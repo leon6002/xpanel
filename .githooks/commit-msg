@@ -1,0 +1,61 @@
+#!/bin/sh
+# Commit message rules (enforced). Enable once after cloning:
+#   git config core.hooksPath .githooks
+#
+#   type(scope): summary          <- title, at most 72 characters
+#                                 <- blank line
+#   What changed and why.         <- body, required
+#
+# - type: feat | fix | refactor | docs | test | perf | build | ci | chore | style | revert
+# - scope: lowercase, e.g. ui, web, server, store, cli, mcp, workspace, tauri, repo
+# - English only (plain ASCII), at most 150 words in total
+# - No AI attribution (Co-Authored-By: Claude..., Claude-Session:, noreply@anthropic.com)
+# Merge commits and fixup!/squash!/amend! commits are exempt from the format rules.
+
+msg=$(mktemp) || exit 1
+trap 'rm -f "$msg"' EXIT
+# Check what git will keep: drop comment lines, everything below the scissors line
+# and leading blank lines, like git's default cleanup
+sed -e '/^# -\{8,\} >8 -\{8,\}$/,$d' -e '/^#/d' "$1" | tr -d '\r' | sed '/[^[:space:]]/,$!d' >"$msg"
+
+fail() {
+  printf 'Commit rejected: %s\n\n' "$1" >&2
+  cat >&2 <<'HELP'
+Expected format:
+
+  feat(web): add quick capture to the new UI
+
+  Capture box sits at the bottom right. Enter saves, Shift+Enter adds
+  a line, pasted screenshots become attachments.
+
+Types: feat fix refactor docs test perf build ci chore style revert
+Rules: English only, at most 150 words, no AI attribution lines.
+HELP
+  exit 1
+}
+
+if grep -Eiq '^[[:space:]]*(Co-Authored-By:.*(claude|anthropic)|Claude-Session:)|noreply@anthropic\.com' "$msg"; then
+  fail 'remove the AI attribution lines (Co-Authored-By: Claude... / Claude-Session: ...).'
+fi
+
+title=$(sed -n '/[^[:space:]]/{p;q;}' "$msg")
+case "$title" in
+  "Merge "*|"fixup! "*|"squash! "*|"amend! "*) exit 0 ;;
+esac
+
+if LC_ALL=C grep -q "$(printf '[^\t -~]')" "$msg"; then
+  fail 'use English only (plain ASCII characters; no Chinese, emoji or curly quotes).'
+fi
+
+words=$(wc -w <"$msg" | tr -d ' ')
+[ "$words" -le 150 ] || fail "message has $words words; keep it within 150."
+
+printf '%s\n' "$title" | grep -Eq '^(feat|fix|refactor|docs|test|perf|build|ci|chore|style|revert)\([a-z0-9][a-z0-9._/-]*\)!?: [^ ](.*[^.])?$' ||
+  fail "title must look like 'feat(scope): summary' (known type, lowercase scope, no trailing period): $title"
+[ ${#title} -le 72 ] || fail "title is ${#title} characters; keep it within 72."
+
+# Line 1 title, line 2 blank, then a non-empty body
+[ "$(sed -n 1p "$msg")" = "$title" ] || fail 'the title must be the first line.'
+[ -z "$(sed -n 2p "$msg" | tr -d '[:space:]')" ] || fail 'leave one blank line after the title.'
+sed -n '3,$p' "$msg" | grep -q '[^[:space:]]' || fail 'add a description of the change below the title.'
+exit 0

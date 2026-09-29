@@ -1,0 +1,2 @@
+# 钩子脚本在 Windows 上也必须是 LF
+.githooks/* text eol=lf

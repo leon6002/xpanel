@@ -1,0 +1,25 @@
+[package]
+name = "xp-server"
+description = "xpanel HTTP 服务：v1 兼容接口 + /api/v1 对外接口 + SSE"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xp-core.workspace = true
+xp-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+axum.workspace = true
+base64.workspace = true
+tower-http = { version = "0.6", features = ["cors"] }
+futures-util = { version = "0.3", default-features = false }
+tokio-stream = { version = "0.1", features = ["sync"] }
+# 新界面（web/dist）编进程序；没构建过也能编译，/next/ 会提示先构建
+rust-embed = { version = "8.12", features = ["mime-guess"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+zip.workspace = true
