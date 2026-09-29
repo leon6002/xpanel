@@ -1,0 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/xp-core",
+    "crates/xp-store",
+    "crates/xp-server",
+    "crates/xp-cli",
+    "crates/xp-workspace",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/leon6002/xpanel"
+
+[workspace.dependencies]
+xp-core = { path = "crates/xp-core" }
+xp-store = { path = "crates/xp-store" }
+xp-server = { path = "crates/xp-server" }
+xp-workspace = { path = "crates/xp-workspace" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "macros", "net", "sync", "time", "signal"] }
+axum = "0.7"
+base64 = "0.22"
+sha2 = "0.10"
+getrandom = "0.2"
+ureq = { version = "2", default-features = false, features = ["json"] }
+tracing = "0.1"
+zip = { version = "4", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
+# 开发用的快速编译（dev.bat）：不做整体链接优化、多线程、增量编译，比 release 快很多，程序稍大、稍慢一点
+[profile.fast]
+inherits = "release"
+opt-level = 1
+lto = false
+codegen-units = 256
+incremental = true
+strip = false

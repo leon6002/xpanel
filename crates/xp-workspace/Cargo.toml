@@ -1,0 +1,14 @@
+[package]
+name = "xp-workspace"
+description = "xpanel 项目目录：把一条笔记展开成 AI 的工作目录，并随笔记更新同步"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xp-core.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+sha2.workspace = true
+chrono.workspace = true
+pinyin = "0.11"
