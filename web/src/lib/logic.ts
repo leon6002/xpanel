@@ -172,3 +172,116 @@ export const plain = (s?: string) =>
   String(s || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "[图片]").replace(/[#>*_`~-]+/g, " ").replace(/\s+/g, " ").trim();
 export const noteTitle = (it: Item) => it.title || plain(it.body).slice(0, 30) || "无标题笔记";
 export const imageRefs = (body?: string) => [...String(body || "").matchAll(/!\[[^\]]*\]\(asset:([A-Za-z0-9._-]+)\)/g)].map((m) => m[1]);
+
+export const parentCat = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+
+/* ---- 设备 ---- */
+export const KINDS: [string, string][] = [
+  ["desktop", "台式机"],
+  ["laptop", "笔记本"],
+  ["mac", "Mac"],
+  ["server", "服务器"],
+  ["nas", "NAS"],
+  ["phone", "手机"],
+  ["other", "其他"],
+];
+export const kindName = (k?: string) => (KINDS.find((x) => x[0] === k) || [0, "其他"])[1];
+export const devOnline = (d?: Device | null) => !!(d && d.lastSeen && Date.now() - d.lastSeen < 3 * 60000);
+export function devIp(d: Device) {
+  const r = (d.reportedIps || [])[0];
+  if (r && devOnline(d)) return r.ip;
+  const n = (d.networks || []).find((n) => n.ip);
+  return n ? n.ip! : r ? r.ip : "";
+}
+export function seenText(d: Device) {
+  if (!d.lastSeen) return "未上报（这台电脑还没装新版，或还没选设备）";
+  return devOnline(d) ? "在线" : "最后在线 " + ago(d.lastSeen);
+}
+/** 入口按机器分组时，用主机名 / 别名 / IP 对上设备 */
+export function deviceByHost(devices: Device[], key: string) {
+  const k = key.toLowerCase();
+  return devices.find((d) =>
+    [d.name, d.hostname, ...(d.aliases || []), ...(d.networks || []).map((n) => n.ip), ...(d.reportedIps || []).map((x) => x.ip)].some((x) => x && String(x).toLowerCase() === k),
+  );
+}
+
+/* ---- 入口按所在机器分组 ---- */
+export type HostKind = "pc" | "server" | "web" | "disk" | "other";
+const isPrivateHost = (h: string) => /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h) || !h.includes(".") || /\.(local|lan|home)$/i.test(h);
+export function hostOf(target: string | null): { key: string; kind: HostKind } {
+  if (!target) return { key: "其他", kind: "other" };
+  let m: RegExpMatchArray | null;
+  if ((m = target.match(/^\\\\([^\\]+)/))) return { key: m[1].toUpperCase(), kind: "pc" };
+  if ((m = target.match(/^file:\/\/([^/]+)\//i)) && !/^[a-z]:$/i.test(m[1])) return { key: m[1].toUpperCase(), kind: "pc" };
+  if ((m = target.match(/^smb:\/\/([^/]+)/i))) return { key: m[1].toUpperCase(), kind: "pc" };
+  if ((m = target.match(/^ssh\s+(?:\S+@)?([^\s:]+)/i))) return { key: m[1].toUpperCase(), kind: "server" };
+  if ((m = target.match(/^https?:\/\/([^/:]+)/i))) return isPrivateHost(m[1]) ? { key: m[1].toUpperCase(), kind: "server" } : { key: "网站", kind: "web" };
+  if (/^[a-z]:\\/i.test(target)) return { key: "本机磁盘", kind: "disk" };
+  if (target.startsWith("/")) return { key: "本机路径", kind: "disk" };
+  return { key: "其他", kind: "other" };
+}
+
+/* ---- 附件、收件箱 ---- */
+export const nowLabel = () => {
+  const d = new Date();
+  return `${d.getMonth() + 1}-${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+};
+export const isImgFile = (f: File) => /^image\//.test(f.type || "");
+export function fileLabel(f: File) {
+  const n = (f.name || "").replace(/\.[^.]+$/, "").replace(/[[\]()]/g, "").trim();
+  return !n || /^image$/i.test(n) ? (isImgFile(f) ? "截图 " : "附件 ") + nowLabel() : n;
+}
+export const assetMd = (isImg: boolean, label: string, name: string) => (isImg ? `![${label}](asset:${name})` : `[📎 ${label}](asset:${name})`);
+/** 只有截图、没写字时自动起的标题 */
+export const INBOX_AUTO = /^(截图|附件) \d+-\d+ \d\d:\d\d$/;
+export const hm = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+export function dayLabel(d: string) {
+  if (d === dateStr(new Date())) return "今天";
+  if (d === addDays(-1)) return "昨天";
+  const [Y, M, D] = d.split("-");
+  return (+Y === new Date().getFullYear() ? "" : Y + "年") + +M + "月" + +D + "日";
+}
+export function shortTime(t?: string) {
+  if (!t) return "";
+  const [d, h] = String(t).split(" ");
+  return d === dateStr(new Date()) ? h : d.slice(5).replace("-", "/");
+}
+/** 剪贴板里的截图在 items 里，拖进来的文件在 files 里 */
+export function clipFiles(dt: DataTransfer | null): File[] {
+  if (!dt) return [];
+  const out = [...(dt.files || [])];
+  if (!out.length)
+    for (const it of [...(dt.items || [])])
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f) out.push(f);
+      }
+  return out;
+}
+
+/* ---- 交给 AI ---- */
+export function buildPrompt(it: Item) {
+  const name = it.type === "inbox" ? "收件箱" : ({ todo: "待办", issue: "问题", idea: "灵感", note: "笔记", link: "入口", rule: "规范与工作流" } as Record<string, string>)[it.type];
+  const lines = [`下面是我工作台里的一条「${name}」，请帮我处理。`, "", `标题：${it.title}`];
+  if (it.body) lines.push("详情：", it.body);
+  if ((it.tags || []).length) lines.push("标签：" + (it.tags || []).map((x) => "#" + x).join(" "));
+  if (it.device) lines.push("相关设备：" + it.device);
+  lines.push("", "先说清楚你打算怎么做，需要我确认的地方先问我；做完告诉我结论和下一步。");
+  return lines.join("\n");
+}
+export function localDirOf(it: Item) {
+  const tg = entryTarget(it);
+  return tg && !/^(https?|smb|ssh)/i.test(tg) ? tg : "";
+}
+export const hasImages = (it: Item) => /\]\(asset:[^)]+\.(png|jpe?g|gif|webp|bmp)\)/i.test(it.body || "");
+
+/** 把正文里第 idx 张图片的显示宽度改成 w（0 = 去掉，用默认） */
+export function setImageWidth(body: string, idx: number, w: number) {
+  let n = -1;
+  return body.replace(/!\[([^\]]*)\]\(/g, (m, alt: string) => {
+    n++;
+    if (n !== idx) return m;
+    const base = alt.replace(/\|\d{2,4}$/, "");
+    return `![${w ? base + "|" + Math.round(w) : base}](`;
+  });
+}

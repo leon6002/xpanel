@@ -16,8 +16,15 @@ use xp_store::{legacy_rev, mime_of, ACTOR_UI};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/", get(index))
-        .route("/index.html", get(index))
+        // 旧界面（单文件）挂在 /old/，新界面没构建时 / 也用它（见 web.rs）
+        .route(
+            "/old",
+            get(|| async { axum::response::Redirect::permanent("/old/") }),
+        )
+        .route("/old/", get(index))
+        .route("/old/index.html", get(index))
+        .route("/old/vendor/marked.js", get(marked))
+        .route("/old/vendor/purify.js", get(purify))
         .route("/vendor/marked.js", get(marked))
         .route("/vendor/purify.js", get(purify))
         .route("/api/ping", get(ping))
@@ -28,7 +35,7 @@ pub fn routes() -> Router<AppState> {
         .route("/api/asset/:name", get(get_asset))
 }
 
-async fn index(State(st): State<AppState>) -> impl IntoResponse {
+pub(crate) async fn index(State(st): State<AppState>) -> impl IntoResponse {
     (
         [(header::CACHE_CONTROL, "no-cache")],
         Html(best_ui(st.dir())),

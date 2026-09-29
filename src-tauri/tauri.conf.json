@@ -4,7 +4,9 @@
   "version": "0.2.0",
   "identifier": "io.github.leon6002.xpanel",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../web/dist",
+    "beforeDevCommand": "npm --prefix web install && npm --prefix web run build",
+    "beforeBuildCommand": "npm --prefix web install && npm --prefix web run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -14,7 +16,7 @@
         "title": "xpanel · 工作台",
         "width": 1480,
         "height": 920,
-        "minWidth": 420,
+        "minWidth": 880,
         "minHeight": 480,
         "center": true,
         "dragDropEnabled": false

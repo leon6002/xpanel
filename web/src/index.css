@@ -166,3 +166,9 @@
 .prose-x td { padding: 9px 12px; border-top: 1px solid var(--line); }
 .prose-x img { max-width: 100%; border-radius: 10px; cursor: zoom-in; }
 .prose-x mark { background: var(--mark); color: inherit; border-radius: 4px; padding: 0 3px; }
+
+/* 问答：原文高亮、定位时闪一下 */
+mark.qa-mark { background: var(--mark); color: var(--mark-fg); border-radius: 3px; padding: 0 2px; cursor: pointer; }
+mark.qa-mark:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-fg) 35%, transparent); }
+@keyframes xp-flash { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+.flash { animation: xp-flash 1.4s ease-out; }

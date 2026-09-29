@@ -5,9 +5,7 @@ cd "$(dirname "$0")"
 command -v cargo >/dev/null || { echo "没找到 Rust，请先安装：https://rustup.rs"; exit 1; }
 command -v npm >/dev/null || { echo "没找到 Node.js，请先安装：https://nodejs.org"; exit 1; }
 npm install
-# 新界面（React，/next/）
-npm --prefix web install
-npm --prefix web run build
+# 界面（web/）由 tauri build 先构建（tauri.conf.json 的 beforeBuildCommand）
 npx tauri build --bundles app
 cargo build --release -p xp-cli
 mkdir -p dist

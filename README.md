@@ -125,11 +125,11 @@ xp serve --data /srv/xpanel            # 无窗口运行（Linux 主机、Docker
 - Windows：双击 `build-windows.bat`，会打包并安装到 `%LOCALAPPDATA%\Programs\xpanel`（`xp` 命令加入 PATH），首次运行自动创建桌面快捷方式。
 - macOS：`bash build-mac.sh`
 - 改了代码想快点用上：双击 `dev.bat`（Windows），用快速编译配置编出 xpanel.exe 和 xp.exe，替换安装目录里的程序并重新打开。
-  第一次要编译所有依赖，几分钟；之后一般几秒到几十秒。只改了界面（`ui/index.html`）时不用编译，见下面「更新」。
+  第一次要编译所有依赖，几分钟；之后一般几秒到几十秒。
 - 开发：`npm install && npx tauri dev`
-- 新界面（预览中）：程序跑起来后浏览器打开 `http://127.0.0.1:8765/next/`。
-  改新界面时在 `web/` 里 `npm install && npm run dev`，打开它给出的地址，保存即刷新，不用编译 Rust。
-  打包脚本会自动构建 `web/`。
+- 只改界面：程序（或 `xp serve`）照常跑着，在 `web/` 里 `npm install && npm run dev`，打开它给出的地址，保存即刷新，不用编译 Rust。
+  打包时 `tauri build` 会先构建 `web/`；`dev.bat` 也会。
+- 旧界面（单文件）还留在 `http://主机:8765/old/`，新界面有问题时可以先用它。
 - 测试：`cargo test --workspace`
 
 代码结构：
@@ -142,8 +142,8 @@ crates/
   xp-workspace 笔记展开成项目目录、同步、「继续」的提示词
   xp-cli      xp 命令行、MCP 服务（xp mcp）
 src-tauri/    桌面版（Tauri）
-ui/           现在的界面（单文件）
-web/          新界面（React + TypeScript + Tailwind），挂在 /next/
+web/          界面（React + TypeScript + Tailwind）
+ui/           旧界面（单文件），挂在 /old/
 ```
 
 ## 使用
@@ -158,9 +158,8 @@ web/          新界面（React + TypeScript + Tailwind），挂在 /next/
 
 ## 更新
 
-- **开发时让界面改动立刻生效**：在 cmd 里执行一次 `mklink /J D:\xpanel\ui D:\codes\workbench-app\ui`（把数据文件夹的 `ui` 链接到仓库），
-  之后仓库里 `ui/index.html` 的版本号一加，桌面版和网页版就会提示刷新。
-- **只改界面**：把新的 `ui/index.html`（`wb-ui-version` 版本号更高）放进主机数据文件夹的 `ui/` 里，所有客户端会提示刷新。
+- **改了界面**：在 `web/` 里 `npm run dev` 边改边看；改完运行 `dev.bat` 编进桌面版和网页服务。
+- **旧界面**（`/old/`）：把新的 `ui/index.html`（`wb-ui-version` 版本号更高）放进主机数据文件夹的 `ui/` 里就会换上。
 - **改了程序本身**：推送 `v*` 标签后，GitHub Actions 会自动打包 Windows 和 macOS 版本并发布到 Releases。
 
 ## 安全说明
