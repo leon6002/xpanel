@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { copyText, desk, errText, isApp, openTarget, v1 } from "../lib/api";
 import { patchItem, qc, useConfig, useTemplates, useThisDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
-import { buildPrompt, hasImages, localDirOf } from "../lib/logic";
+import { buildPrompt, hasImages, localDirOf, noteTitle } from "../lib/logic";
 import { ls, useUi } from "../lib/store";
 import type { Item, State, Template } from "../lib/types";
 import { myWorkspace, recordWorkspace } from "../lib/ws";
@@ -66,7 +66,7 @@ function AgentDialog({ it, promptText, close }: { it: Item; promptText?: string;
   // 新项目：建议的名字和目录
   useEffect(() => {
     if (ws || !real) return;
-    desk.wsDefaults(it.title || "", it.id, ls.get("wb-wsroot")).then(
+    desk.wsDefaults(it.type === "note" ? noteTitle(it) : it.title || "", it.id, ls.get("wb-wsroot")).then(
       (d) => (setName(d.name), setRoot(d.root)),
       (e) => setCheckErr(errText(e)),
     );

@@ -8,6 +8,7 @@ import { ListPane } from "./components/ListPane";
 import { Peek, Reader } from "./components/Reader";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
+import { DebugPanel } from "./components/Debug";
 import { SettingsForm } from "./dialogs/Settings";
 import { isApp } from "./lib/api";
 import { qc, useAppState, useConfig, useLiveUpdates } from "./lib/data";
@@ -82,6 +83,7 @@ function Shell() {
       <QaFloat />
       <DialogHost />
       <Toast />
+      <DebugPanel />
       {dropping && (
         <div className="pointer-events-none fixed inset-3 z-50 grid place-items-center rounded-[22px] border-2 border-dashed border-accent bg-accent/5 text-[15px] font-semibold text-accent">
           松开：{view === "inbox" ? "放进输入框" : "放进快速记录"}（微信导出的 ZIP 会导入）

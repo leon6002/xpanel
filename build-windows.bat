@@ -1,16 +1,18 @@
 @echo off
+rem Release build: builds xpanel and the xp CLI, installs them to %LOCALAPPDATA%\Programs\xpanel and adds xp to PATH.
+rem Keep this file ASCII only: cmd misreads UTF-8 batch files with Chinese text after chcp.
 chcp 65001 >nul
 cd /d "%~dp0"
-echo === 打包并安装 xpanel ===
-where cargo >nul 2>&1 || (echo 没找到 Rust，请先安装：https://rustup.rs & pause & exit /b 1)
-where npm >nul 2>&1 || (echo 没找到 Node.js，请先安装：https://nodejs.org & pause & exit /b 1)
-call npm install || (pause & exit /b 1)
-rem 界面（web/）由 tauri build 先构建（tauri.conf.json 的 beforeBuildCommand）
+echo === xpanel: build and install ===
+where cargo >nul 2>&1 || (echo Rust not found. Install it from https://rustup.rs & pause & exit /b 1)
+where npm >nul 2>&1 || (echo Node.js not found. Install it from https://nodejs.org & pause & exit /b 1)
+call npm install --no-audit --no-fund || (pause & exit /b 1)
+rem tauri build builds the UI (web/) first, see beforeBuildCommand in src-tauri\tauri.conf.json
 call npx tauri build --no-bundle
 if errorlevel 1 (
   echo.
-  echo 打包失败。如果报错里有 link.exe，需要先装 Visual Studio Build Tools 的「使用 C++ 的桌面开发」。
-  echo 其他报错把上面的内容发给 Claude。
+  echo Build failed. If the error mentions link.exe, install Visual Studio Build Tools with "Desktop development with C++".
+  echo For anything else, send the error above to Claude.
   pause & exit /b 1
 )
 cargo build --release -p xp-cli
@@ -18,19 +20,19 @@ if errorlevel 1 (pause & exit /b 1)
 set "DEST=%LOCALAPPDATA%\Programs\xpanel"
 if not exist "%DEST%" mkdir "%DEST%"
 taskkill /im xpanel.exe /f >nul 2>&1
-rem 旧版程序也关掉，免得它继续写旧的 workbench.json
+rem Also close the old program so it stops writing the old workbench.json
 taskkill /im workbench.exe /f >nul 2>&1
 copy /y "target\release\xpanel.exe" "%DEST%\xpanel.exe" >nul
 copy /y "target\release\xp.exe" "%DEST%\xp.exe" >nul
-rem 把安装目录加进用户 PATH（只加一次），之后任何终端里都能用 xp 命令
-powershell -NoProfile -Command "$d=$env:DEST; $p=[Environment]::GetEnvironmentVariable('Path','User'); if(-not $p){$p=''}; if(($p -split ';') -notcontains $d){[Environment]::SetEnvironmentVariable('Path', (($p.TrimEnd(';') + ';' + $d).TrimStart(';')), 'User'); Write-Host ('已把 ' + $d + ' 加入 PATH，新开的终端里可以直接用 xp')}"
+rem Add the install folder to the user PATH once, so xp works in any new terminal
+powershell -NoProfile -Command "$d=$env:DEST; $p=[Environment]::GetEnvironmentVariable('Path','User'); if(-not $p){$p=''}; if(($p -split ';') -notcontains $d){[Environment]::SetEnvironmentVariable('Path', (($p.TrimEnd(';') + ';' + $d).TrimStart(';')), 'User'); Write-Host ('Added ' + $d + ' to PATH; new terminals can run xp')}"
 if not exist dist mkdir dist
 copy /y "target\release\xpanel.exe" "dist\xpanel.exe" >nul
 copy /y "target\release\xp.exe" "dist\xp.exe" >nul
 echo.
-echo 已安装到 %DEST%
-echo 第一次打开会自动在桌面放 xpanel 快捷方式；旧的「我的工作台」快捷方式可以删掉。
-echo 设置会从旧版自动带过来；数据文件夹里的 workbench.json 会自动导入并改名为 workbench.v1.json。
-echo 要给别的电脑用：把 dist 里的 xpanel.exe（和 xp.exe）拷过去即可。
+echo Installed to %DEST%
+echo The first start puts an xpanel shortcut on the desktop.
+echo Settings carry over from the old version; workbench.json in the data folder is imported and renamed to workbench.v1.json.
+echo To use it on another PC, copy xpanel.exe (and xp.exe) from the dist folder.
 start "" "%DEST%\xpanel.exe"
 pause

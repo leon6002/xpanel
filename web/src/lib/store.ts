@@ -69,6 +69,11 @@ interface Ui {
 }
 
 let toastTimer: number | undefined;
+/** 鼠标停在提示上时先别让它消失 */
+export function holdToast(hold: boolean) {
+  window.clearTimeout(toastTimer);
+  if (!hold) toastTimer = window.setTimeout(() => useUi.setState({ toast: null }), 3000);
+}
 
 export const useUi = create<Ui>((set, get) => ({
   view: (ls.get("wb-next-view") as View) || "notes",
@@ -122,6 +127,6 @@ export const useUi = create<Ui>((set, get) => ({
   say: (text, action) => {
     window.clearTimeout(toastTimer);
     set({ toast: { text, action } });
-    toastTimer = window.setTimeout(() => set({ toast: null }), action ? 6000 : 2400);
+    toastTimer = window.setTimeout(() => set({ toast: null }), action ? 10000 : 2400);
   },
 }));
