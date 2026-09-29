@@ -7,7 +7,7 @@ echo 正式发给别人用的版本请用 build-windows.bat。
 echo.
 where cargo >nul 2>&1 || (echo 没找到 Rust，请先安装：https://rustup.rs & pause & exit /b 1)
 where npm >nul 2>&1 || (echo 没找到 Node.js，请先安装：https://nodejs.org & pause & exit /b 1)
-rem 新界面（React，/next/）：没有 node_modules 时先安装依赖
+rem 界面（web/）：没有 node_modules 时先安装依赖；程序会把 web\dist 编进去
 if not exist "web\node_modules" (call npm --prefix web install || (pause & exit /b 1))
 call npm --prefix web run build
 if errorlevel 1 (echo. & echo 新界面构建失败，把上面的报错发给 Claude。 & pause & exit /b 1)

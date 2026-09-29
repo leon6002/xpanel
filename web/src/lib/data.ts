@@ -1,28 +1,61 @@
 /* 数据层：全部条目一次取回（和旧界面一样，几千条也很快），变化时整体刷新；写入先改本地再提交 */
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { applyOp, getRev, getState, isApp, newId } from "./api";
-import type { Item, State } from "./types";
+import { applyOp, desk, getRev, getState, isApp, newId, v1 } from "./api";
+import type { AppConfig, Chat, Device, Item, State, Template } from "./types";
 import { useUi } from "./store";
 
 export const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: 1 } } });
 
+/** 桌面版：配置还没选好（第一次打开）时不去取数据 */
 export function useAppState() {
-  return useQuery({ queryKey: ["state"], queryFn: getState });
+  const cfg = useConfig();
+  const ready = !isApp || !!cfg.data?.config.mode;
+  return useQuery({ queryKey: ["state"], queryFn: getState, enabled: ready, refetchInterval: false });
+}
+
+/** 桌面版的配置（浏览器里没有） */
+export function useConfig() {
+  return useQuery({ queryKey: ["config"], queryFn: desk.getConfig, enabled: isApp, staleTime: Infinity });
+}
+export const setConfig = (c: Partial<AppConfig>) => qc.setQueryData<AppConfig>(["config"], (old) => (old ? { ...old, ...c } : (c as AppConfig)));
+export function useDevices(): Device[] {
+  return useAppState().data?.devices ?? [];
+}
+/** 这台电脑在设备表里的 id（浏览器里为空） */
+export function useThisDevice() {
+  const c = useConfig().data;
+  return { id: c?.config.deviceId || "", hostname: c?.hostname || "" };
+}
+
+export function useChats() {
+  const st = useAppState();
+  return useQuery({
+    queryKey: ["chats"],
+    queryFn: () => v1<{ chats: Chat[] }>("GET", "/inbox/chats").then((r) => r.chats || []),
+    enabled: st.isSuccess,
+  });
+}
+export function useMe() {
+  const st = useAppState();
+  return useQuery({ queryKey: ["me"], queryFn: () => v1<{ me: string[] }>("GET", "/inbox/me").then((r) => r.me || []), enabled: st.isSuccess });
+}
+export function useTemplates() {
+  return useQuery({ queryKey: ["templates"], queryFn: () => v1<{ templates: Template[] }>("GET", "/templates").then((r) => r.templates || []) });
 }
 export const useItems = () => useAppState().data?.items ?? [];
 
 /** 数据变了就刷新：浏览器用 SSE，桌面版每 3 秒问一次版本号 */
-export function useLiveUpdates() {
+export function useLiveUpdates(enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     let last: string | number | undefined;
     const check = async () => {
       if (document.hidden) return;
       try {
         const r = await getRev();
-        if (last !== undefined && r !== last) {
-          qc.invalidateQueries();
-        }
+        const st = qc.getQueryState(["state"]);
+        if ((last !== undefined && r !== last) || st?.status === "error") qc.invalidateQueries();
         last = r;
       } catch {
         /* 离线：等下一次 */
@@ -45,7 +78,7 @@ export function useLiveUpdates() {
       window.clearInterval(t);
       document.removeEventListener("visibilitychange", vis);
     };
-  }, []);
+  }, [enabled]);
 }
 
 async function commit(op: Parameters<typeof applyOp>[0], optimistic: (s: State) => State) {
@@ -89,4 +122,14 @@ export async function addItem(p: Partial<Item> & { type: Item["type"]; title: st
 
 export function removeItem(id: string) {
   return commit({ kind: "delete", id }, (s) => ({ ...s, items: s.items.filter((x) => x.id !== id) }));
+}
+
+export async function importItems(items: Item[]) {
+  const next = await applyOp({ kind: "import", items });
+  qc.setQueryData(["state"], next);
+}
+
+/** 删除后可以撤销：原样写回 */
+export function restoreItem(it: Item) {
+  return saveItem({ ...it, updatedAt: Date.now() });
 }

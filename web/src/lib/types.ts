@@ -36,6 +36,11 @@ export interface Device {
   name: string;
   kind?: string;
   description?: string;
+  aliases?: string[];
+  os?: string;
+  agentVersion?: string;
+  isHost?: boolean;
+  aiTools?: string[];
   lastSeen?: number;
   hostname?: string;
   networks?: { name?: string; ip?: string; note?: string }[];
@@ -64,3 +69,38 @@ export const TYPES: { k: ItemType; name: string; short?: string; check?: string;
 ];
 export const typeName = (t: ItemType) => (t === "inbox" ? "收件箱" : TYPES.find((x) => x.k === t)?.name ?? t);
 export const isCheckable = (t: ItemType) => !!TYPES.find((x) => x.k === t)?.check;
+
+/* ---- 桌面版配置（get_config） ---- */
+export interface Agent { name: string; cmd: string; ask?: string }
+export interface Config {
+  mode: "" | "host" | "client";
+  dataDir: string;
+  serverUrl: string;
+  port: number;
+  lanEnabled: boolean;
+  agents: Agent[];
+  agentCwd: string;
+  coldBackupDir?: string | null;
+  deviceId: string;
+}
+export interface Lan { running: boolean; hostname?: string; urls: string[]; port?: number }
+export interface AppConfig { config: Config; lan: Lan | null; hostname: string }
+
+/* ---- 收件箱：导入的微信聊天 ---- */
+export interface Chat { id: string; name: string; count: number; unread: number; readUpTo?: string; last?: { sender?: string; text?: string; time?: string } }
+export interface Attachment { name: string; kind: "image" | "video" | "file" | string; asset?: string; missing?: boolean }
+export interface Msg { id: string; chat?: string; sender: string; time: string; text: string; attachments?: Attachment[] }
+export interface Bundle { id?: string; importedAt: number; fileName?: string; start?: string; end?: string; total: number; added: number; files?: string[] }
+export interface WxPreview {
+  count: number;
+  start: string;
+  end: string;
+  files: number;
+  missing: number;
+  suggestedChat?: string;
+  matchedChat?: { id: string; name: string; duplicates?: number } | null;
+  senders?: { name: string; count: number }[];
+}
+
+/* ---- 交给 AI 的任务模板 ---- */
+export interface Template { id: string; name: string; goal: string; prompt: string; resume: string }

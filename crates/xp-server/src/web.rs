@@ -1,8 +1,9 @@
-//! 新界面：`web/` 用 Vite 构建到 `web/dist`，编译时整个目录编进程序，挂在 `/next/`。
+//! 界面：`web/` 用 Vite 构建到 `web/dist`，编译时整个目录编进程序，挂在 `/`。
 //!
-//! 单页应用：找不到的路径都回 index.html。带哈希的静态文件长期缓存，index.html 每次都重新取。
+//! 带哈希的静态文件（/assets/）长期缓存，index.html 每次都重新取。
+//! 没构建过新界面（比如只跑了 cargo test）时 `/` 退回旧界面；旧界面一直在 `/old/`。
 
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
@@ -18,12 +19,26 @@ struct Dist;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/next", get(|| async { Redirect::permanent("/next/") }))
-        .route("/next/", get(|| async { serve("index.html") }))
+        .route("/", get(home))
+        .route("/index.html", get(home))
         .route(
-            "/next/*path",
-            get(|Path(p): Path<String>| async move { serve(&p) }),
+            "/assets/*path",
+            get(|Path(p): Path<String>| async move { serve(&format!("assets/{p}")) }),
         )
+        // 预览阶段的地址，留着免得书签失效
+        .route("/next", get(|| async { Redirect::temporary("/") }))
+        .route("/next/", get(|| async { Redirect::temporary("/") }))
+}
+
+async fn home(st: State<AppState>) -> Response {
+    // 只跑过 cargo 时 dist 里可能只有桌面版放的占位页（见 src-tauri/build.rs）
+    let built = Dist::get("index.html")
+        .is_some_and(|f| !String::from_utf8_lossy(&f.data).contains("xp-placeholder"));
+    if built {
+        serve("index.html")
+    } else {
+        crate::legacy::index(st).await.into_response()
+    }
 }
 
 fn serve(path: &str) -> Response {
@@ -42,24 +57,5 @@ fn serve(path: &str) -> Response {
         )
             .into_response();
     }
-    // 静态文件缺了就是真的 404；其余当作界面里的页面地址
-    if path.starts_with("assets/") || (path.contains('.') && !path.ends_with(".html")) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    match Dist::get("index.html") {
-        Some(f) => (
-            [
-                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (header::CACHE_CONTROL, "no-cache"),
-            ],
-            f.data.into_owned(),
-        )
-            .into_response(),
-        None => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            "新界面还没构建：在 web/ 里运行 npm install && npm run build，再重新编译程序。",
-        )
-            .into_response(),
-    }
+    StatusCode::NOT_FOUND.into_response()
 }

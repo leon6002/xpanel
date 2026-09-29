@@ -9,7 +9,7 @@
 - 设备：`xp-core/src/device.rs`（字段规则、心跳合并）+ `xp-store/src/devices.rs`（表、改名同步条目、从旧条目生成）。
   桌面版 `src-tauri/src/device.rs` 每分钟发心跳；界面通过 `api_call` 命令调 `/api/v1`（主机模式在本进程处理，连接模式转发）。
 - 分类和标签：`xp-core/src/category.rs`（路径规则）+ `xp-store/src/categories.rs`（空分类表、改名/移动/删除同步到条目）。
-- 收件箱：随手发的是 `type=inbox` 的普通条目（界面 `ui/index.html` 的「收件箱」一节）。
+- 收件箱：随手发的是 `type=inbox` 的普通条目（界面 `web/src/components/Inbox.tsx`）。
   微信聊天记录：`xp-core/src/wechat.rs`（TXT 格式解析、附件引用、Markdown）+ `xp-store/src/inbox.rs`（chats / bundles / messages 表，
   附件按内容哈希存成 `assets/wx-*.ext`，消息按指纹去重）+ `xp-server/src/inbox.rs`（`/api/v1/inbox/*`，导入接口单独放宽了请求体上限）。
   测试只用自己编的聊天记录，**不要把真实的导出文件或内容放进仓库**。
@@ -20,15 +20,19 @@
   问答存在条目的 `qa`（`{id, quote, prefix, suffix, turns:[{q,a,at,by}]}`），按原话 + 前后文定位；全文索引包含问答内容。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。
 - `src-tauri`：桌面版。主机模式用 xp-store + xp-server；连接模式（`client.rs`）读写主机的 v1 接口，离线队列 `pending.json`。
-- `ui/index.html`：现在在用的界面，单文件原生 JS（整段包在一个 IIFE 里），`ui/vendor/` 是 marked 和 DOMPurify。新界面做完前继续维护。
-- `web/`：第 3 期的新界面（Vite + React 19 + TypeScript + Tailwind v4），构建到 `web/dist`，由 xp-server 编进程序挂在 `/next/`（`crates/xp-server/src/web.rs`，rust-embed；调试构建直接读磁盘上的 dist）。
+- `web/`：界面（Vite + React 19 + TypeScript + Tailwind v4 + Radix），构建到 `web/dist`。桌面版直接用它（`tauri.conf.json` 的 frontendDist，`beforeBuildCommand` 先构建），
+  xp-server 把它编进程序挂在 `/`（`crates/xp-server/src/web.rs`，rust-embed；调试构建直接读磁盘上的 dist）。
+  - `src/components/`：Sidebar、ListPane、Reader（含右侧浮出面板 Peek）、Inbox、Capture、Global（横幅、划词问 AI、全局粘贴/拖放、快捷键）
+  - `src/dialogs/`：交给 AI（含任务模板）、问 AI、设置、设备、分类和标签、微信导入 / 聊天设置 / 追加到笔记
+  - `src/lib/qa.ts`：问答定位（rehype 插件给原文加 `<mark>`）；`lib/ws.ts`：项目目录同步；`lib/drafts.ts`：输入框草稿和待发送附件
   - `src/lib/api.ts` 是唯一的传输层：桌面版走 Tauri 命令（读写条目仍用 `get_state`/`apply_op`，保留连接模式的离线队列），浏览器走 HTTP。
   - `src/lib/data.ts`：TanStack Query 缓存全部条目，写入先改本地再提交；`src/lib/store.ts`：zustand 界面状态。
   - 颜色只用 `src/index.css` 里的设计变量（`bg-surface`、`text-muted`、`bg-accent-soft`…），浅色/深色各一套，不在组件里写色值。
+- `ui/index.html`：旧界面（单文件原生 JS），挂在 `/old/`，只修严重问题，新功能只做在 `web/`。
 
 ## 约定
 - 界面同时跑在两种环境：桌面版（`window.__TAURI__` 存在，走 `invoke`）和浏览器（走 `/api/*`）。新功能两边都要考虑。
-- **改界面必须把 `<meta name="wb-ui-version">` 加 1**。把新的 `ui/index.html` 放到主机数据文件夹的 `ui/` 下，所有客户端会提示刷新。
+- 改旧界面（`ui/index.html`）时把 `<meta name="wb-ui-version">` 加 1。
 - 条目是自由 JSON（`id/type/title/body/tags/category/device/done/pinned/createdAt/updatedAt/priority/due/rank/doneAt/createdBy/agentLog`），按 `id` 合并。
 - 错误分三类（`StoreError`）：`Invalid` → 400（客户端不重试）、`NotFound` → 404、`Unavailable` → 503（客户端留着稍后重试）。别把请求本身的问题报成 503。
 - 数据库结构变更：在 `xp-store/src/schema.rs` 的 `MIGRATIONS` 末尾追加，不改已有的。
@@ -56,4 +60,4 @@
 - 只跑服务：`cargo run -p xp-cli -- serve --data <文件夹>`
 - 打包安装（Windows）：`build-windows.bat`（发布用，慢）；开发时用 `dev.bat`（`[profile.fast]`，增量编译，替换安装目录里的程序）
 - 界面语法检查：把 `<script>` 内容抽出来 `node --check`（见 `.github/workflows/ci.yml`）
-- 新界面：`cd web && npm install && npm run dev`（Vite 开发服务，`/api` 转发到 127.0.0.1:8765，改了即时刷新）；`npm run build` 做类型检查并构建，之后重新编译程序 `/next/` 才会更新
+- 界面：`cd web && npm install && npm run dev`（Vite 开发服务，`/api` 转发到 127.0.0.1:8765，改了即时刷新）；`npm run build` 做类型检查并构建，之后重新编译程序才会更新

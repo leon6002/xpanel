@@ -43,9 +43,11 @@ fn j(s: &str) -> Value {
 #[tokio::test]
 async fn legacy_api_still_works() {
     let (st, d) = setup("legacy");
-    let (c, html) = call(&st, Method::GET, "/", None, &[]).await;
+    let (c, html) = call(&st, Method::GET, "/old/", None, &[]).await;
     assert_eq!(c, StatusCode::OK);
     assert!(html.contains("wb-ui-version"));
+    let (c, _) = call(&st, Method::GET, "/old/vendor/marked.js", None, &[]).await;
+    assert_eq!(c, StatusCode::OK);
     let (c, _) = call(&st, Method::GET, "/vendor/marked.js", None, &[]).await;
     assert_eq!(c, StatusCode::OK);
     // 旧界面用 text/plain 发操作
@@ -780,24 +782,17 @@ async fn qa_on_notes() {
 }
 
 #[tokio::test]
-async fn next_ui_is_served() {
+async fn ui_is_served() {
     let (st, _dir) = setup("next_ui");
-    let (s, _) = call(&st, Method::GET, "/next", None, &[]).await;
-    assert_eq!(s, StatusCode::PERMANENT_REDIRECT);
-    // 构建过就是界面，没构建过给出提示；两种情况下页面地址都走同一个入口
-    let (s, home) = call(&st, Method::GET, "/next/", None, &[]).await;
-    assert!(
-        s == StatusCode::OK || s == StatusCode::SERVICE_UNAVAILABLE,
-        "{s}"
-    );
-    let (s2, deep) = call(&st, Method::GET, "/next/notes/abc", None, &[]).await;
-    assert_eq!((s, &home), (s2, &deep));
-    if s == StatusCode::OK {
-        assert!(home.contains("<div id=\"root\">"));
-    }
-    let (s, _) = call(&st, Method::GET, "/next/assets/missing.js", None, &[]).await;
-    assert_eq!(s, StatusCode::NOT_FOUND);
-    // 旧界面不受影响
-    let (s, _) = call(&st, Method::GET, "/", None, &[]).await;
+    // 构建过新界面就是它，没构建过退回旧界面；两种情况 / 都能打开
+    let (s, home) = call(&st, Method::GET, "/", None, &[]).await;
     assert_eq!(s, StatusCode::OK);
+    assert!(home.contains("<div id=\"root\">") || home.contains("wb-ui-version"));
+    let (s, _) = call(&st, Method::GET, "/next/", None, &[]).await;
+    assert_eq!(s, StatusCode::TEMPORARY_REDIRECT);
+    let (s, _) = call(&st, Method::GET, "/assets/missing.js", None, &[]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, old) = call(&st, Method::GET, "/old/", None, &[]).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(old.contains("wb-ui-version"));
 }
