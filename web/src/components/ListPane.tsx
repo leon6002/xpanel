@@ -76,7 +76,7 @@ function ItemMeta({ it }: { it: Item }) {
 function NoteCard({ it, on }: { it: Item; on: boolean }) {
   const select = useUi((s) => s.select);
   const imgs = imageRefs(it.body);
-  const snippet = plain(it.body).slice(0, 90);
+  const snippet = plain((it.body || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "")).slice(0, 90);
   return (
     <button
       onClick={() => select(it.id)}
@@ -90,7 +90,7 @@ function NoteCard({ it, on }: { it: Item; on: boolean }) {
         {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
         {noteTitle(it)}
       </span>
-      {snippet && snippet !== noteTitle(it) && <span className="line-clamp-2 text-[13px] leading-relaxed text-muted">{snippet}</span>}
+      {snippet && snippet !== noteTitle(it) && !snippet.startsWith(noteTitle(it) + " ") && <span className="line-clamp-2 text-[13px] leading-relaxed text-muted">{snippet}</span>}
       {imgs.length > 0 && (
         <span className="flex gap-1.5">
           {imgs.slice(0, 4).map((n) => (

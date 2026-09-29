@@ -1,7 +1,7 @@
 /* 对话框：任何地方调用 openDialog(关闭 => 内容) 打开；同一时间只有一个 */
 import * as D from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { cx } from "./cx";
 
@@ -34,8 +34,16 @@ export function Dialog({
   onClose: () => void;
   dismissable?: boolean;
 }) {
+  // 先让 Radix 按正常流程关闭，下一帧再卸载：直接在按 Esc 的过程中卸载，
+  // 桌面版（WebView2）里关掉后的第一次点击会被吞掉
+  const [open, setOpen] = useState(true);
+  useEffect(() => {
+    if (open) return;
+    const t = window.setTimeout(onClose, 0);
+    return () => window.clearTimeout(t);
+  }, [open, onClose]);
   return (
-    <D.Root open onOpenChange={(o) => !o && dismissable && onClose()}>
+    <D.Root open={open} onOpenChange={(o) => !o && dismissable && setOpen(false)}>
       <D.Portal>
         <D.Overlay className="fixed inset-0 z-40 bg-[rgb(15_18_22/0.38)] backdrop-blur-[2px]" />
         <D.Content

@@ -170,7 +170,15 @@ export function allTags(items: Item[]) {
 /** 笔记没写标题时用正文开头 */
 export const plain = (s?: string) =>
   String(s || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "[图片]").replace(/[#>*_`~-]+/g, " ").replace(/\s+/g, " ").trim();
-export const noteTitle = (it: Item) => it.title || plain(it.body).slice(0, 30) || "无标题笔记";
+/** 笔记没写标题时用正文第一行有字的内容（跳过只有图片的行） */
+export const noteTitle = (it: Item) =>
+  it.title ||
+  String(it.body || "")
+    .split("\n")
+    .map((l) => plain(l.replace(/!\[[^\]]*\]\([^)]*\)/g, "")))
+    .find(Boolean)
+    ?.slice(0, 40) ||
+  "无标题笔记";
 export const imageRefs = (body?: string) => [...String(body || "").matchAll(/!\[[^\]]*\]\(asset:([A-Za-z0-9._-]+)\)/g)].map((m) => m[1]);
 
 export const parentCat = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
