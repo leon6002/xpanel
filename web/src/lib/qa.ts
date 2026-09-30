@@ -168,3 +168,36 @@ export function qaDigest(it: Item, text: string) {
     }),
   ].join("\n\n");
 }
+
+/** 正文里的本地路径（D:\xx、\\NAS\share、/home/xx）包成可点击复制的小块；代码和链接里的不动 */
+const RE_PATH = /\\\\[^\s\\<>"`|?*，。；]+(?:\\[^\s<>"`|?*，。；]*)*|\b[A-Za-z]:\\[^\s<>"`|?*，。；]*|(?<![\w/])\/(?:Volumes|mnt|home|Users|srv|data|opt|etc|var)\/[^\s<>"`，。；]*/g;
+export function rehypePaths() {
+  return (tree: Root) => {
+    const walk = (p: Parent) => {
+      const kids = p.children as (RootContent | ElementContent)[];
+      for (let i = 0; i < kids.length; i++) {
+        const c = kids[i];
+        if (c.type === "element") {
+          if (!["code", "pre", "a", "mark"].includes(c.tagName)) walk(c);
+          continue;
+        }
+        if (c.type !== "text") continue;
+        RE_PATH.lastIndex = 0;
+        if (!RE_PATH.test(c.value)) continue;
+        RE_PATH.lastIndex = 0;
+        const parts: ElementContent[] = [];
+        let last = 0;
+        for (const m of c.value.matchAll(RE_PATH)) {
+          const v = m[0].replace(/[.,:;)]+$/, "");
+          if (m.index! > last) parts.push({ type: "text", value: c.value.slice(last, m.index) });
+          parts.push({ type: "element", tagName: "span", properties: { className: ["xp-path"], dataCopy: v }, children: [{ type: "text", value: v }] });
+          last = m.index! + v.length;
+        }
+        if (last < c.value.length) parts.push({ type: "text", value: c.value.slice(last) });
+        kids.splice(i, 1, ...parts);
+        i += parts.length - 1;
+      }
+    };
+    walk(tree);
+  };
+}

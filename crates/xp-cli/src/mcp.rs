@@ -67,6 +67,7 @@ fn item_fields() -> Value {
         "tags": {"type":"array","items":{"type":"string"}},
         "category": {"type":"string","description":"分类路径，如 工作/AutoSAR"},
         "device": {"type":"string","description":"相关设备名"},
+        "parentId": {"type":"string","description":"可选。父笔记的 id：写成它的子笔记（笔记和规范可以分层）"},
         "id": {"type":"string","description":"可选。指定 id 就是幂等写入：重复提交只会更新，不会多出一条"}
     })
 }
@@ -81,7 +82,7 @@ pub fn tools() -> Value {
          "inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},"annotations":{"readOnlyHint":true}},
         {"name":"xpanel_create_items","description":"新建一条或多条条目。每条至少要有 title；指定 id 可以幂等写入。",
          "inputSchema":{"type":"object","properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","properties":item_fields(),"required":["title"]}}},"required":["items"]}},
-        {"name":"xpanel_update_item","description":"按字段修改一条条目：只改传了的字段，值为 null 表示删除这个字段。可改 title/body/type/priority/due/tags/category/device/pinned/done 等。",
+        {"name":"xpanel_update_item","description":"按字段修改一条条目：只改传了的字段，值为 null 表示删除这个字段。可改 title/body/type/priority/due/tags/category/device/pinned/done/parentId 等。",
          "inputSchema":{"type":"object","properties":{"id":{"type":"string"},"patch":{"type":"object","description":"要改的字段，如 {\"priority\":\"P1\",\"due\":\"2026-10-08\"}"}},"required":["id","patch"]},
          "annotations":{"idempotentHint":true}},
         {"name":"xpanel_complete_item","description":"把待办 / 问题 / 灵感标成完成（done=false 则取消完成）。",

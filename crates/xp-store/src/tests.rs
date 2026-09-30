@@ -740,3 +740,34 @@ fn wechat_rejects_other_files() {
     );
     assert_eq!(st.wechat_preview(&z).unwrap()["suggestedChat"], "乙");
 }
+
+#[test]
+fn deleting_a_parent_moves_children_up() {
+    let d = tmp("tree");
+    let st = Store::open(&d).unwrap();
+    let note = |id: &str, parent: Option<&str>| {
+        let mut v = json!({"id": id, "type": "note", "title": id, "body": "", "createdAt": 1, "updatedAt": 1});
+        if let Some(p) = parent {
+            v["parentId"] = json!(p);
+        }
+        v
+    };
+    st.apply_op(
+        Op::Import {
+            items: vec![
+                note("a", None),
+                note("b", Some("a")),
+                note("c", Some("b")),
+                note("d", Some("b")),
+            ],
+        },
+        "t",
+    )
+    .unwrap();
+    st.delete("b", "t").unwrap();
+    assert_eq!(st.get("c").unwrap()["parentId"], "a");
+    assert_eq!(st.get("d").unwrap()["parentId"], "a");
+    st.delete("a", "t").unwrap();
+    assert!(st.get("c").unwrap().get("parentId").is_none());
+    let _ = fs::remove_dir_all(d);
+}

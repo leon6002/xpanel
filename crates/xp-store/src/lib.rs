@@ -720,12 +720,37 @@ fn upsert(tx: &Connection, mut item: Value, actor: &str, now: f64) -> Result<()>
     )
 }
 
-/// 软删除；返回是否真的删了（本来就不存在或已删则为 false）
+/// 软删除；返回是否真的删了（本来就不存在或已删则为 false）。
+/// 删掉的是父笔记时，子笔记往上挪一层（挂到它的父笔记下，没有就变成顶层），不跟着删。
 fn soft_delete(tx: &Connection, id: &str, actor: &str, now: f64) -> Result<bool> {
     match read_row(tx, id)? {
         Some(r) if r.deleted_at.is_none() => {
             write_row(tx, &r.data, Some(now))?;
             log(tx, actor, "delete", id, Some(&r.data), None, None)?;
+            let up = r
+                .data
+                .get("parentId")
+                .filter(|v| v.as_str().is_some_and(|s| !s.is_empty() && s != id))
+                .cloned();
+            let kids = tx
+                .prepare("SELECT id FROM items WHERE deleted_at IS NULL AND json_extract(data, '$.parentId') = ?1")?
+                .query_map([id], |r| r.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            for k in kids {
+                let Some(row) = read_row(tx, &k)? else {
+                    continue;
+                };
+                let mut item = row.data.clone();
+                if let Some(o) = item.as_object_mut() {
+                    match &up {
+                        Some(p) => o.insert("parentId".into(), p.clone()),
+                        None => o.remove("parentId"),
+                    };
+                    o.insert("updatedAt".into(), json!(now));
+                }
+                write_row(tx, &item, None)?;
+                log(tx, actor, "update", &k, Some(&row.data), Some(&item), None)?;
+            }
             Ok(true)
         }
         _ => Ok(false),

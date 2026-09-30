@@ -16,15 +16,20 @@
 - MCP：`crates/xp-cli/src/mcp.rs`（`xp mcp`，标准输入输出的 JSON-RPC，每个工具调一次 `/api/v1`）。加接口时考虑要不要加对应的工具，工具说明用中文写清楚参数格式。
 - 笔记展开成项目：`crates/xp-workspace`（目录结构、截图固定编号、同步、更新记录、「继续」提示词；桌面版 `src-tauri/src/workspace.rs` 和 `xp workspace` / MCP 共用）。
   条目上的 `workspaces`（哪台设备、哪个目录）、`agentProgress`（AI 回写的进展）；模板在 `xp-core/src/templates.rs`（内置）+ 数据库 meta（用户改过的）。
-- 划词问 AI：界面「划词问 AI」一节 + 桌面版 `ask_ai`（`src-tauri/src/agent.rs` 的 `ask`，提示词走标准输入，claude → `claude -p`、codex → `codex exec -`）。
-  问答存在条目的 `qa`（`{id, quote, prefix, suffix, turns:[{q,a,at,by}]}`），按原话 + 前后文定位；全文索引包含问答内容。
+- 评论（原来的「划词问 AI」）：笔记下面的评论区 + 选中正文后的批注，评论里 `@AI名字` 就由桌面版 `ask_ai` 在后台回答
+  （`src-tauri/src/agent.rs` 的 `ask`，提示词走标准输入，claude → `claude -p`、codex → `codex exec -`）。界面在 `web/src/components/Comments.tsx`。
+  存在条目的 `qa`（`{id, quote, prefix, suffix, at, resolved?, turns:[{q,a,at,by}]}`：q 是人写的、a 是 AI 的回答、by 是哪个 AI），
+  按原话 + 前后文定位；全文索引包含评论内容；MCP 的 `xpanel_add_qa` 写的也是这个字段。
+- 子笔记：条目的 `parentId` 指向父笔记（笔记、规范）。找不到父笔记就当顶层；删除父笔记时子笔记挪到上一层（`xp-store` 的 `soft_delete`）。
+  界面 `web/src/lib/tree.ts` + `web/src/components/Tree.tsx`（路径、子笔记列表、移动到…、列表里拖动改层级）。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。
 - `src-tauri`：桌面版。主机模式用 xp-store + xp-server；连接模式（`client.rs`）读写主机的 v1 接口，离线队列 `pending.json`。
 - `web/`：界面（Vite + React 19 + TypeScript + Tailwind v4 + Radix），构建到 `web/dist`。桌面版直接用它（`tauri.conf.json` 的 frontendDist，`beforeBuildCommand` 先构建），
   xp-server 把它编进程序挂在 `/`（`crates/xp-server/src/web.rs`，rust-embed；调试构建直接读磁盘上的 dist）。
-  - `src/components/`：Sidebar、ListPane、Reader（含右侧浮出面板 Peek）、Inbox、Capture、Global（横幅、划词问 AI、全局粘贴/拖放、快捷键）
-  - `src/dialogs/`：交给 AI（含任务模板）、问 AI、设置、设备、分类和标签、微信导入 / 聊天设置 / 追加到笔记
-  - `src/lib/qa.ts`：问答定位（rehype 插件给原文加 `<mark>`）；`lib/ws.ts`：项目目录同步；`lib/drafts.ts`：输入框草稿和待发送附件
+  - `src/components/`：Sidebar、ListPane、Reader（含右侧浮出面板 Peek）、Inbox、Capture、Global（横幅、选中文字后的评论浮窗、全局粘贴/拖放、快捷键）、
+    BlockEditor（所见即所得的块编辑器，TipTap；扩展和 Markdown 读写在 `lib/editor.ts`，正文仍存 Markdown）、Comments、Tree
+  - `src/dialogs/`：交给 AI（含任务模板）、设置、设备、分类和标签、微信导入 / 聊天设置 / 追加到笔记
+  - `src/lib/qa.ts`：评论定位（rehype 插件给原文加 `<mark>`）；`lib/ws.ts`：项目目录同步；`lib/drafts.ts`：输入框草稿和待发送附件
   - `src/lib/api.ts` 是唯一的传输层：桌面版走 Tauri 命令（读写条目仍用 `get_state`/`apply_op`，保留连接模式的离线队列），浏览器走 HTTP。
   - `src/lib/data.ts`：TanStack Query 缓存全部条目，写入先改本地再提交；`src/lib/store.ts`：zustand 界面状态。
   - 颜色只用 `src/index.css` 里的设计变量（`bg-surface`、`text-muted`、`bg-accent-soft`…），浅色/深色各一套，不在组件里写色值。

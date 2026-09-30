@@ -1,19 +1,20 @@
 /* 阅读 / 编辑一条：主界面右边的阅读区，和任何页面都能打开的右侧浮出面板（Peek）共用 */
-import { CalendarDays, Copy, ExternalLink, Flag, Folder, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Plus, Sparkles, Trash2, X, FileText } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { CalendarDays, Copy, ExternalLink, FilePlus2, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
-import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
+import { patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
 import { autoTitle, dueInfo, entryTarget, findTarget, noteTitle, normCat, allCats, allTags, parseDue, setImageWidth, ago, assetMd, fileLabel, isImgFile, clipFiles } from "../lib/logic";
 import { ls, useUi, type View } from "../lib/store";
-import { qaDigest } from "../lib/qa";
 import type { Item, ItemType, Priority, State } from "../lib/types";
 import { TYPES, isCheckable, typeName } from "../lib/types";
 import { useMyWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
 import { putAsset } from "../lib/api";
 import { openAgent } from "../dialogs/Agent";
-import { openAsk } from "../dialogs/Ask";
 import { Md } from "./Markdown";
+import { CommentsSection, flash } from "./Comments";
+import { Breadcrumb, ChildNotes, openMove, type OpenFn } from "./Tree";
+import { addChild, canNest } from "../lib/tree";
 import { Button, Chip, IconButton, Segmented } from "./ui";
 
 const STATUS: Record<string, [string, "warn" | "accent" | "danger"]> = { working: ["进行中", "warn"], done: ["完成", "accent"], blocked: ["卡住了", "danger"] };
@@ -97,125 +98,9 @@ function ProgressList({ it }: { it: Item }) {
   );
 }
 
-/* ---------------------------------------------------------------- 问答 */
-
-function flash(el: Element | null | undefined) {
-  if (!el) return;
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
-  el.classList.remove("flash");
-  void (el as HTMLElement).offsetWidth;
-  el.classList.add("flash");
-}
-
-function QaSection({ it, lost, root }: { it: Item; lost: Set<string>; root: React.RefObject<HTMLDivElement | null> }) {
-  const pending = useUi((s) => s.qaPending[it.id]) || [];
-  const list = (it.qa || []).slice().reverse();
-  const [armed, setArmed] = useState<string | null>(null);
-  if (!list.length && !pending.length)
-    return (
-      <section className="qasec mt-12 flex flex-wrap items-center gap-2 text-xs text-faint" data-qa-skip>
-        选中正文里的一段文字就能「问 AI」，问答会挂在原文旁边。
-        <Button tone="ghost" className="h-7 px-2 text-xs" onClick={() => openAsk({ itemId: it.id, quote: "", prefix: "", suffix: "" })}>
-          <Sparkles className="size-3.5" />
-          针对整篇提问
-        </Button>
-      </section>
-    );
-  return (
-    <section className="qasec flex flex-col gap-3" aria-label="问答" data-qa-skip>
-      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted">
-        <Sparkles className="size-4" /> 问答 <span className="font-normal text-faint">{list.length}</span>
-        <span className="grow" />
-        <Button tone="ghost" className="h-7 px-2 text-xs" title="不针对某一段，问整篇" onClick={() => openAsk({ itemId: it.id, quote: "", prefix: "", suffix: "" })}>
-          <Plus className="size-3.5" />
-          提问
-        </Button>
-        {list.length > 0 && (
-          <Button
-            tone="ghost"
-            className="h-7 px-2 text-xs"
-            title="把这些问答按原文顺序整理成一篇新笔记"
-            onClick={async () => {
-              const text = root.current?.querySelector("[data-qa-host]")?.textContent || "";
-              const n = await addItem({ type: "note", title: `${it.title || "笔记"} · 问答`, body: qaDigest(it, text), category: it.category || undefined, tags: [...(it.tags || [])] }).catch(() => null);
-              if (n) {
-                useUi.getState().openPeek(n.id);
-                say("已整理成一篇新笔记");
-              }
-            }}
-          >
-            <FileText className="size-3.5" />
-            整理成笔记
-          </Button>
-        )}
-      </h3>
-      {pending.map((p, i) => (
-        <div key={"p" + i} className="flex flex-col gap-1.5 rounded-[14px] bg-surface-2/60 p-3">
-          <span className="line-clamp-2 rounded bg-mark px-1.5 text-xs text-mark-fg">{p.quote || "整篇笔记"}</span>
-          <div className="text-[13.5px] font-semibold">{p.q}</div>
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <span className="size-3 animate-spin rounded-full border-2 border-accent border-t-transparent" /> 正在问 {p.agent}…
-          </div>
-        </div>
-      ))}
-      {list.map((q) => (
-        <div key={q.id} data-qa-card={q.id} className="flex flex-col gap-2 rounded-[14px] bg-surface-2 p-3.5">
-          <button
-            className="line-clamp-3 rounded bg-mark px-1.5 py-0.5 text-left text-xs text-mark-fg"
-            title={q.quote ? "定位到原文" : ""}
-            onClick={() => q.quote && flash(root.current?.querySelector(`mark[data-qa="${CSS.escape(q.id)}"]`))}
-          >
-            {q.quote || "整篇笔记"}
-            {lost.has(q.id) && <span className="ml-1.5 rounded bg-danger-soft px-1 text-danger">原文已删改</span>}
-          </button>
-          {(q.turns || []).map((t, i) => (
-            <div key={i} className={cx("flex flex-col gap-1", i > 0 && "mt-2")}>
-              <div className="text-[13.5px] font-semibold text-fg">{t.q}</div>
-              <Md src={t.a} className="!text-[13px] !leading-[1.75]" />
-              <div className="text-xs text-faint">
-                {t.by} · {new Date(t.at).toLocaleString()}
-              </div>
-            </div>
-          ))}
-          <div className="flex items-center gap-1">
-            <Button tone="ghost" className="h-7 px-2 text-xs" onClick={() => openAsk({ itemId: it.id, quote: q.quote, prefix: q.prefix || "", suffix: q.suffix || "" }, q.id)}>
-              追问
-            </Button>
-            <Button
-              tone="ghost"
-              className="h-7 px-2 text-xs"
-              onClick={async () =>
-                say(
-                  (await copyText([q.quote ? "> " + q.quote.replace(/\n/g, "\n> ") : "", ...(q.turns || []).map((t) => `**问：** ${t.q}\n\n${t.a}`)].filter(Boolean).join("\n\n")))
-                    ? "已复制"
-                    : "复制失败",
-                )
-              }
-            >
-              复制
-            </Button>
-            <span className="grow" />
-            <Button
-              tone="danger"
-              className={cx("h-7 px-2 text-xs", armed === q.id && "bg-danger-soft")}
-              onClick={() => {
-                if (armed !== q.id) return setArmed(q.id);
-                const cur = latest(it);
-                patchItem(cur, { qa: (cur.qa || []).filter((x) => x.id !== q.id) }).catch(() => {});
-              }}
-            >
-              {armed === q.id ? "再点一次删除" : "删除"}
-            </Button>
-          </div>
-        </div>
-      ))}
-    </section>
-  );
-}
-
 /* ---------------------------------------------------------------- 阅读 */
 
-function ReadBody({ it, onEdit }: { it: Item; onEdit: () => void }) {
+function ReadBody({ it, onEdit, open }: { it: Item; onEdit: () => void; open: OpenFn }) {
   const root = useRef<HTMLDivElement>(null);
   // 渲染 Markdown 时顺便记下找不到原文的问答（同一次渲染里问答区接着读）
   const lost = useMemo(() => new Set<string>(), [it.body, it.qa]);
@@ -225,9 +110,8 @@ function ReadBody({ it, onEdit }: { it: Item; onEdit: () => void }) {
     if (body !== cur.body) patchItem(cur, { body }).catch(() => {});
   };
   return (
-    // 阅读区够宽时问答放在右边，窄时放在正文下面
-    <div ref={root} className="flex flex-col gap-8 @[960px]:flex-row @[960px]:items-start">
-      <article className="min-w-0 max-w-[720px] flex-1">
+    <div ref={root} className="max-w-[720px]">
+      <article className="min-w-0">
         <div data-qa-host={it.id} onDoubleClick={(e) => !(e.target as HTMLElement).closest("img,a,button") && onEdit()}>
           {it.body ? (
             <Md src={it.body} qa={it.qa} lost={lost} onImageWidth={onImageWidth} onMark={(id) => flash(root.current?.querySelector(`[data-qa-card="${CSS.escape(id)}"]`))} />
@@ -237,9 +121,8 @@ function ReadBody({ it, onEdit }: { it: Item; onEdit: () => void }) {
         </div>
         <ProgressList it={it} />
       </article>
-      <div className="w-full @[960px]:sticky @[960px]:top-0 @[960px]:w-[280px] @[960px]:shrink-0">
-        <QaSection it={it} lost={lost} root={root} />
-      </div>
+      {canNest(it) && <ChildNotes it={it} open={open} />}
+      <CommentsSection it={it} lost={lost} root={root} />
     </div>
   );
 }
@@ -278,7 +161,13 @@ function Prop({ icon: Icon, children, title }: { icon: typeof Folder; children: 
   );
 }
 
-function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) => void; focusTitle?: boolean }) {
+const noLost = new Set<string>();
+// 块编辑器比较大，第一次进编辑时再加载
+const BlockEditor = lazy(() => import("./BlockEditor").then((m) => ({ default: m.BlockEditor })));
+
+/** rich：所见即所得的块编辑器；否则是 Markdown 源码 */
+function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focusTitle?: boolean; open: OpenFn }) {
+  const richApi = useRef<(() => string | null) | null>(null);
   const { data } = useAppState();
   const devices = useDevices();
   const [title, setTitle] = useState(it.title);
@@ -289,12 +178,15 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
   cur.current = { title, body };
   const ta = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const edRoot = useRef<HTMLDivElement>(null);
 
   const flush = () => {
     window.clearTimeout(timer.current);
     timer.current = undefined;
     const x = latest(it);
     let t = cur.current.title.trim();
+    const fresh = richApi.current?.();
+    if (fresh != null) cur.current = { ...cur.current, body: fresh };
     const b = cur.current.body;
     if (!t && x.type === "link") {
       const tg = findTarget(b);
@@ -320,12 +212,11 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
     const n = fn(cur.current.body);
     cur.current = { ...cur.current, body: n };
     setBodyRaw(n);
-    onLive?.(n);
     schedule();
   };
   useEffect(() => {
     if (focusTitle) titleRef.current?.focus();
-    else ta.current?.focus();
+    else if (!rich) ta.current?.focus();
     const save = () => timer.current !== undefined && flush();
     window.addEventListener("beforeunload", save);
     return () => {
@@ -342,6 +233,7 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-editor>
+      <Breadcrumb it={x} open={open} />
       <input
         ref={titleRef}
         value={title}
@@ -418,37 +310,50 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
         )}
         <span className="ml-auto text-xs text-faint">{saved}</span>
       </div>
-      <textarea
-        ref={ta}
-        value={body}
-        onChange={(e) => {
-          const v = e.target.value;
-          setBody(() => v);
-        }}
-        onBlur={flush}
-        onPaste={(e) => {
-          const files = clipFiles(e.clipboardData);
-          if (!files.length) return;
-          e.preventDefault();
-          insertFiles(files, e.currentTarget, setBody);
-        }}
-        onDragOver={(e) => e.dataTransfer.types.includes("Files") && e.preventDefault()}
-        onDrop={(e) => {
-          const files = clipFiles(e.dataTransfer);
-          if (!files.length) return;
-          e.preventDefault();
-          e.stopPropagation();
-          insertFiles(files, e.currentTarget, setBody);
-        }}
-        placeholder={
-          x.type === "link"
-            ? "网址或路径，如 \\\\NAS\\share、http://192.168.1.10:8080；下面可以写备注"
-            : "支持 Markdown：# 标题、- 列表、- [ ] 待办、`代码`、表格…  截图可以直接粘贴，文件可以拖进来"
-        }
-        spellCheck={false}
-        className="mt-2 min-h-0 flex-1 resize-none bg-transparent pb-40 text-[15px] leading-[1.85] text-fg-2 outline-none placeholder:text-faint"
-        aria-label="正文"
-      />
+      {rich ? (
+        <div ref={edRoot} className="-ml-12 mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto scroll-quiet">
+          <Suspense fallback={<div className="flex-[1_0_auto] pl-12 text-sm text-faint">正在打开编辑器…</div>}>
+            <BlockEditor value={body} itemId={it.id} api={richApi} onChange={(md) => setBody(() => md)} />
+          </Suspense>
+          {x.type !== "link" && (
+            <div className="max-w-[720px] pb-40 pl-12" data-qa-skip>
+              <CommentsSection it={x} lost={noLost} root={edRoot} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <textarea
+          ref={ta}
+          value={body}
+          onChange={(e) => {
+            const v = e.target.value;
+            setBody(() => v);
+          }}
+          onBlur={flush}
+          onPaste={(e) => {
+            const files = clipFiles(e.clipboardData);
+            if (!files.length) return;
+            e.preventDefault();
+            insertFiles(files, e.currentTarget, setBody);
+          }}
+          onDragOver={(e) => e.dataTransfer.types.includes("Files") && e.preventDefault()}
+          onDrop={(e) => {
+            const files = clipFiles(e.dataTransfer);
+            if (!files.length) return;
+            e.preventDefault();
+            e.stopPropagation();
+            insertFiles(files, e.currentTarget, setBody);
+          }}
+          placeholder={
+            x.type === "link"
+              ? "网址或路径，如 \\\\NAS\\share、http://192.168.1.10:8080；下面可以写备注"
+              : "支持 Markdown：# 标题、- 列表、- [ ] 待办、`代码`、表格…  截图可以直接粘贴，文件可以拖进来"
+          }
+          spellCheck={false}
+          className="mt-2 min-h-0 flex-1 resize-none bg-transparent pb-40 text-[15px] leading-[1.85] text-fg-2 outline-none placeholder:text-faint"
+          aria-label="正文"
+        />
+      )}
     </div>
   );
 }
@@ -498,15 +403,29 @@ function TagInput({ tags, all, onChange }: { tags: string[]; all: string[]; onCh
 
 type Mode = "read" | "edit" | "split";
 
-function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode: Mode; setMode: (m: Mode) => void; bar?: ReactNode; wide: boolean; focusTitle?: boolean }) {
+function ItemView({
+  it,
+  mode,
+  setMode,
+  bar,
+  wide,
+  focusTitle,
+  open,
+}: {
+  it: Item;
+  mode: Mode;
+  setMode: (m: Mode) => void;
+  bar?: ReactNode;
+  wide: boolean;
+  focusTitle?: boolean;
+  open: OpenFn;
+}) {
   const ui = useUi();
   const [armed, setArmed] = useState(false);
-  const [live, setLive] = useState<string | null>(null);
   const tg = it.type === "link" ? entryTarget(it) : null;
   const ws = useMyWorkspace(it);
   useEffect(() => {
     setArmed(false);
-    setLive(null);
   }, [it.id, mode]);
 
   return (
@@ -521,7 +440,7 @@ function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode
               ? [
                   ["read", "阅读"],
                   ["edit", "编辑"],
-                  ["split", "分栏"],
+                  ["split", "Markdown"],
                 ]
               : [
                   ["read", "阅读"],
@@ -558,6 +477,22 @@ function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode
             </option>
           ))}
         </select>
+        {canNest(it) && (
+          <>
+            <IconButton
+              label="新建子笔记"
+              onClick={async () => {
+                const n = await addChild(latest(it)).catch(() => null);
+                if (n) open(n.id, true);
+              }}
+            >
+              <FilePlus2 />
+            </IconButton>
+            <IconButton label="移动到…（放到另一篇下面）" onClick={() => openMove(latest(it))}>
+              <FolderInput />
+            </IconButton>
+          </>
+        )}
         <IconButton label={ws ? "继续交给 AI（笔记有更新时只交新增的）" : isApp ? "交给 AI" : "复制给 AI 的提示词"} onClick={() => openAgent(latest(it))}>
           <Sparkles />
         </IconButton>
@@ -576,9 +511,21 @@ function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode
           onClick={async () => {
             if (!armed) return setArmed(true);
             const copy = latest(it);
+            // 子笔记会往上挪一层；撤销时挪回来
+            const kids = (qc.getQueryData<State>(["state"])?.items ?? []).filter((x) => x.parentId === it.id).map((x) => x.id);
             await removeItem(it.id).catch(() => {});
             if (ui.peek?.id === it.id) ui.closePeek();
-            say("已删除", { label: "撤销", run: () => restoreItem(copy) });
+            say(kids.length ? `已删除，${kids.length} 篇子笔记移到了上一层` : "已删除", {
+              label: "撤销",
+              run: async () => {
+                await restoreItem(copy);
+                const now = qc.getQueryData<State>(["state"])?.items ?? [];
+                for (const k of kids) {
+                  const x = now.find((y) => y.id === k);
+                  if (x) await patchItem(x, { parentId: it.id }).catch(() => {});
+                }
+              },
+            });
           }}
         >
           <Trash2 />
@@ -586,22 +533,19 @@ function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode
         {bar}
       </div>
       {mode === "read" ? (
-        <div className="scroll-quiet min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-40 @container">
+        <div className="scroll-quiet min-h-0 flex-1 overflow-y-auto px-14 pt-6 pb-40 @container">
+          <Breadcrumb it={it} open={open} />
           <MetaChips it={it} />
           <h2 className="mt-3 mb-4 text-[26px] leading-snug font-bold text-fg">{it.type === "note" ? noteTitle(it) : it.title}</h2>
           {tg && <div className="mb-4 rounded-lg bg-surface-2 px-3 py-2 font-mono text-[13px] break-all text-muted">{tg}</div>}
-          <ReadBody it={it} onEdit={() => setMode("edit")} />
+          <ReadBody it={it} onEdit={() => setMode("edit")} open={open} />
         </div>
       ) : (
-        <div className={cx("flex min-h-0 flex-1 gap-8 px-8 pt-6", mode === "split" && "flex-row")}>
-          <div className={cx("flex min-h-0 flex-col", mode === "split" ? "w-1/2" : "flex-1")}>
-            <Editor key={it.id} it={it} onLive={mode === "split" ? setLive : undefined} focusTitle={focusTitle} />
+        <div className="flex min-h-0 flex-1 gap-8 px-14 pt-6">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <Editor key={it.id + mode} it={it} rich={mode === "edit"} focusTitle={focusTitle} open={open} />
           </div>
-          {mode === "split" && (
-            <div className="scroll-quiet min-h-0 w-1/2 overflow-y-auto pb-40">
-              <Md src={live ?? it.body ?? ""} />
-            </div>
-          )}
+
         </div>
       )}
     </>
@@ -638,7 +582,19 @@ export function Reader() {
     );
   return (
     <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface shadow-2">
-      <ItemView it={it} mode={ui.mode} setMode={ui.setMode} wide focusTitle={focusTitle} />
+      <ItemView
+        it={it}
+        mode={ui.mode}
+        setMode={ui.setMode}
+        wide
+        focusTitle={focusTitle}
+        open={(id, edit) => {
+          const t = data?.items.find((x) => x.id === id);
+          if (t && viewOf(t.type) !== ui.view) ui.setView(viewOf(t.type));
+          useUi.getState().select(id);
+          if (edit && ui.mode === "read") ui.setMode("edit");
+        }}
+      />
     </main>
   );
 }
@@ -705,6 +661,10 @@ export function Peek() {
         mode={ui.peek.mode}
         setMode={(m) => ui.openPeek(it.id, m === "split" ? "edit" : m)}
         wide={full}
+        open={(id, edit) => {
+          ui.openPeek(id, edit ? "edit" : "read");
+          if (full) useUi.setState({ peekFull: true });
+        }}
         bar={
           <>
             <IconButton

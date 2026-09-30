@@ -4,9 +4,10 @@ import { createPortal } from "react-dom";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { assetSrc, isApp, openTarget } from "../lib/api";
+import { assetSrc, copyText, isApp, openTarget } from "../lib/api";
+import { useUi } from "../lib/store";
 import { useConfig } from "../lib/data";
-import { rehypeImgIndex, rehypeQaMarks } from "../lib/qa";
+import { rehypeImgIndex, rehypePaths, rehypeQaMarks } from "../lib/qa";
 import type { Qa } from "../lib/types";
 import { cx } from "../lib/cx";
 
@@ -177,10 +178,47 @@ function Mark(props: { children?: ReactNode; className?: string; "data-qa"?: str
 }
 
 const transform = (url: string) => (url.startsWith("asset:") ? url : defaultUrlTransform(url));
-const components = { img: AssetImg, a: Link, mark: Mark } as unknown as Components;
+/* ---- 一键复制：代码块右上角按钮；行内代码、路径点一下就复制 ---- */
+const copied = async (v: string) => useUi.getState().say((await copyText(v)) ? "已复制：" + (v.length > 40 ? v.slice(0, 40) + "…" : v) : "复制失败");
+function Pre(props: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  return (
+    <div className="group/pre relative">
+      <pre ref={ref}>{props.children}</pre>
+      <button
+        data-qa-skip
+        onClick={() => copied(ref.current?.innerText.replace(/\n$/, "") || "")}
+        className="absolute top-2 right-2 rounded-md bg-surface px-2 py-0.5 text-xs text-muted opacity-0 shadow-1 group-hover/pre:opacity-100 hover:text-fg"
+      >
+        复制
+      </button>
+    </div>
+  );
+}
+function Code(props: { children?: ReactNode; className?: string; node?: { position?: unknown } }) {
+  // 代码块里的 <code> 带 language- 类名或多行，交给 Pre；行内代码点一下复制
+  const text = String(props.children ?? "");
+  if (/language-/.test(props.className || "") || text.includes("\n")) return <code className={props.className}>{props.children}</code>;
+  return (
+    <code className="xp-copy" title="点击复制" onClick={() => copied(text)}>
+      {props.children}
+    </code>
+  );
+}
+function Span(props: { children?: ReactNode; className?: string; "data-copy"?: string }) {
+  const v = props["data-copy"];
+  if (!v) return <span className={props.className}>{props.children}</span>;
+  return (
+    <span className="xp-path" title="点击复制路径" onClick={() => copied(v)}>
+      {props.children}
+    </span>
+  );
+}
+
+const components = { img: AssetImg, a: Link, mark: Mark, pre: Pre, code: Code, span: Span } as unknown as Components;
 
 const Render = memo(function Render({ src, qa, lost }: { src: string; qa?: Qa[]; lost?: Set<string> }) {
-  const rehype = useMemo(() => (qa && qa.length && lost ? [rehypeImgIndex, [rehypeQaMarks, { qa, lost }]] : [rehypeImgIndex]), [qa, lost]);
+  const rehype = useMemo(() => (qa && qa.length && lost ? [rehypeImgIndex, [rehypeQaMarks, { qa, lost }], rehypePaths] : [rehypeImgIndex, rehypePaths]), [qa, lost]);
   return (
     // 单个换行也换行（和旧界面一致）
     <Markdown remarkPlugins={[remarkGfm, remarkBreaks]} rehypePlugins={rehype as never} urlTransform={transform} components={components}>

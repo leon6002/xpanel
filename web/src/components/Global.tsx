@@ -1,5 +1,5 @@
 /* 全局的小部件：连接横幅、选中文字浮出「问 AI」、任何地方粘贴截图 / 拖入文件、快捷键 */
-import { Sparkles } from "lucide-react";
+import { MessageSquarePlus, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errText, isApp } from "../lib/api";
 import { qc, useAppState, useConfig, useThisDevice } from "../lib/data";
@@ -8,7 +8,7 @@ import { clipFiles } from "../lib/logic";
 import { selectionContext, type QaSel } from "../lib/qa";
 import { useUi } from "../lib/store";
 import { TYPES } from "../lib/types";
-import { openAsk } from "../dialogs/Ask";
+import { canAsk, SelectionComment } from "./Comments";
 import { openDevices } from "../dialogs/Devices";
 import { openSettings } from "../dialogs/Settings";
 import { importWechat } from "./Inbox";
@@ -40,9 +40,12 @@ export function Banner() {
   return null;
 }
 
-/** 在阅读区选中一段文字 → 浮出「问 AI」 */
+/** 在正文里选中一段文字 → 浮出「评论」和「问 AI」（问 AI = 评论里先写好 @ 第一个能回答的 AI） */
 export function QaFloat() {
   const [pos, setPos] = useState<{ x: number; y: number; sel: QaSel } | null>(null);
+  const [open, setOpen] = useState<{ x: number; y: number; sel: QaSel; initial?: string } | null>(null);
+  const agents = useConfig().data?.config.agents ?? [];
+  const asker = isApp ? agents.find(canAsk) : undefined;
   useEffect(() => {
     const up = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest?.(".qa-float")) return;
@@ -51,37 +54,53 @@ export function QaFloat() {
         if (!sel || sel.isCollapsed || !sel.rangeCount) return setPos(null);
         const r = sel.getRangeAt(0);
         const node = r.commonAncestorContainer;
-        const host = (node.nodeType === 1 ? (node as Element) : node.parentElement)?.closest("[data-qa-host]") as HTMLElement | null;
+        const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
+        if (el?.closest("[data-qa-skip]")) return setPos(null);
+        const host = el?.closest("[data-qa-host]") as HTMLElement | null;
         if (!host) return setPos(null);
         const ctx = selectionContext(host, r, host.dataset.qaHost!);
         if (!ctx) return setPos(null);
         const rect = r.getBoundingClientRect();
-        setPos({ x: Math.min(window.innerWidth - 110, rect.right - 40), y: rect.bottom + 6, sel: ctx });
+        setPos({ x: Math.min(window.innerWidth - 190, rect.right - 60), y: rect.bottom + 6, sel: ctx });
       }, 0);
     };
     const down = (e: MouseEvent) => !(e.target as HTMLElement).closest?.(".qa-float") && setPos(null);
+    const scroll = () => setPos(null);
     document.addEventListener("mouseup", up);
     document.addEventListener("mousedown", down);
-    window.addEventListener("scroll", () => setPos(null), true);
+    window.addEventListener("scroll", scroll, true);
     return () => {
       document.removeEventListener("mouseup", up);
       document.removeEventListener("mousedown", down);
+      window.removeEventListener("scroll", scroll, true);
     };
   }, []);
-  if (!pos) return null;
+  const go = (initial?: string) => {
+    if (!pos) return;
+    setOpen({ ...pos, initial });
+    setPos(null);
+  };
   return (
-    <button
-      className="qa-float fixed z-30 inline-flex h-8 items-center gap-1.5 rounded-full bg-fg px-3 text-[12.5px] font-semibold text-bg shadow-3 [&_svg]:size-3.5"
-      style={{ left: pos.x, top: pos.y }}
-      onMouseDown={(e) => e.preventDefault()}
-      onClick={() => {
-        const s = pos.sel;
-        setPos(null);
-        openAsk(s);
-      }}
-    >
-      <Sparkles />问 AI
-    </button>
+    <>
+      {pos && (
+        <div
+          className="qa-float fixed z-30 flex items-center gap-0.5 rounded-full bg-fg p-0.5 text-[12.5px] font-semibold text-bg shadow-3 [&_button]:inline-flex [&_button]:h-7 [&_button]:items-center [&_button]:gap-1.5 [&_button]:rounded-full [&_button]:px-2.5 [&_button:hover]:bg-bg/15 [&_svg]:size-3.5"
+          style={{ left: pos.x, top: pos.y }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button onClick={() => go()}>
+            <MessageSquarePlus />
+            评论
+          </button>
+          {asker && (
+            <button onClick={() => go("@" + asker.name + " ")} title={"请 " + asker.name + " 解释这段（在评论里回答）"}>
+              <Sparkles />问 AI
+            </button>
+          )}
+        </div>
+      )}
+      {open && <SelectionComment sel={open.sel} at={{ x: open.x, y: open.y }} initial={open.initial} onClose={() => setOpen(null)} />}
+    </>
   );
 }
 
