@@ -85,9 +85,9 @@ export function Pri({ p }: { p?: string }) {
 
 /* ---- 表单 ---- */
 export const inputCls =
-  "h-9 w-full min-w-0 rounded-[10px] border border-line bg-surface px-3 text-[13.5px] text-fg outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20";
+  "h-9 w-full min-w-0 rounded-[10px] bg-surface-2/70 px-3 text-[13.5px] text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-2 focus:bg-surface focus:shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--accent)_45%,transparent)]";
 export const textareaCls =
-  "w-full min-w-0 rounded-[10px] border border-line bg-surface px-3 py-2 text-[13.5px] leading-relaxed text-fg outline-none placeholder:text-faint focus:border-accent focus:ring-2 focus:ring-accent/20";
+  "w-full min-w-0 rounded-[10px] bg-surface-2/70 px-3 py-2 text-[13.5px] leading-relaxed text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-2 focus:bg-surface focus:shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--accent)_45%,transparent)]";
 
 export function Field({ label, children, className, hint }: { label: ReactNode; children: ReactNode; className?: string; hint?: ReactNode }) {
   return (

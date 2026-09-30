@@ -91,7 +91,8 @@ export function useGlobalInput() {
   const depth = useRef(0);
   useEffect(() => {
     const box = () => (useUi.getState().view === "inbox" ? "inbox" : "capture");
-    const focusBox = () => (document.getElementById(box() === "inbox" ? "xp-inbox-input" : "xp-capture") as HTMLTextAreaElement | null)?.focus();
+    // 快速记录收起时先展开（它自己会把光标放进去）
+    const focusBox = () => (box() === "inbox" ? document.getElementById("xp-inbox-input")?.focus() : useUi.getState().focusCapture());
     const inEditor = (t: EventTarget | null) => !!(t as HTMLElement | null)?.closest?.("[data-editor]");
     const paste = (e: ClipboardEvent) => {
       if (inEditor(e.target)) return;
