@@ -191,7 +191,8 @@ mark.qa-mark:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-fg) 35%
 .flash { animation: xp-flash 1.4s ease-out; }
 
 /* ===== 块编辑器（和阅读排版一致） ===== */
-.xp-editor { min-height: 100%; caret-color: var(--accent); }
+/* 左边留出放「+ ⠿」手柄的位置；这块空白也算编辑区，鼠标停在这里一样会出手柄 */
+.xp-editor { min-height: 100%; caret-color: var(--accent); padding-left: 3rem; }
 .xp-editor > * + * { margin-top: 0.7em; }
 .xp-editor p.is-empty::before,
 .xp-editor h1.is-empty::before, .xp-editor h2.is-empty::before, .xp-editor h3.is-empty::before {
@@ -205,7 +206,6 @@ mark.qa-mark:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-fg) 35%
 .xp-editor table { table-layout: fixed; }
 .xp-editor td, .xp-editor th { vertical-align: top; position: relative; }
 .xp-editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
-.xp-editor img.ProseMirror-selectednode { outline: 2px solid var(--accent); }
 .xp-editor hr.ProseMirror-selectednode { border-top-color: var(--accent); }
 .xp-editor a { cursor: text; }
 .xp-editor .ProseMirror-gapcursor::after { border-top-color: var(--fg); }
