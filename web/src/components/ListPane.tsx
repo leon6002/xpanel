@@ -1,7 +1,25 @@
 /* 中间的列表：事项（焦点 + 三栏）、笔记、入口（按所在机器分组）、规范 */
-import { Check, Copy, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Search, Server, Star } from "lucide-react";
-import { useMemo } from "react";
+import { Check, ChevronRight, Copy, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Search, Server, Star } from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { copyText, openTarget } from "../lib/api";
+
+/** 列表里悬停出现的「复制」：复制标题和正文（Markdown） */
+function CopyBtn({ text, className }: { text: string; className?: string }) {
+  return (
+    <button
+      aria-label="复制"
+      title="复制标题和正文"
+      onClick={async (e) => {
+        e.stopPropagation();
+        useUi.getState().say((await copyText(text)) ? "已复制" : "复制失败");
+      }}
+      className={cx("grid size-7 shrink-0 place-items-center rounded-md text-faint opacity-0 group-hover:opacity-100 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5", className)}
+    >
+      <Copy />
+    </button>
+  );
+}
+const fullText = (it: Item) => [it.title, it.body].filter(Boolean).join("\n\n");
 import { addItem, patchItem, useAppState, useDevices } from "../lib/data";
 import { ago, byPriority, byRecent, deviceByHost, devOnline, dueInfo, entryTarget, hostOf, imageRefs, inCat, noteTitle, plain, type HostKind } from "../lib/logic";
 import { useUi } from "../lib/store";
@@ -10,6 +28,8 @@ import { TYPES } from "../lib/types";
 import { useMyWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
 import { Thumb } from "./Markdown";
+import { rootDropProps, SubRows, useNoteDnd } from "./Tree";
+import { buildTree, useOpenNodes } from "../lib/tree";
 import { Button, Chip, Pri } from "./ui";
 
 export function useFilter() {
@@ -53,7 +73,7 @@ function ItemMeta({ it }: { it: Item }) {
     <span className="flex flex-wrap items-center gap-1.5 text-xs">
       {di && <Chip tone={di.tone === "late" ? "danger" : di.tone === "soon" ? "warn" : "plain"}>{di.text}</Chip>}
       {it.category && ui.cat !== it.category && <span className="text-muted">{it.category}</span>}
-      {(it.qa || []).length > 0 && <Chip>{(it.qa || []).length} 条问答</Chip>}
+      {(it.qa || []).length > 0 && <Chip>{(it.qa || []).length} 条评论</Chip>}
       {p && <Chip tone={p.status === "blocked" ? "danger" : p.status === "done" ? "accent" : "warn"}>AI {p.status === "blocked" ? "卡住了" : p.status === "done" ? "完成" : "进行中"}</Chip>}
       {ws && (
         <Chip>
@@ -73,34 +93,43 @@ function ItemMeta({ it }: { it: Item }) {
   );
 }
 
-function NoteCard({ it, on }: { it: Item; on: boolean }) {
+function NoteCard({ it, on, kids = 0, crumb, sel }: { it: Item; on: boolean; kids?: number; crumb?: string; sel?: string | null }) {
   const select = useUi((s) => s.select);
+  const open = useOpenNodes((s) => !!s.open[it.id]);
+  const toggle = useOpenNodes((s) => s.toggle);
+  const dnd = useNoteDnd(it);
   const imgs = imageRefs(it.body);
   const snippet = plain((it.body || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "")).slice(0, 90);
   return (
-    <button
-      onClick={() => select(it.id)}
-      aria-current={on || undefined}
-      className={cx(
-        "flex w-full flex-col gap-1.5 rounded-[14px] bg-surface px-4 py-3.5 text-left transition-shadow",
-        on ? "shadow-sel" : "shadow-1 hover:shadow-2",
-      )}
-    >
-      <span className="line-clamp-2 text-[15px] font-semibold text-fg">
-        {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
-        {noteTitle(it)}
-      </span>
-      {snippet && snippet !== noteTitle(it) && !snippet.startsWith(noteTitle(it) + " ") && <span className="line-clamp-2 text-[13px] leading-relaxed text-muted">{snippet}</span>}
-      {imgs.length > 0 && (
-        <span className="flex gap-1.5">
-          {imgs.slice(0, 4).map((n) => (
-            <Thumb key={n} name={n} className="h-11 w-16 rounded-md object-cover" />
-          ))}
-          {imgs.length > 4 && <span className="self-center text-xs text-muted">+{imgs.length - 4}</span>}
+    <div {...dnd.props} className={cx("group relative rounded-[14px] bg-surface transition-shadow", on || dnd.over ? "shadow-sel" : "shadow-1 hover:shadow-2")}>
+      <CopyBtn text={fullText(it)} className="absolute top-2.5 right-2.5 z-10" />
+      <button onClick={() => select(it.id)} aria-current={on || undefined} className="flex w-full flex-col gap-1.5 rounded-[14px] px-4 py-3.5 text-left">
+        {crumb && <span className="-mb-1 truncate text-[11.5px] text-faint">{crumb} /</span>}
+        <span className="line-clamp-2 text-[15px] font-semibold text-fg">
+          {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
+          {noteTitle(it)}
         </span>
+        {snippet && snippet !== noteTitle(it) && !snippet.startsWith(noteTitle(it) + " ") && <span className="line-clamp-2 text-[13px] leading-relaxed text-muted">{snippet}</span>}
+        {imgs.length > 0 && (
+          <span className="flex gap-1.5">
+            {imgs.slice(0, 4).map((n) => (
+              <Thumb key={n} name={n} className="h-11 w-16 rounded-md object-cover" />
+            ))}
+            {imgs.length > 4 && <span className="self-center text-xs text-muted">+{imgs.length - 4}</span>}
+          </span>
+        )}
+        <ItemMeta it={it} />
+      </button>
+      {kids > 0 && (
+        <div className="-mt-1.5 px-2 pb-2">
+          <button onClick={() => toggle(it.id)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-muted hover:bg-surface-2 hover:text-fg">
+            <ChevronRight className={cx("size-3.5 transition-transform", open && "rotate-90")} />
+            {kids} 篇子笔记
+          </button>
+          {open && <SubRows parent={it.id} depth={0} sel={sel} seen={new Set([it.id])} />}
+        </div>
       )}
-      <ItemMeta it={it} />
-    </button>
+    </div>
   );
 }
 
@@ -135,6 +164,7 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
         {(it.body || "").trim() && !it.done && <span className="line-clamp-1 text-xs text-muted">{plain(it.body)}</span>}
         <ItemMeta it={it} />
       </button>
+      <CopyBtn text={fullText(it)} />
       <button
         aria-label={it.pinned ? "移出焦点" : "设为焦点"}
         title={it.pinned ? "移出焦点" : "设为焦点"}
@@ -196,6 +226,15 @@ export function ListPane() {
   const sel = ui.selected[ui.view];
   const filtering = !!(ui.q || ui.tag || ui.dev || ui.cat);
 
+  // 选中的是子笔记（比如从阅读区的路径点过来）：把上面几层展开
+  useEffect(() => {
+    if (!sel || (ui.view !== "notes" && ui.view !== "rules")) return;
+    const t = buildTree(items);
+    const it = t.byId.get(sel);
+    if (it) t.ancestors(it).forEach((a) => !useOpenNodes.getState().open[a.id] && useOpenNodes.getState().toggle(a.id, true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel, ui.view]);
+
   const title =
     ui.cat === "none" ? "未分类" : ui.cat ? ui.cat.split("/").pop() : ui.tag ? "#" + ui.tag : { inbox: "收件箱", work: "事项", notes: "笔记", links: "入口", rules: "规范与工作流" }[ui.view];
 
@@ -204,9 +243,23 @@ export function ListPane() {
     if (ui.view === "notes" || ui.view === "rules") {
       const type = ui.view === "notes" ? "note" : "rule";
       const list = items.filter((i) => i.type === type && match(i)).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || byRecent(a, b));
+      const tree = buildTree(items.filter((i) => i.type === type));
+      // 筛选时平铺（标题上面写着在哪篇下面）；不筛选时只列顶层，子笔记收在卡片里
+      const shown = filtering ? list : list.filter((x) => tree.isRoot(x));
       return {
         count: list.length,
-        node: list.length ? list.map((it) => <NoteCard key={it.id} it={it} on={sel === it.id} />) : empty(type === "note" ? "还没有笔记" : "写下固定的做法和约定"),
+        node: shown.length
+          ? shown.map((it) => (
+              <NoteCard
+                key={it.id}
+                it={it}
+                on={sel === it.id}
+                sel={sel}
+                kids={filtering ? 0 : tree.children(it.id).length}
+                crumb={filtering ? tree.ancestors(it).map(noteTitle).join(" / ") : undefined}
+              />
+            ))
+          : empty(type === "note" ? "还没有笔记" : "写下固定的做法和约定"),
       };
     }
     if (ui.view === "links") {
@@ -343,7 +396,9 @@ export function ListPane() {
           新建
         </Button>
       </div>
-      <div className="scroll-quiet -mr-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-2 pb-6">{body.node}</div>
+      <div className="scroll-quiet -mr-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
+        {body.node}
+      </div>
     </section>
   );
 }

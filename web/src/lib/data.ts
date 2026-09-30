@@ -81,16 +81,25 @@ export function useLiveUpdates(enabled = true) {
   }, [enabled]);
 }
 
+/* 改动按顺序一个个发给主机：同时发两个时后发的可能先到，旧内容会盖掉新内容。
+   还有改动排着队时不拿主机返回的状态覆盖本地（那份状态还没包含后面的改动）。 */
+let queue: Promise<unknown> = Promise.resolve();
+let inflight = 0;
 async function commit(op: Parameters<typeof applyOp>[0], optimistic: (s: State) => State) {
   const prev = qc.getQueryData<State>(["state"]);
   if (prev) qc.setQueryData(["state"], optimistic(prev));
+  inflight++;
+  const run = queue.then(() => applyOp(op));
+  queue = run.catch(() => {});
   try {
-    const next = await applyOp(op);
-    qc.setQueryData(["state"], next);
+    const next = await run;
+    if (inflight === 1) qc.setQueryData(["state"], next);
   } catch (e) {
     useUi.getState().say("保存失败：" + (e instanceof Error ? e.message : String(e)));
     qc.invalidateQueries({ queryKey: ["state"] });
     throw e;
+  } finally {
+    inflight--;
   }
 }
 
@@ -121,7 +130,21 @@ export async function addItem(p: Partial<Item> & { type: Item["type"]; title: st
 }
 
 export function removeItem(id: string) {
-  return commit({ kind: "delete", id }, (s) => ({ ...s, items: s.items.filter((x) => x.id !== id) }));
+  // 子笔记往上挪一层（主机那边也是这么处理的）
+  return commit({ kind: "delete", id }, (s) => {
+    const up = s.items.find((x) => x.id === id)?.parentId as string | undefined;
+    return {
+      ...s,
+      items: s.items
+        .filter((x) => x.id !== id)
+        .map((x) => {
+          if (x.parentId !== id) return x;
+          const { parentId: _drop, ...rest } = x;
+          void _drop;
+          return (up ? { ...rest, parentId: up } : rest) as Item;
+        }),
+    };
+  });
 }
 
 export async function importItems(items: Item[]) {

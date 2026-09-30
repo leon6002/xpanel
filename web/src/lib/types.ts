@@ -28,6 +28,8 @@ export interface Item {
   agentProgress?: Progress[];
   agentLog?: { agent: string; at: number }[];
   workspaces?: Workspace[];
+  /** 父笔记（笔记、规范可以分层） */
+  parentId?: string;
   [k: string]: unknown;
 }
 

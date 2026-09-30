@@ -176,3 +176,36 @@ mark.qa-mark { background: var(--mark); color: var(--mark-fg); border-radius: 3p
 mark.qa-mark:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-fg) 35%, transparent); }
 @keyframes xp-flash { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
 .flash { animation: xp-flash 1.4s ease-out; }
+
+/* ===== 块编辑器（和阅读排版一致） ===== */
+.xp-editor { min-height: 100%; caret-color: var(--accent); }
+.xp-editor > * + * { margin-top: 0.7em; }
+.xp-editor p.is-empty::before,
+.xp-editor h1.is-empty::before, .xp-editor h2.is-empty::before, .xp-editor h3.is-empty::before {
+  content: attr(data-placeholder); color: var(--faint); float: left; height: 0; pointer-events: none;
+}
+.xp-editor ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
+.xp-editor ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; }
+.xp-editor ul[data-type="taskList"] li > label { margin-top: 0.3em; user-select: none; }
+.xp-editor ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.xp-editor ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--faint); text-decoration: line-through; }
+.xp-editor table { table-layout: fixed; }
+.xp-editor td, .xp-editor th { vertical-align: top; position: relative; }
+.xp-editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
+.xp-editor img.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+.xp-editor hr.ProseMirror-selectednode { border-top-color: var(--accent); }
+.xp-editor a { cursor: text; }
+.xp-editor .ProseMirror-gapcursor::after { border-top-color: var(--fg); }
+/* 拖动时的落点线 */
+.ProseMirror-dropcursor, .prosemirror-dropcursor-block { background: var(--accent) !important; }
+/* 左侧手柄（+ 和 ⋮⋮），由 DragHandle 定位 */
+.drag-handle { transition: opacity 0.12s; }
+.drag-handle[data-hidden], .drag-handle.hide { opacity: 0; pointer-events: none; }
+.xp-editor li > p, .xp-editor li > div > p { margin: 0; }
+.xp-editor li + li { margin-top: 0.15em; }
+.xp-editor ul[data-type="taskList"] li > label { margin-top: 0.42em; }
+/* 点一下就复制的行内代码、路径 */
+.prose-x code.xp-copy, .prose-x .xp-path { cursor: copy; transition: background 0.12s; }
+.prose-x code.xp-copy:hover { background: var(--accent-soft); color: var(--accent-strong); }
+.prose-x .xp-path { border-radius: 4px; padding: 0 2px; margin: 0 -2px; text-decoration: underline dotted color-mix(in srgb, var(--fg) 30%, transparent); text-underline-offset: 3px; }
+.prose-x .xp-path:hover { background: var(--accent-soft); color: var(--accent-strong); text-decoration: none; }
