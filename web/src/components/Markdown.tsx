@@ -79,7 +79,7 @@ function AssetImg(props: { src?: string; alt?: string; "data-idx"?: number | str
                 title={v ? `宽 ${v}px` : "默认大小"}
                 aria-pressed={v === width}
                 onClick={() => edit(idx, v)}
-                className={cx("rounded-md px-2 py-0.5", v === width ? "bg-accent text-on-accent" : "text-fg-2 hover:bg-surface-3")}
+                className={cx("rounded-md px-2 py-0.5", v === width ? "bg-ink text-on-ink" : "text-fg-2 hover:bg-surface-3")}
               >
                 {n}
               </button>

@@ -365,20 +365,22 @@ async fn put_asset(s: St<'_>, name: String, data: String) -> Result<String, Stri
     .await
 }
 
+/// 读一个附件的内容：主机模式读本地数据库，连接模式向主机要
+fn asset_bytes(st: &AppState, name: &str) -> Result<Vec<u8>, String> {
+    match st.cfg().mode.as_str() {
+        "host" => st.host_store()?.get_asset(name).map_err(|e| e.to_string()),
+        "client" => client::get_asset(&st.cfg().server_url, name),
+        _ => not_set(),
+    }
+}
+
 /// 返回 data: 网址，界面直接当图片用
 #[tauri::command]
 async fn get_asset(s: St<'_>, name: String) -> Result<String, String> {
     let st = s.inner().clone();
     blocking(move || {
         use base64::Engine;
-        let bytes = match st.cfg().mode.as_str() {
-            "host" => st
-                .host_store()?
-                .get_asset(&name)
-                .map_err(|e| e.to_string())?,
-            "client" => client::get_asset(&st.cfg().server_url, &name)?,
-            _ => return not_set(),
-        };
+        let bytes = asset_bytes(&st, &name)?;
         Ok(format!(
             "data:{};base64,{}",
             xp_store::mime_of(&name),
@@ -421,10 +423,57 @@ async fn run_agent(
     blocking(move || agent::launch_terminal(&agent, &cwd, &prompt)).await
 }
 
-/// 问 AI 一个问题（不开窗口），返回回答。cwd 是笔记展开的项目目录时，AI 能看到里面的材料
+/// 问 AI 一个问题（不开窗口），返回回答。cwd 是笔记展开的项目目录时，AI 能看到里面的材料。
+/// images 是笔记里的图片（附件名）：先写到工作目录的 `.xpanel/ask-images/` 里，提示词里写的就是这些相对路径，
+/// AI 用读文件的工具就能看到图片内容（codex 另外用 -i 直接附上）。
 #[tauri::command]
-async fn ask_ai(agent: Agent, cwd: String, prompt: String) -> Result<String, String> {
-    blocking(move || agent::ask(&agent, &cwd, &prompt, 600)).await
+async fn ask_ai(
+    s: St<'_>,
+    agent: Agent,
+    cwd: String,
+    prompt: String,
+    images: Option<Vec<String>>,
+    key: Option<String>,
+) -> Result<String, String> {
+    let st = s.inner().clone();
+    blocking(move || {
+        let dir = std::path::Path::new(cwd.trim());
+        let run = if !cwd.trim().is_empty() && dir.is_dir() {
+            dir.to_path_buf()
+        } else {
+            let k: String = key
+                .unwrap_or_default()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .take(40)
+                .collect();
+            std::env::temp_dir()
+                .join("xpanel-ask")
+                .join(if k.is_empty() { "note".into() } else { k })
+        };
+        let mut files = vec![];
+        let names = images.unwrap_or_default();
+        if !names.is_empty() {
+            let d = run.join(agent::ASK_IMAGES);
+            std::fs::create_dir_all(&d).map_err(|e| format!("建图片目录失败：{e}"))?;
+            for n in names.iter().take(40) {
+                let Ok(n) = xp_store::safe_asset_name(n) else {
+                    continue;
+                };
+                let f = d.join(&n);
+                if !f.exists() {
+                    match asset_bytes(&st, &n) {
+                        Ok(b) => std::fs::write(&f, b).map_err(|e| format!("写图片失败：{e}"))?,
+                        Err(_) => continue,
+                    }
+                }
+                files.push(f);
+            }
+        }
+        std::fs::create_dir_all(&run).map_err(|e| e.to_string())?;
+        agent::ask(&agent, &run.to_string_lossy(), &prompt, &files, 600)
+    })
+    .await
 }
 
 #[tauri::command]

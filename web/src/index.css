@@ -4,19 +4,25 @@
    颜色都通过 CSS 变量给出，浅色 / 深色各一套；组件里只用下面 @theme 里的名字（bg-surface、text-muted…），不写死色值。 */
 
 :root {
-  --bg: #eef1f5;
+  /* 中性偏暖的浅底，像纸：侧栏和列表直接放在底色上，不画框；阅读区是白色。
+     层次只靠底色深浅区分，不用描边：surface-2 = 悬停 / 输入框，surface-3 = 选中 */
+  --bg: #f8f8f6;
   --surface: #ffffff;
-  --surface-2: #f5f7fa;
-  --surface-3: #eef1f5;
-  --line: #e3e7ed;
-  --line-soft: #edf0f4;
-  --fg: #1b2230;
-  --fg-2: #37404f;
-  --muted: #5e6778;
-  --faint: #8a93a3;
-  --accent: #2f5bea;
-  --accent-strong: #1e43bf;
-  --accent-soft: #e3e9ff;
+  --surface-2: #f1f0ec;
+  --surface-3: #e8e7e2;
+  --line: #e4e3de;
+  --line-soft: #eeede9;
+  --fg: #1f1e1c;
+  --fg-2: #3a3935;
+  --muted: #6b6a65;
+  --faint: #9c9a93;
+  /* 主按钮用墨色（近黑），不用彩色；点缀色是赭石 / 陶土色，只用在小地方：未读数、勾选、焦点、@ 提到 */
+  --ink: #262522;
+  --ink-hover: #45433e;
+  --on-ink: #fbfaf8;
+  --accent: #b0532c;
+  --accent-strong: #8c3f1f;
+  --accent-soft: #f6e9e1;
   --on-accent: #ffffff;
   --mark: #fff1c2;
   --mark-fg: #6b4e00;
@@ -26,34 +32,38 @@
   --ok: #1f9d5b;
   --danger: #c93a30;
   --danger-soft: #fdeceb;
-  --todo: #2f5bea;
+  --todo: #4d6b8a;
   --issue: #d24b3c;
   --idea: #c3820e;
-  --note: #4a5e80;
+  --note: #5b5f68;
   --link: #11808a;
   --rule: #6e54d8;
-  --shadow-1: 0 0 0 1px rgb(27 34 48 / 0.035), 0 1px 2px rgb(27 34 48 / 0.04);
-  --shadow-2: 0 0 0 1px rgb(27 34 48 / 0.035), 0 2px 6px rgb(27 34 48 / 0.04), 0 12px 32px rgb(27 34 48 / 0.06);
-  --shadow-3: 0 0 0 1px rgb(27 34 48 / 0.05), 0 4px 12px rgb(27 34 48 / 0.06), 0 24px 56px rgb(27 34 48 / 0.14);
-  --shadow-sel: 0 0 0 1.5px color-mix(in srgb, var(--accent) 38%, transparent), 0 10px 28px color-mix(in srgb, var(--accent) 12%, transparent);
+  /* 只给浮起来的东西（弹出菜单、对话框、右侧浮出面板）用阴影，都不带描边 */
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / 0.05), 0 12px 32px rgb(0 0 0 / 0.06);
+  --shadow-3: 0 4px 14px rgb(0 0 0 / 0.07), 0 24px 60px rgb(0 0 0 / 0.14);
+  --shadow-sel: none;
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0f1216;
-  --surface: #171b21;
-  --surface-2: #1d222a;
-  --surface-3: #232933;
-  --line: #2a313b;
-  --line-soft: #222831;
-  --fg: #e8ecf2;
-  --fg-2: #c5ccd6;
-  --muted: #98a2b1;
-  --faint: #6c7686;
-  --accent: #6e8dff;
-  --accent-strong: #9db1ff;
-  --accent-soft: #1e2a4d;
-  --on-accent: #0b1020;
+  --bg: #1b1b1a;
+  --surface: #242423;
+  --surface-2: #2c2c2a;
+  --surface-3: #353532;
+  --line: #3a3a37;
+  --line-soft: #2f2f2d;
+  --fg: #ecebe7;
+  --fg-2: #cfcdc7;
+  --muted: #a09e97;
+  --faint: #75736d;
+  --ink: #ecebe7;
+  --ink-hover: #d4d2cc;
+  --on-ink: #1b1b1a;
+  --accent: #e08a62;
+  --accent-strong: #f2a987;
+  --accent-soft: #3b2a21;
+  --on-accent: #1b1b1a;
   --mark: #4a3d12;
   --mark-fg: #f4d98a;
   --warn: #f0c36b;
@@ -62,16 +72,16 @@
   --ok: #4cc38a;
   --danger: #f2877e;
   --danger-soft: #3a1f1f;
-  --todo: #7c9cf0;
+  --todo: #8fa9c6;
   --issue: #f08576;
   --idea: #ebb54f;
-  --note: #a3b6d6;
+  --note: #b4b2ab;
   --link: #5ecdd2;
   --rule: #a794f4;
-  --shadow-1: 0 0 0 1px rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow-2: 0 0 0 1px rgb(255 255 255 / 0.04), 0 2px 6px rgb(0 0 0 / 0.25), 0 12px 32px rgb(0 0 0 / 0.3);
-  --shadow-3: 0 0 0 1px rgb(255 255 255 / 0.06), 0 4px 12px rgb(0 0 0 / 0.3), 0 24px 56px rgb(0 0 0 / 0.5);
-  --shadow-sel: 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent), 0 10px 28px rgb(0 0 0 / 0.35);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.25);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / 0.25), 0 12px 32px rgb(0 0 0 / 0.3);
+  --shadow-3: 0 4px 14px rgb(0 0 0 / 0.35), 0 24px 60px rgb(0 0 0 / 0.5);
+  --shadow-sel: none;
   color-scheme: dark;
 }
 
@@ -86,6 +96,9 @@
   --color-fg-2: var(--fg-2);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
+  --color-ink: var(--ink);
+  --color-ink-hover: var(--ink-hover);
+  --color-on-ink: var(--on-ink);
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
@@ -156,18 +169,18 @@
 .prose-x li::marker { color: var(--faint); }
 .prose-x li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.3em; }
 .prose-x input[type="checkbox"] { accent-color: var(--accent); margin-right: 0.5em; }
-.prose-x a { color: var(--accent); text-decoration: none; }
-.prose-x a:hover { text-decoration: underline; }
+.prose-x a { color: var(--fg); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent); text-underline-offset: 3px; }
+.prose-x a:hover { color: var(--accent-strong); text-decoration-color: currentColor; }
 .prose-x strong { color: var(--fg); }
 .prose-x code { font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-2); border-radius: 6px; padding: 0.1em 0.4em; }
 .prose-x pre { background: var(--surface-2); border-radius: 12px; padding: 14px 16px; overflow-x: auto; line-height: 1.7; }
 .prose-x pre code { background: none; padding: 0; font-size: 12.5px; }
-.prose-x blockquote { border-left: 3px solid var(--line); padding: 2px 14px; color: var(--muted); }
+.prose-x blockquote { background: var(--surface-2); border-radius: 10px; padding: 8px 14px; color: var(--muted); }
 .prose-x hr { border: none; border-top: 1px solid var(--line); margin: 1.6em 0; }
-.prose-x table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13.5px; line-height: 1.5; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: table; }
+.prose-x table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 13.5px; line-height: 1.5; border-radius: 12px; overflow: hidden; display: table; background: color-mix(in srgb, var(--surface-2) 45%, transparent); }
 .prose-x thead tr { background: var(--surface-2); }
 .prose-x th { text-align: left; font-weight: 600; color: var(--fg); padding: 9px 12px; }
-.prose-x td { padding: 9px 12px; border-top: 1px solid var(--line); }
+.prose-x td { padding: 9px 12px; border-top: 1px solid var(--line-soft); }
 .prose-x img { max-width: 100%; border-radius: 10px; cursor: zoom-in; }
 .prose-x mark { background: var(--mark); color: inherit; border-radius: 4px; padding: 0 3px; }
 
@@ -200,6 +213,8 @@ mark.qa-mark:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-fg) 35%
 .ProseMirror-dropcursor, .prosemirror-dropcursor-block { background: var(--accent) !important; }
 /* 左侧手柄（+ 和 ⋮⋮），由 DragHandle 定位 */
 .drag-handle { transition: opacity 0.12s; }
+/* 手柄对着的那一块：浅底色，左右各多铺出一点，不画线 */
+.xp-editor > .xp-hover { background: color-mix(in srgb, var(--surface-2) 75%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--surface-2) 75%, transparent); border-radius: 6px; }
 .drag-handle[data-hidden], .drag-handle.hide { opacity: 0; pointer-events: none; }
 .xp-editor li > p, .xp-editor li > div > p { margin: 0; }
 .xp-editor li + li { margin-top: 0.15em; }

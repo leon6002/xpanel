@@ -8,6 +8,8 @@ import CodeBlock from "@tiptap/extension-code-block";
 import { DragHandle } from "@tiptap/extension-drag-handle-react";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import { EditorContent, Extension, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type Editor, type NodeViewProps, type Range } from "@tiptap/react";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import Suggestion from "@tiptap/suggestion";
 import {
   ArrowDown,
@@ -70,7 +72,7 @@ function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
             key={n}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => updateAttributes({ width: v || null })}
-            className={cx("rounded-md px-2 py-0.5", v === w ? "bg-accent text-on-accent" : "text-fg-2 hover:bg-surface-3")}
+            className={cx("rounded-md px-2 py-0.5", v === w ? "bg-ink text-on-ink" : "text-fg-2 hover:bg-surface-3")}
           >
             {n}
           </button>
@@ -153,6 +155,40 @@ const useSlash = create<{ open: boolean; items: Cmd[]; index: number; rect: DOMR
   pick: null,
 }));
 
+/* 鼠标所在的块铺一层浅底色，看得出一块是从哪到哪（手柄对着的就是这一块） */
+const hoverKey = new PluginKey<number | null>("xp-hover");
+const BlockHover = Extension.create({
+  name: "xpBlockHover",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<number | null>({
+        key: hoverKey,
+        state: {
+          init: () => null,
+          apply(tr, pos) {
+            const m = tr.getMeta(hoverKey);
+            if (m !== undefined) return m as number | null;
+            return pos == null ? null : tr.mapping.map(pos);
+          },
+        },
+        props: {
+          decorations(state) {
+            const pos = hoverKey.getState(state);
+            if (pos == null) return null;
+            const node = state.doc.nodeAt(pos);
+            if (!node) return null;
+            return DecorationSet.create(state.doc, [Decoration.node(pos, pos + node.nodeSize, { class: "xp-hover" })]);
+          },
+        },
+      }),
+    ];
+  },
+});
+const setHover = (editor: Editor, pos: number | null) => {
+  if (editor.isDestroyed || hoverKey.getState(editor.state) === pos) return;
+  editor.view.dispatch(editor.state.tr.setMeta(hoverKey, pos).setMeta("addToHistory", false));
+};
+
 const SlashCommand = Extension.create({
   name: "slash",
   addProseMirrorPlugins() {
@@ -203,7 +239,7 @@ function SlashMenu() {
           key={c.key}
           onClick={() => pick?.(c)}
           onMouseEnter={() => useSlash.setState({ index: i })}
-          className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13.5px] [&_svg]:size-4", i === index ? "bg-accent-soft text-accent-strong" : "text-fg-2")}
+          className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13.5px] [&_svg]:size-4", i === index ? "bg-surface-2 text-fg" : "text-fg-2")}
         >
           <c.icon className="text-muted" />
           <span className="grow">{c.name}</span>
@@ -285,7 +321,9 @@ function BlockHandle({ editor }: { editor: Editor }) {
     <DragHandle
       editor={editor}
       onNodeChange={({ node, pos }) => {
-        if (!menu) cur.current = { node, pos };
+        if (menu) return;
+        cur.current = { node, pos };
+        setHover(editor, node ? pos : null);
       }}
       computePositionConfig={{ placement: "left-start", strategy: "absolute" }}
     >
@@ -378,7 +416,7 @@ export function BlockEditor({
   const openAsset = useOpenAsset();
   const editor = useEditor(
     {
-      extensions: editorExtensions([SlashCommand], { image: XImageView as never, codeBlock: XCodeBlock }),
+      extensions: editorExtensions([SlashCommand, BlockHover], { image: XImageView as never, codeBlock: XCodeBlock }),
       content: value,
       contentType: "markdown",
       immediatelyRender: true,
@@ -439,7 +477,7 @@ export function BlockEditor({
   }, [editor]);
   if (!editor) return null;
   return (
-    <div className="relative flex-[1_0_auto] pl-12" onClick={(e) => e.target === e.currentTarget && editor.chain().focus("end").run()}>
+    <div className="relative flex-[1_0_auto] pl-12" onMouseLeave={() => !document.querySelector("[data-radix-menu-content]") && setHover(editor, null)} onClick={(e) => e.target === e.currentTarget && editor.chain().focus("end").run()}>
       <BlockHandle editor={editor} />
       <EditorContent editor={editor} className="pb-8" />
       <SlashMenu />

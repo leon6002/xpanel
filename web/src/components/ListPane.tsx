@@ -49,7 +49,7 @@ export function useFilter() {
 function SearchBox() {
   const { q, setQ } = useUi();
   return (
-    <label className="flex h-[42px] shrink-0 items-center gap-2 rounded-xl bg-surface px-3.5 text-muted shadow-1">
+    <label className="flex h-[42px] shrink-0 items-center gap-2 rounded-xl bg-surface-2 px-3.5 text-muted">
       <Search className="size-4" />
       <input
         id="xp-search"
@@ -101,9 +101,9 @@ function NoteCard({ it, on, kids = 0, crumb, sel }: { it: Item; on: boolean; kid
   const imgs = imageRefs(it.body);
   const snippet = plain((it.body || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "")).slice(0, 90);
   return (
-    <div {...dnd.props} className={cx("group relative rounded-[14px] bg-surface transition-shadow", on || dnd.over ? "shadow-sel" : "shadow-1 hover:shadow-2")}>
+    <div {...dnd.props} className={cx("group relative rounded-xl transition-colors", dnd.over ? "bg-accent-soft" : on ? "bg-surface-3" : "hover:bg-surface-2")}>
       <CopyBtn text={fullText(it)} className="absolute top-2.5 right-2.5 z-10" />
-      <button onClick={() => select(it.id)} aria-current={on || undefined} className="flex w-full flex-col gap-1.5 rounded-[14px] px-4 py-3.5 text-left">
+      <button onClick={() => select(it.id)} aria-current={on || undefined} className="flex w-full flex-col gap-1.5 rounded-xl px-3.5 py-3 text-left">
         {crumb && <span className="-mb-1 truncate text-[11.5px] text-faint">{crumb} /</span>}
         <span className="line-clamp-2 text-[15px] font-semibold text-fg">
           {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
@@ -121,8 +121,8 @@ function NoteCard({ it, on, kids = 0, crumb, sel }: { it: Item; on: boolean; kid
         <ItemMeta it={it} />
       </button>
       {kids > 0 && (
-        <div className="-mt-1.5 px-2 pb-2">
-          <button onClick={() => toggle(it.id)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-muted hover:bg-surface-2 hover:text-fg">
+        <div className="-mt-1.5 px-1.5 pb-2">
+          <button onClick={() => toggle(it.id)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-muted hover:bg-surface-3 hover:text-fg">
             <ChevronRight className={cx("size-3.5 transition-transform", open && "rotate-90")} />
             {kids} 篇子笔记
           </button>
@@ -139,8 +139,8 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
   return (
     <div
       className={cx(
-        "group flex items-start gap-2.5 rounded-xl bg-surface px-3 py-2.5 transition-shadow",
-        on ? "shadow-sel" : "shadow-1 hover:shadow-2",
+        "group flex items-start gap-2.5 rounded-xl px-3 py-2.5 transition-colors",
+        on ? "bg-surface-3" : "hover:bg-surface-2",
       )}
     >
       <button
@@ -151,7 +151,7 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
         onClick={() => patchItem(it, { done: !it.done })}
         className={cx(
           "mt-0.5 grid size-[18px] shrink-0 place-items-center rounded-[5px] border-[1.5px] transition-colors [&_svg]:size-3",
-          it.done ? "border-accent bg-accent text-on-accent" : "border-faint text-transparent hover:border-accent",
+          it.done ? "border-ink bg-ink text-on-ink" : "border-faint text-transparent hover:border-fg",
         )}
       >
         <Check strokeWidth={3} />
@@ -183,7 +183,7 @@ function LinkRow({ it, on }: { it: Item; on: boolean }) {
   const ui = useUi();
   const t = entryTarget(it);
   return (
-    <div className={cx("group flex items-center gap-2 rounded-xl bg-surface px-3.5 py-2.5 transition-shadow", on ? "shadow-sel" : "shadow-1 hover:shadow-2")}>
+    <div className={cx("group flex items-center gap-2 rounded-xl px-3.5 py-2.5 transition-colors", on ? "bg-surface-3" : "hover:bg-surface-2")}>
       <button onClick={() => ui.select(it.id)} className="flex min-w-0 grow flex-col text-left">
         <span className="truncate text-[14px] font-semibold">
           {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
@@ -207,7 +207,7 @@ function LinkRow({ it, on }: { it: Item; on: boolean }) {
             aria-label="打开"
             title="打开"
             onClick={() => openTarget(t).then((r) => r === "copied" && ui.say("网页版不能直接打开本地路径，已复制：" + t))}
-            className="grid size-8 place-items-center rounded-lg text-muted hover:bg-accent-soft hover:text-accent [&_svg]:size-4"
+            className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-4"
           >
             <ExternalLink />
           </button>
@@ -396,7 +396,7 @@ export function ListPane() {
           新建
         </Button>
       </div>
-      <div className="scroll-quiet -mr-2 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
+      <div className="scroll-quiet -mr-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
         {body.node}
       </div>
     </section>

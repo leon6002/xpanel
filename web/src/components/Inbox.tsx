@@ -56,7 +56,7 @@ function Conv({ id, name, time, preview, badge, color, letter }: { id: string; n
     <button
       onClick={() => ui.setIbx(id)}
       aria-current={on || undefined}
-      className={cx("grid w-full grid-cols-[38px_1fr_auto] items-center gap-x-2.5 rounded-xl px-2.5 py-2 text-left", on ? "bg-surface shadow-1" : "hover:bg-surface/60")}
+      className={cx("grid w-full grid-cols-[38px_1fr_auto] items-center gap-x-2.5 rounded-xl px-2.5 py-2 text-left", on ? "bg-surface-3" : "hover:bg-surface-2")}
     >
       <span className="row-span-2 grid size-[38px] place-items-center rounded-[11px] text-[15px] font-bold text-white" style={{ background: color }}>
         {letter}
@@ -141,7 +141,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
     });
   }
   return (
-    <div className={cx("group relative flex items-end justify-end gap-2 pt-7", ui.peek?.id === it.id && "[&_.bub]:ring-2 [&_.bub]:ring-accent")} data-iid={it.id}>
+    <div className={cx("group relative flex items-end justify-end gap-2 pt-7", ui.peek?.id === it.id && "[&_.bub]:ring-2 [&_.bub]:ring-ink/40")} data-iid={it.id}>
       <div className="absolute top-0 right-0 z-10 hidden items-center gap-0.5 rounded-lg bg-surface p-0.5 shadow-3 group-hover:flex">
         {TRIAGE.map(({ k, icon: Icon }) => (
           <button key={k} className={tool} title={`归到「${typeName(k)}」`} onClick={() => triage(k)}>
@@ -181,7 +181,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
         onClick={toggle}
         className={cx(
           "mb-5 grid size-5 shrink-0 place-items-center rounded-full border-[1.5px] [&_svg]:size-3",
-          sel ? "border-accent bg-accent text-on-accent" : "border-line text-transparent",
+          sel ? "border-ink bg-ink text-on-ink" : "border-line text-transparent",
           !sel && !selecting && "opacity-0 group-hover:opacity-100",
         )}
       >
@@ -189,7 +189,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
       </button>
       <div className="flex max-w-[78%] min-w-0 flex-col items-end gap-1">
         <div
-          className={cx("bub rounded-[16px] rounded-br-[6px] px-3.5 py-2.5 text-[14px] break-words", sel ? "bg-accent text-on-accent [&_.prose-x]:text-on-accent" : "bg-accent-soft text-fg")}
+          className={cx("bub rounded-[16px] rounded-br-[6px] px-3.5 py-2.5 text-[14px] break-words", sel ? "bg-ink text-on-ink [&_.prose-x]:text-on-ink" : "bg-accent-soft text-fg")}
           onClick={(e) => selecting && !(e.target as HTMLElement).closest("a,img") && toggle()}
         >
           {showTitle && <div className="whitespace-pre-wrap">{it.title}</div>}
@@ -256,7 +256,7 @@ function WxMsg({ m, mine, sel, selecting, onClick }: { m: Msg; mine: boolean; se
   return (
     <div className={cx("group flex items-end gap-2", mine ? "justify-end" : "justify-start")} data-mid={m.id} onClick={(e) => !(e.target as HTMLElement).closest("a,img") && onClick(e)}>
       {mine && (
-        <span className={cx("mb-1 grid size-5 shrink-0 place-items-center rounded-full border-[1.5px] [&_svg]:size-3", sel ? "border-accent bg-accent text-on-accent" : "border-line text-transparent", !sel && !selecting && "opacity-0 group-hover:opacity-100")}>
+        <span className={cx("mb-1 grid size-5 shrink-0 place-items-center rounded-full border-[1.5px] [&_svg]:size-3", sel ? "border-ink bg-ink text-on-ink" : "border-line text-transparent", !sel && !selecting && "opacity-0 group-hover:opacity-100")}>
           <Check strokeWidth={3} />
         </span>
       )}
@@ -268,7 +268,7 @@ function WxMsg({ m, mine, sel, selecting, onClick }: { m: Msg; mine: boolean; se
           className={cx(
             "cursor-pointer rounded-[16px] px-3.5 py-2.5 text-[14px] leading-relaxed break-words whitespace-pre-wrap",
             mine ? "rounded-br-[6px]" : "rounded-bl-[6px]",
-            sel ? "bg-accent text-on-accent" : mine ? "bg-accent-soft" : "bg-surface-2",
+            sel ? "bg-ink text-on-ink" : mine ? "bg-accent-soft" : "bg-surface-2",
           )}
         >
           {String(m.text || "")
@@ -282,7 +282,7 @@ function WxMsg({ m, mine, sel, selecting, onClick }: { m: Msg; mine: boolean; se
         </div>
       </div>
       {!mine && (
-        <span className={cx("mb-1 grid size-5 shrink-0 place-items-center rounded-full border-[1.5px] [&_svg]:size-3", sel ? "border-accent bg-accent text-on-accent" : "border-line text-transparent", !sel && !selecting && "opacity-0 group-hover:opacity-100")}>
+        <span className={cx("mb-1 grid size-5 shrink-0 place-items-center rounded-full border-[1.5px] [&_svg]:size-3", sel ? "border-ink bg-ink text-on-ink" : "border-line text-transparent", !sel && !selecting && "opacity-0 group-hover:opacity-100")}>
           <Check strokeWidth={3} />
         </span>
       )}
@@ -493,10 +493,8 @@ export function InboxMain() {
       if (c.readUpTo && !divided && m.time > c.readUpTo) {
         divided = true;
         rows.push(
-          <div key="new" id="ibx-new" className="my-2 flex items-center gap-3 text-xs text-accent">
-            <span className="h-px grow bg-accent/30" />
-            以下是没处理过的消息
-            <span className="h-px grow bg-accent/30" />
+          <div key="new" id="ibx-new" className="my-2 flex justify-center">
+            <span className="rounded-full bg-accent-soft px-3 py-0.5 text-xs text-accent-strong">以下是没处理过的消息</span>
           </div>,
         );
       }
@@ -523,7 +521,7 @@ export function InboxMain() {
       : "发给自己的东西先放这里";
 
   return (
-    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface shadow-2">
+    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface">
       <header className="flex items-center gap-2.5 px-5 pt-3.5 pb-2">
         <h1 className="truncate text-[16px] font-bold" title={c?.name}>
           {c ? c.name : "随手记"}
