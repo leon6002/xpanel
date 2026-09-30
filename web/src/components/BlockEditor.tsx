@@ -31,12 +31,13 @@ import {
   Quote,
   Table2,
   Trash2,
+  Wand,
   FileCode2,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { copyText, errText, putAsset } from "../lib/api";
-import { editorExtensions, tidyMarkdown, useGentleMarkdown, XImage } from "../lib/editor";
+import { editorExtensions, isRichHtml, looksLikeMarkdown, repairMarkdown, tidyMarkdown, useGentleMarkdown, XImage } from "../lib/editor";
 import { clipFiles, fileLabel, isImgFile, noteTitle } from "../lib/logic";
 import { qc } from "../lib/data";
 import { REF_PREFIX } from "../lib/links";
@@ -458,6 +459,18 @@ function BlockHandle({ editor }: { editor: Editor }) {
               <MenuItem icon={ArrowDown} onSelect={() => move(1)}>
                 下移
               </MenuItem>
+              <MenuItem
+                icon={Wand}
+                onSelect={() => {
+                  const before = tidyMarkdown(editor.getMarkdown());
+                  const after = repairMarkdown(before);
+                  if (after === before) return say("没有需要重新排版的地方");
+                  editor.chain().focus().setContent(after, { contentType: "markdown", emitUpdate: true }).run();
+                  say("已把整篇按 Markdown 重新排版（Ctrl+Z 可以撤销）");
+                }}
+              >
+                整篇按 Markdown 重新排版
+              </MenuItem>
               <DM.Separator className="my-1 h-px bg-line-soft" />
               <MenuItem
                 icon={Trash2}
@@ -507,14 +520,35 @@ export function BlockEditor({
       shouldRerenderOnTransaction: false,
       editorProps: {
         attributes: { class: "xp-editor prose-x outline-none", spellcheck: "false", "data-qa-host": itemId },
-        handlePaste: (_view, e) => {
+        handlePaste: (view, e) => {
+          // 用 view 上挂的编辑器：闭包里的 editor 可能是第一次渲染时的旧实例
+          const editor = (view.dom as unknown as { editor?: Editor }).editor;
+          if (!editor) return false;
           const files = clipFiles(e.clipboardData);
-          if (!files.length || !editor) return false;
+          if (files.length) {
+            e.preventDefault();
+            insertFiles(editor, files);
+            return true;
+          }
+          // 纯文本的 Markdown：按 Markdown 解析后插入（代码块里照旧当代码）
+          const text = e.clipboardData?.getData("text/plain") || "";
+          const html = e.clipboardData?.getData("text/html") || "";
+          // 从 VS Code 复制的代码（不是 .md 文件）交给代码块自己处理
+          const vsMode = (() => {
+            try {
+              return JSON.parse(e.clipboardData?.getData("vscode-editor-data") || "{}").mode || "";
+            } catch {
+              return "";
+            }
+          })();
+          if (vsMode && vsMode !== "markdown") return false;
+          if (!text || editor.isActive("codeBlock") || isRichHtml(html) || !looksLikeMarkdown(text)) return false;
           e.preventDefault();
-          insertFiles(editor, files);
+          editor.chain().focus().insertContent(text.replace(/\r\n/g, "\n"), { contentType: "markdown" }).run();
           return true;
         },
         handleDrop: (view, e) => {
+          const editor = (view.dom as unknown as { editor?: Editor }).editor;
           const files = clipFiles(e.dataTransfer);
           if (!files.length || !editor) return false;
           e.preventDefault();
