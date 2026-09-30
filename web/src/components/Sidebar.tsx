@@ -25,7 +25,7 @@ function greet() {
 }
 
 const secH = "flex items-center gap-1 px-3 pb-1 text-xs text-muted";
-const miniBtn = "grid size-6 place-items-center rounded-md text-faint hover:bg-surface hover:text-accent [&_svg]:size-3.5";
+const miniBtn = "grid size-6 place-items-center rounded-md text-faint hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5";
 
 export function Sidebar() {
   const { data, error } = useAppState();
@@ -81,7 +81,7 @@ export function Sidebar() {
       <div key={p}>
         <div
           style={{ paddingLeft: 4 + depth * 14 }}
-          className={cx("flex h-[32px] items-center rounded-lg pr-3 text-[13.5px]", on ? "bg-accent-soft font-semibold text-accent-strong" : "text-fg-2 hover:bg-surface/60")}
+          className={cx("flex h-[32px] items-center rounded-lg pr-3 text-[13.5px]", on ? "bg-surface-3 font-medium text-fg" : "text-fg-2 hover:bg-surface-2")}
         >
           <button
             aria-label={open ? "收起" : "展开"}
@@ -104,7 +104,7 @@ export function Sidebar() {
     <nav aria-label="主导航" className="flex w-[228px] shrink-0 flex-col gap-4 px-1.5 py-2.5 max-[1200px]:w-14 max-[1200px]:px-0">
       <div className="flex flex-col gap-1 px-2.5 max-[1200px]:px-[13px]">
         <div className="flex items-center gap-2.5">
-          <span className="grid size-[30px] place-items-center rounded-[9px] bg-accent text-[15px] font-bold text-on-accent">x</span>
+          <span className="grid size-[30px] place-items-center rounded-[9px] bg-ink text-[15px] font-bold text-on-ink">x</span>
           <span className="text-[17px] font-bold max-[1200px]:hidden">xpanel</span>
         </div>
         <span className="text-xs text-muted max-[1200px]:hidden">{greet()}</span>
@@ -118,14 +118,14 @@ export function Sidebar() {
             onClick={() => ui.setView(k)}
             title={name}
             className={cx(
-              "relative flex h-10 items-center gap-2.5 rounded-[10px] px-3 text-left text-sm transition-colors max-[1200px]:justify-center max-[1200px]:px-0 [&_svg]:size-[18px]",
-              ui.view === k ? "bg-surface font-semibold text-fg shadow-1 [&_svg]:text-accent" : "text-fg-2 hover:bg-surface/60",
+              "relative flex h-9 items-center gap-2.5 rounded-lg px-3 text-left text-sm transition-colors max-[1200px]:justify-center max-[1200px]:px-0 [&_svg]:size-[18px]",
+              ui.view === k ? "bg-surface-3 font-medium text-fg" : "text-fg-2 hover:bg-surface-2",
             )}
           >
             <Icon strokeWidth={1.8} />
             <span className="grow max-[1200px]:hidden">{name}</span>
             {k === "inbox" && counts.inbox > 0 ? (
-              <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-xs font-normal text-on-accent max-[1200px]:absolute max-[1200px]:-top-1 max-[1200px]:right-0 max-[1200px]:h-4 max-[1200px]:min-w-4 max-[1200px]:px-1 max-[1200px]:text-[10px]">
+              <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent-soft px-1.5 text-xs font-semibold text-accent-strong max-[1200px]:absolute max-[1200px]:-top-1 max-[1200px]:right-0 max-[1200px]:h-4 max-[1200px]:min-w-4 max-[1200px]:px-1 max-[1200px]:text-[10px]">
                 {counts.inbox}
               </span>
             ) : (
@@ -151,14 +151,14 @@ export function Sidebar() {
               </div>
               <button
                 onClick={() => ui.setCat(null)}
-                className={cx("flex h-[32px] items-center rounded-lg px-3 text-[13.5px]", !ui.cat ? "bg-accent-soft font-semibold text-accent-strong" : "text-fg-2 hover:bg-surface/60")}
+                className={cx("flex h-[32px] items-center rounded-lg px-3 text-[13.5px]", !ui.cat ? "bg-surface-3 font-medium text-fg" : "text-fg-2 hover:bg-surface-2")}
               >
                 全部
               </button>
               {kids("").map((p) => node(p, 0))}
               <button
                 onClick={() => ui.setCat(ui.cat === "none" ? null : "none")}
-                className={cx("flex h-[32px] items-center rounded-lg px-3 text-[13.5px]", ui.cat === "none" ? "bg-accent-soft font-semibold text-accent-strong" : "text-muted hover:bg-surface/60")}
+                className={cx("flex h-[32px] items-center rounded-lg px-3 text-[13.5px]", ui.cat === "none" ? "bg-surface-3 font-medium text-fg" : "text-muted hover:bg-surface-2")}
               >
                 未分类
               </button>
@@ -174,7 +174,7 @@ export function Sidebar() {
                       key={t}
                       onClick={() => ui.setTag(ui.tag === t ? null : t)}
                       title={`${n} 条`}
-                      className={cx("rounded-full px-2.5 py-0.5 text-xs", ui.tag === t ? "bg-accent text-on-accent" : "bg-surface text-fg-2 hover:text-fg")}
+                      className={cx("rounded-full px-2.5 py-0.5 text-xs", ui.tag === t ? "bg-ink text-on-ink" : "bg-surface-2 text-fg-2 hover:bg-surface-3 hover:text-fg")}
                     >
                       #{t}
                     </button>
@@ -202,7 +202,7 @@ export function Sidebar() {
                 key={d.id}
                 onClick={() => ui.setDev(on ? null : d.name)}
                 title={on ? "取消按设备筛选" : "只看和这台有关的"}
-                className={cx("flex h-[30px] items-center gap-2 rounded-lg px-3 text-[13px]", on ? "bg-accent-soft font-semibold text-accent-strong" : "text-fg-2 hover:bg-surface/60")}
+                className={cx("flex h-[30px] items-center gap-2 rounded-lg px-3 text-[13px]", on ? "bg-surface-3 font-medium text-fg" : "text-fg-2 hover:bg-surface-2")}
               >
                 <span className={cx("size-1.5 shrink-0 rounded-full", devOnline(d) ? "bg-ok" : "bg-line")} />
                 <span className="truncate">{d.name}</span>
@@ -214,7 +214,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 rounded-xl bg-surface py-1.5 pr-1.5 pl-3 text-[12.5px] text-fg-2 max-[1200px]:flex-col max-[1200px]:p-1.5">
+      <div className="flex items-center gap-1 rounded-lg py-1.5 pr-1.5 pl-3 text-[12.5px] text-fg-2 max-[1200px]:flex-col max-[1200px]:p-1.5">
         <button className="flex min-w-0 grow items-center gap-2 text-left" onClick={() => openSettings()} title={isApp ? "连接与设置" : "网页版设置"}>
           <span className={cx("size-2 shrink-0 rounded-full", conn.dot)} />
           <span className="truncate max-[1200px]:hidden" title={conn.text}>

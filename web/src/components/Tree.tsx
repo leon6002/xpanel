@@ -236,8 +236,8 @@ function SubRow({ it, depth, sel, seen }: { it: Item; depth: number; sel?: strin
         aria-current={on || undefined}
         className={cx(
           "group/row flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 text-[13px]",
-          on ? "bg-accent-soft font-medium text-accent-strong" : "text-fg-2 hover:bg-surface-2",
-          dnd.over && "shadow-sel",
+          on ? "bg-surface-3 font-medium text-fg" : "text-fg-2 hover:bg-surface-3/70",
+          dnd.over && "bg-accent-soft",
         )}
         style={{ paddingLeft: 6 + depth * 16 }}
       >

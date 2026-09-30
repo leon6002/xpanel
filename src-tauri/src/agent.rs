@@ -172,8 +172,35 @@ pub fn ask_command(a: &Agent) -> Option<String> {
     }
 }
 
+/// 问答时笔记里的图片放在工作目录的这个子目录（界面写提示词时用同样的相对路径）
+pub const ASK_IMAGES: &str = ".xpanel/ask-images";
+
+/// codex exec 看不了文件里的图片，要用 -i 附上：插在最后的「-」（从标准输入读提示词）前面
+fn with_images(cmdline: &str, images: &[std::path::PathBuf]) -> String {
+    let t = cmdline.trim_end();
+    let is_codex = t.split_whitespace().next().is_some_and(|x| {
+        x.trim_end_matches(".exe")
+            .trim_end_matches(".cmd")
+            .ends_with("codex")
+    });
+    if images.is_empty() || !is_codex || !t.contains(" exec") || !t.ends_with(" -") {
+        return cmdline.to_string();
+    }
+    let args: String = images
+        .iter()
+        .map(|p| format!(" -i \"{}\"", p.to_string_lossy()))
+        .collect();
+    format!("{}{} -", &t[..t.len() - 2], args)
+}
+
 /// 跑一次非交互的 AI 命令：提示词从标准输入传进去，返回标准输出。最多等 timeout 秒。
-pub fn ask(a: &Agent, cwd: &str, prompt: &str, timeout: u64) -> Result<String, String> {
+pub fn ask(
+    a: &Agent,
+    cwd: &str,
+    prompt: &str,
+    images: &[std::path::PathBuf],
+    timeout: u64,
+) -> Result<String, String> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     let cmdline = ask_command(a).ok_or_else(|| {
@@ -182,6 +209,7 @@ pub fn ask(a: &Agent, cwd: &str, prompt: &str, timeout: u64) -> Result<String, S
             a.name
         )
     })?;
+    let cmdline = with_images(&cmdline, images);
     let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg(&cmdline);
@@ -289,6 +317,17 @@ mod ask_tests {
         );
     }
 
+    #[test]
+    fn codex_gets_images_as_flags() {
+        let imgs = vec![std::path::PathBuf::from("/t/a.png")];
+        assert_eq!(
+            with_images("codex exec -", &imgs),
+            "codex exec -i \"/t/a.png\" -"
+        );
+        assert_eq!(with_images("claude -p", &imgs), "claude -p");
+        assert_eq!(with_images("codex exec -", &[]), "codex exec -");
+    }
+
     #[cfg(unix)]
     #[test]
     fn runs_with_stdin() {
@@ -297,18 +336,18 @@ mod ask_tests {
             cmd: String::new(),
             ask: "tr a-z A-Z".into(),
         };
-        assert_eq!(ask(&a, "", "hello", 10).unwrap(), "HELLO");
+        assert_eq!(ask(&a, "", "hello", &[], 10).unwrap(), "HELLO");
         let bad = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "echo oops >&2; exit 3".into(),
         };
-        assert_eq!(ask(&bad, "", "x", 10).unwrap_err(), "oops");
+        assert_eq!(ask(&bad, "", "x", &[], 10).unwrap_err(), "oops");
         let slow = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "sleep 5".into(),
         };
-        assert!(ask(&slow, "", "x", 1).unwrap_err().contains("已停止"));
+        assert!(ask(&slow, "", "x", &[], 1).unwrap_err().contains("已停止"));
     }
 }

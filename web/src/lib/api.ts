@@ -156,7 +156,7 @@ export const desk = {
   openDataDir: () => need()<void>("open_data_dir"),
   createShortcut: () => need()<string>("create_desktop_shortcut"),
   runAgent: (agent: Agent, cwd: string, prompt: string) => need()<void>("run_agent", { agent, cwd, prompt }),
-  askAi: (agent: Agent, cwd: string, prompt: string) => need()<string>("ask_ai", { agent, cwd, prompt }),
+  askAi: (agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "") => need()<string>("ask_ai", { agent, cwd, prompt, images, key }),
   wsDefaults: (title: string, itemId: string, root: string | null) =>
     need()<{ root: string; name: string; path: string; defaultRoot: string }>("workspace_defaults", { title, itemId, root }),
   wsCheck: (root: string, name: string, itemId: string) => need()<{ path: string; state: "new" | "ours" | "other" | "busy" }>("workspace_check", { root, name, itemId }),

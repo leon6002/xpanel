@@ -4,6 +4,8 @@ import type { Element, ElementContent, Root, RootContent, Text } from "hast";
 import type { Item, Qa } from "./types";
 
 export const QA_CTX = 40;
+/** 问答时笔记图片放在工作目录的哪里（桌面版写进去） */
+export const ASK_IMAGES = ".xpanel/ask-images";
 
 function commonTail(a: string, b: string) {
   let i = 0;
@@ -145,8 +147,14 @@ export function selectionContext(root: HTMLElement, range: Range, itemId: string
 
 /* ---- 提问用的提示词 ---- */
 export function buildAskPrompt(it: Item, ctx: { quote?: string; prefix?: string; suffix?: string }, question: string, prev?: { q: string; a: string }[]) {
-  const body = String(it.body || "").replace(/!\[[^\]]*\]\(asset:[^)]+\)/g, "[图片]");
+  // 图片由桌面版先写到工作目录的 .xpanel/ask-images/ 里（和 src-tauri 的 ASK_IMAGES 一致），这里换成相对路径
+  let nImg = 0;
+  const body = String(it.body || "").replace(/!\[([^\]]*)\]\(asset:([^)\s]+)\)/g, (_m, alt: string, name: string) => {
+    nImg++;
+    return `[图片${alt.replace(/\|\d+$/, "") ? "「" + alt.replace(/\|\d+$/, "") + "」" : ""}：${ASK_IMAGES}/${name}]`;
+  });
   const L = [`你在帮我读一篇笔记，回答我关于它的问题。`, ``, `笔记标题：${it.title || "(无标题)"}`];
+  if (nImg) L.push(``, `笔记里有 ${nImg} 张图片，已经放在当前工作目录的 ${ASK_IMAGES}/ 下（正文里标着路径）。问题和图片有关时，先用读文件的工具打开对应图片看清内容再回答，不要说看不到。`);
   if (ctx.quote) L.push(``, `我选中的原文：`, ...ctx.quote.split("\n").map((l) => "> " + l), ``, `（前后文：…${ctx.prefix || ""}【${ctx.quote}】${ctx.suffix || ""}…）`);
   L.push(``, `笔记全文：`, "```markdown", body.length > 12000 ? body.slice(0, 12000) + "\n…（后面省略）" : body, "```");
   if (prev && prev.length) {

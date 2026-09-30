@@ -105,7 +105,7 @@ export function Capture() {
         aria-label="快速记录"
         title="快速记录（/）"
         onClick={() => setOpen(true)}
-        className="fixed right-6 bottom-6 z-20 grid size-12 place-items-center rounded-full bg-accent text-on-accent shadow-3 transition-transform hover:scale-105 hover:bg-accent-strong [&_svg]:size-[22px]"
+        className="fixed right-6 bottom-6 z-20 grid size-12 place-items-center rounded-full bg-ink text-on-ink shadow-3 transition-transform hover:scale-105 hover:bg-accent-strong [&_svg]:size-[22px]"
       >
         <Plus strokeWidth={2.2} />
       </button>
@@ -145,7 +145,7 @@ export function Capture() {
           title="记下（回车）"
           disabled={(!draft.text.trim() && !draft.files.length) || draft.files.some((f) => f.uploading)}
           onClick={submit}
-          className="grid size-[38px] shrink-0 place-items-center rounded-xl bg-accent text-on-accent transition-colors hover:bg-accent-strong disabled:opacity-40 [&_svg]:size-[18px]"
+          className="grid size-[38px] shrink-0 place-items-center rounded-xl bg-ink text-on-ink transition-colors hover:bg-ink-hover disabled:opacity-40 [&_svg]:size-[18px]"
         >
           <Plus strokeWidth={2.2} />
         </button>
@@ -161,7 +161,7 @@ export function Capture() {
               ui.setCapType(t.k);
               ref.current?.focus();
             }}
-            className={cx("rounded-full px-2.5 py-0.5", type === t.k ? "bg-accent-soft font-semibold text-accent-strong" : "text-muted hover:text-fg")}
+            className={cx("rounded-full px-2.5 py-0.5", type === t.k ? "bg-surface-3 font-semibold text-fg" : "text-muted hover:text-fg")}
           >
             {t.short ?? t.name}
           </button>

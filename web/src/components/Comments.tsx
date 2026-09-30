@@ -3,7 +3,7 @@
    thread = {id, quote, prefix, suffix, at, resolved?, turns:[{q, a, at, by}]}
    - q：人写的话（可能为空：同一条评论 @ 了多个 AI 时，后面几个 AI 的回答各占一轮）
    - a：AI 的回答（没 @ AI 时为空），by：回答的 AI */
-import { AtSign, Check, Copy, CornerDownRight, FileText, MessageSquare, RotateCcw, Send, Trash2 } from "lucide-react";
+import { AtSign, Check, Copy, CornerDownRight, FileText, MessageSquare, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { copyText, desk, errText, isApp, newId } from "../lib/api";
@@ -12,6 +12,7 @@ import { buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
 import { ls, useUi } from "../lib/store";
 import type { Agent, Item, Qa, State } from "../lib/types";
 import { myWorkspace } from "../lib/ws";
+import { imageRefs } from "../lib/logic";
 import { cx } from "../lib/cx";
 import { Md } from "./Markdown";
 import { Button } from "./ui";
@@ -67,7 +68,7 @@ export async function postComment(opts: { itemId: string; text: string; sel?: Om
       const p: PendingQ = { q: question, quote: thread?.quote || "", agent: a.name, thread: tid };
       pend((l) => [...l, p]);
       try {
-        const answer = String(await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev))).trim();
+        const answer = String(await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev), imageRefs(it.body), it.id)).trim();
         await saveThread(itemId, (list) => {
           const i = list.findIndex((x) => x.id === tid);
           if (i < 0) return list;
@@ -96,6 +97,38 @@ export function useAgents() {
   return cfg?.agents ?? [];
 }
 
+/** 从一段文字里把 @AI 名字拆出来：返回提到的 AI 和去掉之后的文字 */
+function splitMentions(text: string, agents: Agent[]) {
+  const found: string[] = [];
+  let rest = text;
+  for (const a of agents.slice().sort((x, y) => y.name.length - x.name.length)) {
+    if (!rest.includes("@" + a.name)) continue;
+    found.push(a.name);
+    rest = rest.split("@" + a.name).join("");
+  }
+  return { names: found, rest: rest.replace(/[ \t]{2,}/g, " ").replace(/^[ \t]+/, "") };
+}
+
+/** @ 到的 AI 显示成标签：头像字 + 名字 */
+export function AgentTag({ name, onRemove, small }: { name: string; onRemove?: () => void; small?: boolean }) {
+  return (
+    <span className={cx("inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-soft pr-2 pl-0.5 align-middle font-medium text-accent-strong", small ? "h-[22px] text-[12.5px]" : "h-6 text-[13px]")}>
+      <span className="grid size-[18px] place-items-center rounded-full bg-accent text-[10.5px] font-bold text-on-accent">{name.slice(0, 1).toUpperCase()}</span>
+      {name}
+      {onRemove && (
+        <button
+          aria-label={"不叫 " + name}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onRemove}
+          className="-mr-1 grid size-4 place-items-center rounded-full text-accent-strong/70 hover:bg-accent/15 hover:text-accent-strong [&_svg]:size-3"
+        >
+          <X />
+        </button>
+      )}
+    </span>
+  );
+}
+
 export function Composer({
   itemId,
   sel,
@@ -113,15 +146,26 @@ export function Composer({
   autoFocus?: boolean;
   onDone?: () => void;
   compact?: boolean;
-  initial?: string;
+  /** 预先 @ 好的 AI，比如「问 AI」 */
+  initial?: string[];
 }) {
   const agents = useAgents();
   const me = useThisDevice();
-  const [text, setText] = useState(() => ls.get("wb-cdraft-" + itemId + (threadId || sel?.quote || "")) || initial || "");
+  const key = "wb-cdraft-" + itemId + (threadId || sel?.quote || "");
+  // 草稿按「@名字 正文」存，读回来再拆成标签
+  const [text, setText] = useState(() => ls.get(key) || "");
+  const [tags, setTags] = useState<string[]>(() => initial || []);
   const [pick, setPick] = useState<{ q: string; i: number } | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
-  const key = "wb-cdraft-" + itemId + (threadId || sel?.quote || "");
-  useEffect(() => ls.set(key, text || null), [key, text]);
+  useEffect(() => ls.set(key, [...tags.map((n) => "@" + n), text].join(" ").trim() || null), [key, text, tags]);
+  // 手打的完整「@名字」也变成标签（配置晚到时，草稿里的也能拆出来）
+  useEffect(() => {
+    if (!agents.length || !text.includes("@")) return;
+    const { names, rest } = splitMentions(text, agents);
+    if (!names.length) return;
+    setTags((t) => [...t, ...names.filter((n) => !t.includes(n))]);
+    setText(rest);
+  }, [agents, text]);
   useLayoutEffect(() => {
     const el = ta.current;
     if (!el) return;
@@ -135,20 +179,19 @@ export function Composer({
     el.selectionStart = el.selectionEnd = el.value.length;
   }, [autoFocus]);
 
-  const options = pick ? agents.filter((a) => a.name.toLowerCase().includes(pick.q.toLowerCase())) : [];
-  const onInput = (v: string) => {
+  const options = pick ? agents.filter((a) => a.name.toLowerCase().includes(pick.q.toLowerCase()) && !tags.includes(a.name)) : [];
+  const onInput = (v: string, caret?: number) => {
     setText(v);
-    const el = ta.current;
-    const before = v.slice(0, el ? el.selectionStart : v.length);
+    const before = v.slice(0, caret ?? ta.current?.selectionStart ?? v.length);
     const m = before.match(/@([^\s@]{0,20})$/);
     setPick(m && agents.length ? { q: m[1], i: 0 } : null);
   };
   const choose = (a: Agent) => {
     const el = ta.current!;
     const pos = el.selectionStart;
-    const before = text.slice(0, pos).replace(/@([^\s@]{0,20})$/, "@" + a.name + " ");
-    const next = before + text.slice(pos);
-    setText(next);
+    const before = text.slice(0, pos).replace(/@([^\s@]{0,20})$/, "");
+    setText(before + text.slice(pos));
+    setTags((t) => (t.includes(a.name) ? t : [...t, a.name]));
     setPick(null);
     requestAnimationFrame(() => {
       el.focus();
@@ -156,86 +199,106 @@ export function Composer({
     });
   };
   const send = async () => {
-    const t = text.trim();
-    if (!t) return;
+    const body = text.trim();
+    if (!body && !tags.length) return;
+    const full = [...tags.map((n) => "@" + n), body].join(" ").trim();
     setText("");
+    setTags([]);
     ls.set(key, null);
     onDone?.();
     try {
-      await postComment({ itemId, text: t, sel, threadId, agents, me });
+      await postComment({ itemId, text: full, sel, threadId, agents, me });
     } catch (e) {
       say("评论没发出去：" + errText(e));
-      setText(t);
+      setText(body);
     }
   };
-  const who = mentioned(text, agents);
+  const who = agents.filter((a) => tags.includes(a.name));
+  const empty = !text.trim() && !tags.length;
 
   return (
     <div className="relative">
-      <div className={cx("flex items-end gap-2 rounded-xl bg-surface-2/70 py-1.5 pr-1.5 pl-3 transition-shadow focus-within:bg-surface focus-within:shadow-2", compact && "rounded-lg")}>
-        <textarea
-          ref={ta}
-          rows={1}
-          value={text}
-          onChange={(e) => onInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (pick && options.length) {
-              if (e.key === "ArrowDown") return e.preventDefault(), setPick({ ...pick, i: (pick.i + 1) % options.length });
-              if (e.key === "ArrowUp") return e.preventDefault(), setPick({ ...pick, i: (pick.i - 1 + options.length) % options.length });
-              if (e.key === "Enter" || e.key === "Tab") return e.preventDefault(), choose(options[pick.i]);
-              if (e.key === "Escape") return e.preventDefault(), e.stopPropagation(), setPick(null);
-            }
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              send();
-            }
-            if (e.key === "Escape" && onDone) {
-              e.stopPropagation();
-              onDone();
-            }
-          }}
-          placeholder={placeholder || (isApp ? "写评论，输入 @ 可以叫 AI 来回答…" : "写评论…")}
-          className="scroll-quiet min-w-0 grow resize-none self-center bg-transparent py-1 text-[13.5px] leading-6 outline-none placeholder:text-faint"
-        />
+      <div
+        onClick={() => ta.current?.focus()}
+        className={cx("flex cursor-text items-end gap-2 rounded-xl bg-surface-2 py-1.5 pr-1.5 pl-2.5 transition-colors focus-within:bg-surface-3/60", compact && "rounded-lg")}
+      >
+        <div className="flex min-w-0 grow flex-wrap items-center gap-1 self-center py-0.5">
+          {tags.map((n) => (
+            <AgentTag key={n} name={n} onRemove={() => setTags((t) => t.filter((x) => x !== n))} />
+          ))}
+          <textarea
+            ref={ta}
+            rows={1}
+            value={text}
+            onChange={(e) => onInput(e.target.value, e.target.selectionStart)}
+            onKeyDown={(e) => {
+              if (pick && options.length) {
+                if (e.key === "ArrowDown") return e.preventDefault(), setPick({ ...pick, i: (pick.i + 1) % options.length });
+                if (e.key === "ArrowUp") return e.preventDefault(), setPick({ ...pick, i: (pick.i - 1 + options.length) % options.length });
+                if (e.key === "Enter" || e.key === "Tab") return e.preventDefault(), choose(options[pick.i]);
+                if (e.key === "Escape") return e.preventDefault(), e.stopPropagation(), setPick(null);
+              }
+              // 光标在最前面按退格：去掉最后一个标签
+              if (e.key === "Backspace" && tags.length && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+                e.preventDefault();
+                setTags((t) => t.slice(0, -1));
+              }
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                send();
+              }
+              if (e.key === "Escape" && onDone) {
+                e.stopPropagation();
+                onDone();
+              }
+            }}
+            placeholder={tags.length ? "想问什么…" : placeholder || (isApp ? "写评论，输入 @ 可以叫 AI 来回答…" : "写评论…")}
+            className="scroll-quiet min-w-[8em] grow basis-0 resize-none bg-transparent px-0.5 py-0.5 text-[13.5px] leading-6 outline-none placeholder:text-faint"
+          />
+        </div>
         {isApp && agents.length > 0 && (
           <button
             title="@ 一个 AI"
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               const el = ta.current!;
               const pos = el.selectionStart ?? text.length;
               const pre = text.slice(0, pos);
-              const next = pre + (pre && !/\s$/.test(pre) ? " @" : "@") + text.slice(pos);
-              onInput(next);
+              const ins = pre && !/\s$/.test(pre) ? " @" : "@";
+              const next = pre + ins + text.slice(pos);
+              onInput(next, pos + ins.length);
               requestAnimationFrame(() => {
                 el.focus();
-                el.selectionStart = el.selectionEnd = pos + (next.length - text.length);
-                onInput(next);
+                el.selectionStart = el.selectionEnd = pos + ins.length;
               });
             }}
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-accent [&_svg]:size-4"
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-4"
           >
             <AtSign />
           </button>
         )}
         <button
           title={who.length ? `发送，并请 ${who.map((a) => a.name).join("、")} 回答` : "发送（回车）"}
-          disabled={!text.trim()}
-          onClick={send}
-          className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-on-accent disabled:opacity-40 [&_svg]:size-4"
+          disabled={empty}
+          onClick={(e) => {
+            e.stopPropagation();
+            send();
+          }}
+          className="grid size-8 shrink-0 place-items-center rounded-lg bg-ink text-on-ink disabled:opacity-30 [&_svg]:size-4"
         >
           <Send />
         </button>
       </div>
       {pick && options.length > 0 && (
-        <div className="absolute bottom-full left-2 z-30 mb-1 w-56 rounded-xl bg-surface p-1 shadow-3" onMouseDown={(e) => e.preventDefault()}>
+        <div className="absolute bottom-full left-2 z-30 mb-1 w-60 rounded-xl bg-surface p-1 shadow-3" onMouseDown={(e) => e.preventDefault()}>
           {options.map((a, i) => (
             <button
               key={a.name}
               onClick={() => choose(a)}
-              className={cx("flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px]", i === pick.i ? "bg-accent-soft text-accent-strong" : "text-fg-2")}
+              className={cx("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px]", i === pick.i ? "bg-surface-2 text-fg" : "text-fg-2")}
             >
-              <span className="grid size-5 place-items-center rounded-md bg-accent/10 text-[11px] font-bold text-accent">{a.name.slice(0, 1)}</span>
+              <span className="grid size-5 place-items-center rounded-full bg-accent text-[10.5px] font-bold text-on-accent">{a.name.slice(0, 1).toUpperCase()}</span>
               <span className="grow truncate">{a.name}</span>
               {!canAsk(a) && <span className="text-[11px] text-faint">需填问答命令</span>}
             </button>
@@ -256,12 +319,12 @@ export function Composer({
 function highlightMentions(text: string, agents: Agent[]) {
   if (!agents.length) return text;
   const names = agents.map((a) => a.name).sort((a, b) => b.length - a.length);
-  const re = new RegExp("(" + names.map((n) => "@" + n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "g");
-  return text.split(re).map((p, i) => (i % 2 ? <span key={i} className="rounded bg-accent-soft px-1 font-medium text-accent-strong">{p}</span> : p));
+  const re = new RegExp("@(" + names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "g");
+  return text.split(re).map((p, i) => (i % 2 ? <AgentTag key={i} name={p} small /> : p));
 }
 
 const avatar = (name: string, ai: boolean) => (
-  <span className={cx("grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-bold", ai ? "bg-accent/10 text-accent" : "bg-surface-3 text-fg-2")}>{name.slice(0, 1)}</span>
+  <span className={cx("grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-bold", ai ? "bg-accent text-on-accent" : "bg-surface-3 text-fg-2")}>{name.slice(0, 1)}</span>
 );
 
 function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJump: () => void }) {
@@ -278,7 +341,7 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
   return (
     <div data-qa-card={q.id} className={cx("group/th flex flex-col gap-2.5 rounded-[14px] p-3.5 transition-colors", resolved ? "opacity-60" : "bg-surface-2/60")}>
       {q.quote && (
-        <button className="line-clamp-2 border-l-2 border-mark-fg/40 pl-2 text-left text-xs text-muted hover:text-fg" title="定位到原文" onClick={onJump}>
+        <button className="line-clamp-2 self-start rounded-md bg-mark/70 px-1.5 py-0.5 text-left text-xs text-mark-fg hover:bg-mark" title="定位到原文" onClick={onJump}>
           {q.quote}
           {lost && <span className="ml-1.5 rounded bg-danger-soft px-1 text-danger">原文已删改</span>}
         </button>
@@ -369,6 +432,19 @@ function jumpTo(root: HTMLElement | null, q: Qa) {
     }
     pos += len;
   }
+  // 编辑页：交给编辑器自己选中（直接改页面选区会被编辑器盖掉）
+  type PM = { view: { posAtDOM: (n: Node, o: number) => number }; chain: () => { focus: () => { setTextSelection: (r: { from: number; to: number }) => { scrollIntoView: () => { run: () => void } } } } };
+  const ed = (host.closest(".ProseMirror") as (Element & { editor?: PM }) | null)?.editor;
+  if (ed) {
+    try {
+      const from = ed.view.posAtDOM(r.startContainer, r.startOffset);
+      const to = ed.view.posAtDOM(r.endContainer, r.endOffset);
+      ed.chain().focus().setTextSelection({ from, to }).scrollIntoView().run();
+      return;
+    } catch {
+      /* 退回到页面选区 */
+    }
+  }
   (r.startContainer.parentElement as HTMLElement | null)?.scrollIntoView({ behavior: "smooth", block: "center" });
   const sel = window.getSelection();
   sel?.removeAllRanges();
@@ -427,7 +503,7 @@ export function CommentsSection({ it, lost, root }: { it: Item; lost: Set<string
 
 /* ---------------------------------------------------------------- 划选后的评论框 */
 
-export function SelectionComment({ sel, at, onClose, initial }: { sel: QaSel; at: { x: number; y: number }; onClose: () => void; initial?: string }) {
+export function SelectionComment({ sel, at, onClose, initial }: { sel: QaSel; at: { x: number; y: number }; onClose: () => void; initial?: string[] }) {
   const box = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -446,7 +522,7 @@ export function SelectionComment({ sel, at, onClose, initial }: { sel: QaSel; at
   const top = Math.min(at.y, window.innerHeight - 180);
   return createPortal(
     <div ref={box} className="fixed z-40 flex w-[380px] flex-col gap-2 rounded-[14px] bg-surface p-3 shadow-3" style={{ left, top }}>
-      <div className="line-clamp-2 border-l-2 border-mark-fg/40 pl-2 text-xs text-muted">{sel.quote}</div>
+      <div className="line-clamp-2 self-start rounded-md bg-mark/70 px-1.5 py-0.5 text-xs text-mark-fg">{sel.quote}</div>
       <Composer itemId={sel.itemId} sel={sel} initial={initial} autoFocus onDone={onClose} placeholder={isApp ? "评论这段，@ 可以叫 AI 解释…" : "评论这段…"} />
     </div>,
     document.body,

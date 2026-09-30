@@ -43,7 +43,7 @@ export function Banner() {
 /** 在正文里选中一段文字 → 浮出「评论」和「问 AI」（问 AI = 评论里先写好 @ 第一个能回答的 AI） */
 export function QaFloat() {
   const [pos, setPos] = useState<{ x: number; y: number; sel: QaSel } | null>(null);
-  const [open, setOpen] = useState<{ x: number; y: number; sel: QaSel; initial?: string } | null>(null);
+  const [open, setOpen] = useState<{ x: number; y: number; sel: QaSel; initial?: string[] } | null>(null);
   const agents = useConfig().data?.config.agents ?? [];
   const asker = isApp ? agents.find(canAsk) : undefined;
   useEffect(() => {
@@ -75,7 +75,7 @@ export function QaFloat() {
       window.removeEventListener("scroll", scroll, true);
     };
   }, []);
-  const go = (initial?: string) => {
+  const go = (initial?: string[]) => {
     if (!pos) return;
     setOpen({ ...pos, initial });
     setPos(null);
@@ -93,7 +93,7 @@ export function QaFloat() {
             评论
           </button>
           {asker && (
-            <button onClick={() => go("@" + asker.name + " ")} title={"请 " + asker.name + " 解释这段（在评论里回答）"}>
+            <button onClick={() => go([asker.name])} title={"请 " + asker.name + " 解释这段（在评论里回答）"}>
               <Sparkles />问 AI
             </button>
           )}

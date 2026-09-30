@@ -9,8 +9,8 @@ export function Button({ tone = "soft", className, ...p }: ButtonHTMLAttributes<
       {...p}
       className={cx(
         "inline-flex h-[34px] items-center gap-1.5 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] transition-colors disabled:cursor-default disabled:opacity-50",
-        tone === "primary" && "bg-accent font-semibold text-on-accent hover:bg-accent-strong",
-        tone === "soft" && "bg-surface-3 text-fg-2 hover:bg-line",
+        tone === "primary" && "bg-ink font-semibold text-on-ink hover:bg-ink-hover",
+        tone === "soft" && "bg-surface-2 text-fg-2 hover:bg-surface-3",
         tone === "ghost" && "bg-transparent text-muted hover:bg-surface-3 hover:text-fg",
         tone === "danger" && "bg-transparent text-danger hover:bg-danger-soft",
         className,
@@ -54,7 +54,7 @@ export function Chip({ children, tone = "plain", className, onClick, title }: { 
 
 export function Segmented<T extends string>({ value, options, onChange, label }: { value: T; options: [T, string][]; onChange: (v: T) => void; label: string }) {
   return (
-    <div role="group" aria-label={label} className="flex rounded-[10px] bg-surface-3 p-[3px]">
+    <div role="group" aria-label={label} className="flex rounded-[10px] bg-surface-2 p-[3px]">
       {options.map(([k, name]) => (
         <button
           key={k}
@@ -85,9 +85,9 @@ export function Pri({ p }: { p?: string }) {
 
 /* ---- 表单 ---- */
 export const inputCls =
-  "h-9 w-full min-w-0 rounded-[10px] bg-surface-2/70 px-3 text-[13.5px] text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-2 focus:bg-surface focus:shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--accent)_45%,transparent)]";
+  "h-9 w-full min-w-0 rounded-[10px] bg-surface-2 px-3 text-[13.5px] text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-3/60 focus:bg-surface-3/60";
 export const textareaCls =
-  "w-full min-w-0 rounded-[10px] bg-surface-2/70 px-3 py-2 text-[13.5px] leading-relaxed text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-2 focus:bg-surface focus:shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--accent)_45%,transparent)]";
+  "w-full min-w-0 rounded-[10px] bg-surface-2 px-3 py-2 text-[13.5px] leading-relaxed text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-3/60 focus:bg-surface-3/60";
 
 export function Field({ label, children, className, hint }: { label: ReactNode; children: ReactNode; className?: string; hint?: ReactNode }) {
   return (
@@ -124,8 +124,8 @@ export function Pick<T>({ items, value, onChange, label, render }: { items: T[];
           aria-checked={i === value}
           onClick={() => onChange(i)}
           className={cx(
-            "inline-flex h-9 items-center gap-1.5 rounded-[10px] border px-3.5 text-[13px] transition-colors [&_svg]:size-4",
-            i === value ? "border-accent bg-accent-soft font-semibold text-accent-strong" : "border-line text-fg-2 hover:border-faint",
+            "inline-flex h-9 items-center gap-1.5 rounded-[10px] px-3.5 text-[13px] transition-colors [&_svg]:size-4",
+            i === value ? "bg-ink font-semibold text-on-ink" : "bg-surface-2 text-fg-2 hover:bg-surface-3",
           )}
         >
           {render(t)}

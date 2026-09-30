@@ -567,7 +567,7 @@ export function Reader() {
 
   if (!it)
     return (
-      <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface p-6 text-center text-sm text-faint shadow-2">
+      <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface p-6 text-center text-sm text-faint">
         {ui.view === "notes" ? (
           <div className="flex flex-col items-center gap-3">
             <FileText className="size-8 text-line" />
@@ -581,7 +581,7 @@ export function Reader() {
       </main>
     );
   return (
-    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface shadow-2">
+    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface">
       <ItemView
         it={it}
         mode={ui.mode}
