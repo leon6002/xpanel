@@ -58,11 +58,11 @@ function Shell() {
     );
 
   return (
-    <div className="flex h-full min-w-0 gap-4 p-4">
+    <div className="flex h-full min-w-0 gap-6 p-4">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <Banner />
-        <div className="flex min-h-0 min-w-0 flex-1 gap-4">
+        <div className="flex min-h-0 min-w-0 flex-1 gap-5">
           {isLoading && !data ? (
             <div className="grid grow place-items-center text-sm text-muted">加载中…</div>
           ) : view === "inbox" ? (
