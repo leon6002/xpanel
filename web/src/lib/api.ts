@@ -1,6 +1,6 @@
 /* 传输层：界面只认这里的函数。
    桌面版走 Tauri 命令（主机模式在本进程处理，连接模式由桌面版转发，离线时有队列）；浏览器走 HTTP。 */
-import type { Agent, AppConfig, Config, Item, State, Template, Usage } from "./types";
+import type { Agent, AppConfig, Config, Item, State, SyncPlan, SyncReport, Template, Usage } from "./types";
 
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 const tauri = (window as unknown as { __TAURI__?: { core?: { invoke: Invoke } } }).__TAURI__;
@@ -161,6 +161,9 @@ export const desk = {
   openDataDir: () => need()<void>("open_data_dir"),
   createShortcut: () => need()<string>("create_desktop_shortcut"),
   runAgent: (agent: Agent, cwd: string, prompt: string) => need()<void>("run_agent", { agent, cwd, prompt }),
+  /** 和外置硬盘同步：先看看该怎么同步，再执行（auto / push / pull） */
+  syncPlan: (dir: string) => need()<SyncPlan>("sync_plan", { dir }),
+  syncRun: (dir: string, direction: "auto" | "push" | "pull") => need()<SyncReport>("sync_run", { dir, direction }),
   askAi: async (agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "") => {
     // 新版返回 {text, usage}；兼容只返回文字的旧版
     const r = await need()<string | { text: string; usage?: Usage }>("ask_ai", { agent, cwd, prompt, images, key });

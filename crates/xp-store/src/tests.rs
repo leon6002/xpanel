@@ -822,3 +822,92 @@ fn patch_merges_fields_and_detects_conflicts() {
     assert!(it.get("tags").is_none());
     let _ = fs::remove_dir_all(d);
 }
+
+#[test]
+fn syncs_with_an_external_folder() {
+    let a = tmp("sync-a");
+    let ext = tmp("sync-ext");
+    let _ = fs::remove_dir_all(&ext);
+    let note = |id: &str, body: &str, at: f64| json!({"id": id, "type": "note", "title": id, "body": body, "createdAt": 1, "updatedAt": at});
+    let st = Store::open(&a).unwrap();
+    st.apply_op(
+        Op::Import {
+            items: vec![note("n1", "台式机写的", 1.0)],
+        },
+        "t",
+    )
+    .unwrap();
+    fs::create_dir_all(a.join("assets")).unwrap();
+    fs::write(a.join("assets/pic-1.png"), b"png").unwrap();
+    // 第一次：那边没有数据 → 复制过去
+    assert_eq!(st.sync_plan(&ext).unwrap().action, "push");
+    assert_eq!(st.sync_run(&ext, "auto").unwrap().action, "push");
+    assert!(ext.join("assets/pic-1.png").exists());
+    assert_eq!(st.sync_plan(&ext).unwrap().action, "none");
+    // 出差时笔记本直接用外置硬盘上的数据
+    {
+        let laptop = Store::open(&ext).unwrap();
+        assert_eq!(laptop.get("n1").unwrap()["body"], "台式机写的");
+        laptop
+            .apply_op(
+                Op::Import {
+                    items: vec![note("n2", "出差时写的", 5.0)],
+                },
+                "t",
+            )
+            .unwrap();
+        fs::write(ext.join("assets/pic-2.png"), b"png2").unwrap();
+    }
+    // 回来：只有那边改过 → 用那边的
+    let p = st.sync_plan(&ext).unwrap();
+    assert_eq!(p.action, "pull");
+    assert!(p.remote.changed && !p.local.changed);
+    st.sync_run(&ext, "auto").unwrap();
+    assert_eq!(st.get("n2").unwrap()["body"], "出差时写的");
+    assert!(a.join("assets/pic-2.png").exists());
+    assert!(fs::read_dir(a.join("backups"))
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with("before-sync-")));
+    assert_eq!(st.sync_plan(&ext).unwrap().action, "none");
+    // 本机再改 → 复制过去
+    st.apply_op(
+        Op::Import {
+            items: vec![note("n3", "回来又写的", 9.0)],
+        },
+        "t",
+    )
+    .unwrap();
+    assert_eq!(st.sync_plan(&ext).unwrap().action, "push");
+    st.sync_run(&ext, "auto").unwrap();
+    // 两边都改 → 冲突，auto 不动；选了方向才执行
+    st.apply_op(
+        Op::Import {
+            items: vec![note("n4", "本机", 10.0)],
+        },
+        "t",
+    )
+    .unwrap();
+    {
+        let laptop = Store::open(&ext).unwrap();
+        laptop
+            .apply_op(
+                Op::Import {
+                    items: vec![note("n5", "那边", 10.0)],
+                },
+                "t",
+            )
+            .unwrap();
+    }
+    assert_eq!(st.sync_plan(&ext).unwrap().action, "conflict");
+    assert!(st.sync_run(&ext, "auto").is_err());
+    st.sync_run(&ext, "push").unwrap();
+    assert_eq!(st.sync_plan(&ext).unwrap().action, "none");
+    let laptop = Store::open(&ext).unwrap();
+    assert!(laptop.get("n4").is_ok());
+    assert!(laptop.get("n5").is_err());
+    assert!(st.sync_plan(&a).is_err());
+    drop(laptop);
+    let _ = fs::remove_dir_all(a);
+    let _ = fs::remove_dir_all(ext);
+}

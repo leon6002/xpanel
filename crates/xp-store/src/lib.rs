@@ -13,6 +13,7 @@ mod devices;
 mod inbox;
 mod keys;
 mod schema;
+mod sync;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Map, Value};
@@ -29,6 +30,7 @@ use xp_core::{
 
 pub use assets::{mime_of, safe_asset_name};
 pub use inbox::{MessageQuery, SOURCE_WECHAT};
+pub use sync::{SideInfo, SyncPlan, SyncReport};
 
 pub const DB_FILE: &str = "xpanel.db";
 /// 界面（旧版 index.html 和桌面版）写入时用的操作者名

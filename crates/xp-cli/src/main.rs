@@ -172,6 +172,24 @@ enum Cmd {
         #[arg(long)]
         cold_backup: Option<String>,
     },
+    /// 和外置硬盘同步整份数据：xp sync --data D:\xpanel F:\xpanel（谁改过用谁的；两边都改过时要加 --push 或 --pull）。
+    /// 桌面版的「设置 → 外置硬盘同步」做的是同一件事；同步前先退出正在用这两个文件夹的 xpanel
+    Sync {
+        /// 本机的数据文件夹
+        #[arg(long, env = "XPANEL_DATA")]
+        data: String,
+        /// 另一边（外置硬盘上的文件夹）
+        target: String,
+        /// 用本机的覆盖那边
+        #[arg(long, conflicts_with = "pull")]
+        push: bool,
+        /// 用那边的覆盖本机
+        #[arg(long)]
+        pull: bool,
+        /// 只看看会怎么同步，不改任何东西
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -737,6 +755,59 @@ fn run(cli: Cli) -> Result<(), String> {
             let st = xp_store::Store::open(&data).map_err(|e| e.to_string())?;
             st.set_cold_backup_dir(cold_backup.map(Into::into));
             xp_server::serve_blocking(Arc::new(st), port)?;
+        }
+        Cmd::Sync {
+            data,
+            target,
+            push,
+            pull,
+            dry_run,
+        } => {
+            let st = xp_store::Store::open(&data).map_err(|e| e.to_string())?;
+            let p = st
+                .sync_plan(std::path::Path::new(&target))
+                .map_err(|e| e.to_string())?;
+            let side = |n: &str, s: &xp_store::SideInfo| {
+                if s.exists {
+                    println!(
+                        "{n}：{} 条，{} 个附件{}",
+                        s.items,
+                        s.assets,
+                        if s.changed {
+                            "，上次同步后改过"
+                        } else {
+                            ""
+                        }
+                    );
+                } else {
+                    println!("{n}：还没有数据");
+                }
+            };
+            side("本机", &p.local);
+            side("那边", &p.remote);
+            println!("{}", p.message);
+            if dry_run {
+                return Ok(());
+            }
+            let dir = if push {
+                "push"
+            } else if pull {
+                "pull"
+            } else {
+                "auto"
+            };
+            let r = st
+                .sync_run(std::path::Path::new(&target), dir)
+                .map_err(|e| format!("{e}（用 --push 或 --pull 选择）"))?;
+            println!(
+                "{}{}",
+                r.message,
+                if r.assets_copied > 0 {
+                    format!("，复制了 {} 个附件", r.assets_copied)
+                } else {
+                    String::new()
+                }
+            );
         }
     }
     Ok(())
