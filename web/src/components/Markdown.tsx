@@ -43,12 +43,103 @@ export function Lightbox({ src, onClose }: { src: string; onClose: () => void })
   );
 }
 
-const SIZES: [string, number][] = [
+export const SIZES: [string, number][] = [
   ["小", 240],
   ["中", 480],
   ["大", 800],
-  ["自动", 0],
+  ["默认", 0],
 ];
+
+/** 可以拖动改大小的图片（像飞书文档）：左右两边和右下角有把手，只改宽度，高度按原比例跟着变。
+ *  没设过宽度时按默认大小显示：不超过版面宽，也不超过 480px / 六成屏幕高，竖着拍的照片不会铺满一屏。 */
+export function ResizableImage({
+  url,
+  alt,
+  width,
+  onWidth,
+  onOpen,
+  selected,
+}: {
+  url: string;
+  alt: string;
+  width: number;
+  onWidth: (w: number) => void;
+  onOpen?: () => void;
+  selected?: boolean;
+}) {
+  const box = useRef<HTMLSpanElement>(null);
+  const [drag, setDrag] = useState<number | null>(null);
+  const w = drag ?? width;
+  const start = (side: 1 | -1) => (e: React.PointerEvent<HTMLSpanElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget;
+    const im = box.current?.querySelector("img");
+    if (!im) return;
+    const x0 = e.clientX;
+    const w0 = im.getBoundingClientRect().width;
+    const max = Math.max(120, box.current!.parentElement?.getBoundingClientRect().width || 2000);
+    let cur = w0;
+    el.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      cur = Math.round(Math.max(80, Math.min(max, w0 + side * (ev.clientX - x0))));
+      setDrag(cur);
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      if (Math.abs(cur - w0) > 2) onWidth(cur);
+      setDrag(null);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  };
+  const show = drag != null || selected ? "opacity-100" : "opacity-0 group-hover/img:opacity-100";
+  const bar = cx("absolute top-1/2 z-10 h-10 w-[7px] -translate-y-1/2 cursor-ew-resize rounded-full bg-surface shadow-[0_1px_4px_rgb(0_0_0/0.35)] transition-opacity", show);
+  return (
+    <span ref={box} className="group/img relative inline-block max-w-full align-top" data-qa-skip contentEditable={false}>
+      <img
+        src={url}
+        alt={alt}
+        draggable={false}
+        style={w ? { width: w, maxHeight: "none" } : undefined}
+        className={cx("block max-w-full rounded-[10px]", !w && "max-h-[min(480px,60vh)] w-auto", selected && "ring-2 ring-accent/50")}
+        onClick={onOpen}
+      />
+      <span title="拖动调整大小" className={cx(bar, "left-1.5")} onPointerDown={start(-1)} onMouseDown={(e) => e.stopPropagation()} />
+      <span title="拖动调整大小" className={cx(bar, "right-1.5")} onPointerDown={start(1)} onMouseDown={(e) => e.stopPropagation()} />
+      <span
+        title="拖动调整大小"
+        className={cx("absolute right-1 bottom-1 z-10 size-3.5 cursor-nwse-resize rounded-full bg-surface shadow-[0_1px_4px_rgb(0_0_0/0.35)] transition-opacity", show)}
+        onPointerDown={start(1)}
+        onMouseDown={(e) => e.stopPropagation()}
+      />
+      {drag != null ? (
+        <span className="absolute top-2 left-2 rounded-md bg-black/60 px-1.5 py-0.5 text-xs text-white tabular-nums">{drag} px</span>
+      ) : (
+        <span className={cx("absolute top-2 right-2 flex gap-0.5 rounded-lg bg-surface/95 p-0.5 text-xs shadow-2 transition-opacity", show)}>
+          {SIZES.map(([n, v]) => (
+            <button
+              key={n}
+              title={v ? `宽 ${v}px` : "默认大小"}
+              aria-pressed={v === width}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onWidth(v);
+              }}
+              className={cx("rounded-md px-2 py-0.5", v === width ? "bg-ink text-on-ink" : "text-fg-2 hover:bg-surface-3")}
+            >
+              {n}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
 
 /** 正文里的附件写成 asset:名字；图片说明末尾的 |480 是显示宽度（和 Obsidian 一样） */
 function AssetImg(props: { src?: string; alt?: string; "data-idx"?: number | string }) {
@@ -62,59 +153,13 @@ function AssetImg(props: { src?: string; alt?: string; "data-idx"?: number | str
   const asset = useAssetUrl(s.startsWith("asset:") ? s.slice(6) : null);
   const url = s.startsWith("asset:") ? asset : s;
   const [big, setBig] = useState(false);
-  const [drag, setDrag] = useState<number | null>(null);
-  const box = useRef<HTMLSpanElement>(null);
   if (!url) return <span className="inline-block rounded-lg bg-surface-2 px-2 text-xs text-faint">{label || "图片"}</span>;
-  const w = drag ?? width;
-  const img = <img src={url} alt={label} style={w ? { width: w } : undefined} onClick={() => setBig(true)} />;
   return (
     <>
       {edit && idx >= 0 ? (
-        <span ref={box} className="group/img relative inline-block max-w-full align-top" data-qa-skip>
-          {img}
-          <span className="absolute top-2 right-2 hidden gap-0.5 rounded-lg bg-surface/95 p-0.5 text-xs shadow-2 group-hover/img:flex">
-            {SIZES.map(([n, v]) => (
-              <button
-                key={n}
-                title={v ? `宽 ${v}px` : "默认大小"}
-                aria-pressed={v === width}
-                onClick={() => edit(idx, v)}
-                className={cx("rounded-md px-2 py-0.5", v === width ? "bg-ink text-on-ink" : "text-fg-2 hover:bg-surface-3")}
-              >
-                {n}
-              </button>
-            ))}
-          </span>
-          <span
-            title="拖动调整大小"
-            className="absolute right-0 bottom-0 hidden size-4 cursor-nwse-resize rounded-tl-md border-t-2 border-l-2 border-accent bg-surface/80 group-hover/img:block"
-            onPointerDown={(e) => {
-              e.preventDefault();
-              const el = e.currentTarget;
-              const im = box.current?.querySelector("img");
-              if (!im) return;
-              const x0 = e.clientX,
-                w0 = im.getBoundingClientRect().width,
-                max = box.current!.parentElement!.getBoundingClientRect().width;
-              let cur = w0;
-              el.setPointerCapture(e.pointerId);
-              const move = (ev: PointerEvent) => {
-                cur = Math.max(80, Math.min(max, w0 + ev.clientX - x0));
-                setDrag(cur);
-              };
-              const up = () => {
-                el.removeEventListener("pointermove", move);
-                el.removeEventListener("pointerup", up);
-                if (Math.abs(cur - w0) > 3) edit(idx, cur);
-                setDrag(null);
-              };
-              el.addEventListener("pointermove", move);
-              el.addEventListener("pointerup", up);
-            }}
-          />
-        </span>
+        <ResizableImage url={url} alt={label} width={width} onWidth={(w) => edit(idx, w)} onOpen={() => setBig(true)} />
       ) : (
-        img
+        <img src={url} alt={label} style={width ? { width, maxHeight: "none" } : undefined} className={cx(!width && "max-h-[min(480px,60vh)] w-auto")} onClick={() => setBig(true)} />
       )}
       {big && <Lightbox src={url} onClose={() => setBig(false)} />}
     </>

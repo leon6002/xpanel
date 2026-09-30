@@ -40,18 +40,11 @@ import { editorExtensions, tidyMarkdown, useGentleMarkdown, XImage } from "../li
 import { clipFiles, fileLabel, isImgFile } from "../lib/logic";
 import { useUi } from "../lib/store";
 import { cx } from "../lib/cx";
-import { Lightbox, useAssetUrl, useOpenAsset } from "./Markdown";
+import { Lightbox, ResizableImage, useAssetUrl, useOpenAsset } from "./Markdown";
 
 const say = (t: string) => useUi.getState().say(t);
 
 /* ---------------------------------------------------------------- 节点视图 */
-
-const SIZES: [string, number][] = [
-  ["小", 240],
-  ["中", 480],
-  ["大", 800],
-  ["自动", 0],
-];
 
 function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
   const src = String(node.attrs.src || "");
@@ -60,24 +53,14 @@ function ImageView({ node, updateAttributes, selected }: NodeViewProps) {
   const w = Number(node.attrs.width) || 0;
   const [big, setBig] = useState(false);
   return (
-    <NodeViewWrapper className="group/img relative my-2 block w-fit max-w-full" data-drag-handle>
+    <NodeViewWrapper className="relative my-2 block w-fit max-w-full" data-drag-handle>
       {url ? (
-        <img src={url} alt={node.attrs.alt || ""} style={w ? { width: w } : undefined} className={cx("max-w-full rounded-[10px]", selected && "ring-2 ring-accent")} onDoubleClick={() => setBig(true)} />
+        <span onDoubleClick={() => setBig(true)} className="contents">
+          <ResizableImage url={url} alt={node.attrs.alt || ""} width={w} selected={selected} onWidth={(v) => updateAttributes({ width: v || null })} />
+        </span>
       ) : (
         <span className="inline-block rounded-lg bg-surface-2 px-2 py-1 text-xs text-faint">{node.attrs.alt || "图片"}</span>
       )}
-      <span contentEditable={false} className="absolute top-2 right-2 hidden gap-0.5 rounded-lg bg-surface/95 p-0.5 text-xs shadow-2 group-hover/img:flex">
-        {SIZES.map(([n, v]) => (
-          <button
-            key={n}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => updateAttributes({ width: v || null })}
-            className={cx("rounded-md px-2 py-0.5", v === w ? "bg-ink text-on-ink" : "text-fg-2 hover:bg-surface-3")}
-          >
-            {n}
-          </button>
-        ))}
-      </span>
       {big && url && <Lightbox src={url} onClose={() => setBig(false)} />}
     </NodeViewWrapper>
   );
@@ -477,7 +460,7 @@ export function BlockEditor({
   }, [editor]);
   if (!editor) return null;
   return (
-    <div className="relative flex-[1_0_auto] pl-12" onMouseLeave={() => !document.querySelector("[data-radix-menu-content]") && setHover(editor, null)} onClick={(e) => e.target === e.currentTarget && editor.chain().focus("end").run()}>
+    <div className="relative flex-[1_0_auto]" onMouseLeave={() => !document.querySelector("[data-radix-menu-content]") && setHover(editor, null)} onClick={(e) => e.target === e.currentTarget && editor.chain().focus("end").run()}>
       <BlockHandle editor={editor} />
       <EditorContent editor={editor} className="pb-8" />
       <SlashMenu />
