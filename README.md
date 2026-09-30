@@ -7,6 +7,8 @@ A self-hosted personal dashboard for todos, issues, ideas, Markdown notes and en
 One machine stores the data (SQLite); other machines, browsers and AI agents connect to it over the LAN.
 Built with Tauri 2 (Rust). External AI tools can read and write through a REST API (`/api/v1`, OpenAPI) and the `xp` CLI.
 
+文档：[开发指南](docs/development.md) · [开发进度](docs/progress.md) · [外置硬盘同步](docs/drive-sync.md)
+
 ## 功能
 
 - **收件箱**：像发消息一样把想到的、截的图直接发进来（输入框在最下面，回车发送），之后鼠标移上去一键归到待办、问题、灵感、笔记或入口；也可以多选合成一篇笔记。

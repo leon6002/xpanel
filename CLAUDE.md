@@ -1,5 +1,8 @@
 # 开发说明（给 AI 编程助手和贡献者）
 
+给人看的开发指南（环境、设计规则、测试、换电脑）在 `docs/development.md`，当前进度、已知问题和待办在 `docs/progress.md`。
+开始工作前先看这两篇；做完一批改动后更新 `docs/progress.md`。
+
 ## 结构
 - `crates/xp-core`：条目模型、v1 操作（Op）、优先级、筛选排序、导出、统计。纯逻辑，不碰文件和网络。
 - `crates/xp-store`：SQLite 存储（`xpanel.db`）。条目整条 JSON 存在 `data` 列，常用字段另拆列；软删除；每次写入 `rev` +1 并通过 broadcast 通知；
@@ -45,8 +48,12 @@
 ## 约定
 - 界面同时跑在两种环境：桌面版（`window.__TAURI__` 存在，走 `invoke`）和浏览器（走 `/api/*`）。新功能两边都要考虑。
 - 改旧界面（`ui/index.html`）时把 `<meta name="wb-ui-version">` 加 1。
-- 条目是自由 JSON（`id/type/title/body/tags/category/device/done/pinned/createdAt/updatedAt/priority/due/rank/doneAt/createdBy/agentLog`），按 `id` 合并。
-- 错误分三类（`StoreError`）：`Invalid` → 400（客户端不重试）、`NotFound` → 404、`Unavailable` → 503（客户端留着稍后重试）。别把请求本身的问题报成 503。
+- 条目是自由 JSON（`id/type/title/body/tags/category/device/done/pinned/createdAt/updatedAt/priority/due/rank/doneAt/createdBy/agentLog`，
+  以及 `parentId`、`links`、`qa`、`workspaces`、`agentProgress`），按 `id` 合并。界面改字段用 `patchItem`（patch 操作），不要整条 upsert 覆盖已有条目。
+- 错误分四类（`StoreError`）：`Invalid` → 400（客户端不重试）、`NotFound` → 404、`Conflict` → 409（别处刚改过，让用户选）、
+  `Unavailable` → 503（客户端留着稍后重试）。别把请求本身的问题报成 503。
+- 界面设计规则（用户定的，详见 `docs/development.md`）：不用线条和边框分区，层次只靠底色；主按钮墨色、不用蓝色，点缀色赭石只用在很少的地方；
+  阴影只给浮起来的东西；宽屏正文居中；小按钮悬浮，不单独占列。
 - 数据库结构变更：在 `xp-store/src/schema.rs` 的 `MIGRATIONS` 末尾追加，不改已有的。
 - 用户界面文字、错误信息用中文，简短直白。
 - 不要把个人数据、机器名、IP 提交进仓库（数据文件、`backups/`、`assets/`、`CLAUDE.local.md` 已被忽略）。
@@ -68,6 +75,7 @@
 ## 常用命令
 - 测试：`cargo test --workspace`
 - 检查：`cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings`
+- 界面类型检查和构建：`npm --prefix web run build`
 - 开发：`npm install && npx tauri dev`
 - 只跑服务：`cargo run -p xp-cli -- serve --data <文件夹>`
 - 打包安装（Windows）：`build-windows.bat`（发布用，慢）；开发时用 `dev.bat`（`[profile.fast]`，增量编译，替换安装目录里的程序）
