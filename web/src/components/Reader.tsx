@@ -1,5 +1,6 @@
 /* 阅读 / 编辑一条：主界面右边的阅读区，和任何页面都能打开的右侧浮出面板（Peek）共用 */
-import { CalendarDays, Copy, ExternalLink, FilePlus2, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
+import { CalendarDays, Copy, ExternalLink, FilePlus2, FoldHorizontal, UnfoldHorizontal, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
+import { create } from "zustand";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
@@ -110,7 +111,7 @@ function ReadBody({ it, onEdit, open }: { it: Item; onEdit: () => void; open: Op
     if (body !== cur.body) patchItem(cur, { body }).catch(() => {});
   };
   return (
-    <div ref={root} className="max-w-[720px]">
+    <div ref={root}>
       <article className="min-w-0">
         <div data-qa-host={it.id} onDoubleClick={(e) => !(e.target as HTMLElement).closest("img,a,button") && onEdit()}>
           {it.body ? (
@@ -316,7 +317,7 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
             <BlockEditor value={body} itemId={it.id} api={richApi} onChange={(md) => setBody(() => md)} />
           </Suspense>
           {x.type !== "link" && (
-            <div className="max-w-[720px] pb-40 pl-12" data-qa-skip>
+            <div className="pb-40 pl-12" data-qa-skip>
               <CommentsSection it={x} lost={noLost} root={edRoot} />
             </div>
           )}
@@ -403,6 +404,16 @@ function TagInput({ tags, all, onChange }: { tags: string[]; all: string[]; onCh
 
 type Mode = "read" | "edit" | "split";
 
+/** 宽屏时正文默认居中、限宽（好读）；可以切成铺满 */
+const useFullWidth = create<{ on: boolean; toggle: () => void }>((set) => ({
+  on: ls.get("wb-fullwidth") === "1",
+  toggle: () =>
+    set((s) => {
+      ls.set("wb-fullwidth", s.on ? null : "1");
+      return { on: !s.on };
+    }),
+}));
+
 function ItemView({
   it,
   mode,
@@ -421,6 +432,7 @@ function ItemView({
   open: OpenFn;
 }) {
   const ui = useUi();
+  const full = useFullWidth((s) => s.on);
   const [armed, setArmed] = useState(false);
   const tg = it.type === "link" ? entryTarget(it) : null;
   const ws = useMyWorkspace(it);
@@ -449,6 +461,11 @@ function ItemView({
           }
         />
         <span className="grow" />
+        {wide && (
+          <IconButton label={full ? "适中宽度（正文居中）" : "全宽显示"} onClick={() => useFullWidth.getState().toggle()}>
+            {full ? <FoldHorizontal /> : <UnfoldHorizontal />}
+          </IconButton>
+        )}
         {isCheckable(it.type) && (
           <Button tone={it.done ? "soft" : "primary"} onClick={() => patchItem(it, { done: !it.done })}>
             {it.done ? "取消完成" : TYPES.find((t) => t.k === it.type)?.check}
@@ -534,15 +551,17 @@ function ItemView({
       </div>
       {mode === "read" ? (
         <div className="scroll-quiet min-h-0 flex-1 overflow-y-auto px-14 pt-6 pb-40 @container">
-          <Breadcrumb it={it} open={open} />
-          <MetaChips it={it} />
-          <h2 className="mt-3 mb-4 text-[26px] leading-snug font-bold text-fg">{it.type === "note" ? noteTitle(it) : it.title}</h2>
-          {tg && <div className="mb-4 rounded-lg bg-surface-2 px-3 py-2 font-mono text-[13px] break-all text-muted">{tg}</div>}
-          <ReadBody it={it} onEdit={() => setMode("edit")} open={open} />
+          <div className={cx("mx-auto w-full", !full && "max-w-[880px]")}>
+            <Breadcrumb it={it} open={open} />
+            <MetaChips it={it} />
+            <h2 className="mt-3 mb-4 text-[26px] leading-snug font-bold text-fg">{it.type === "note" ? noteTitle(it) : it.title}</h2>
+            {tg && <div className="mb-4 rounded-lg bg-surface-2 px-3 py-2 font-mono text-[13px] break-all text-muted">{tg}</div>}
+            <ReadBody it={it} onEdit={() => setMode("edit")} open={open} />
+          </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 gap-8 px-14 pt-6">
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className={cx("mx-auto flex min-h-0 w-full flex-1 flex-col", !full && "max-w-[880px]")}>
             <Editor key={it.id + mode} it={it} rich={mode === "edit"} focusTitle={focusTitle} open={open} />
           </div>
 
