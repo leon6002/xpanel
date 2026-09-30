@@ -11,7 +11,7 @@ import { copyText, desk, errText, isApp, newId } from "../lib/api";
 import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
 import { buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
 import { ls, useUi } from "../lib/store";
-import type { Agent, Item, Qa, State } from "../lib/types";
+import type { Agent, Item, Qa, State, Usage } from "../lib/types";
 import { myWorkspace } from "../lib/ws";
 import { imageRefs } from "../lib/logic";
 import { cx } from "../lib/cx";
@@ -69,14 +69,16 @@ export async function postComment(opts: { itemId: string; text: string; sel?: Om
       const p: PendingQ = { q: question, quote: thread?.quote || "", agent: a.name, thread: tid };
       pend((l) => [...l, p]);
       try {
-        const answer = String(await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev), imageRefs(it.body), it.id)).trim();
+        const r = await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev), imageRefs(it.body), it.id);
+        const answer = String(r.text || "").trim();
+        const usage = r.usage ? { usage: r.usage } : {};
         await saveThread(itemId, (list) => {
           const i = list.findIndex((x) => x.id === tid);
           if (i < 0) return list;
           const turns = (list[i].turns || []).slice();
           const k = turns.findIndex((t) => t.at === at && t.q === text);
-          if (k >= 0 && !turns[k].a) turns[k] = { ...turns[k], a: answer, by: a.name, at: turns[k].at };
-          else turns.splice(k >= 0 ? k + 1 : turns.length, 0, { q: "", a: answer, at: Date.now(), by: a.name });
+          if (k >= 0 && !turns[k].a) turns[k] = { ...turns[k], a: answer, by: a.name, at: turns[k].at, ...usage };
+          else turns.splice(k >= 0 ? k + 1 : turns.length, 0, { q: "", a: answer, at: Date.now(), by: a.name, ...usage });
           list[i] = { ...list[i], turns };
           return list;
         });
@@ -367,7 +369,19 @@ const useAnsOpen = create<{ open: Record<string, 1>; toggle: (id: string) => voi
     }),
 }));
 
-function Answer({ id, text }: { id: string; text: string }) {
+/** 1234 → 1.2k */
+const kfmt = (n: number) => (n >= 10000 ? Math.round(n / 1000) + "k" : n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+
+function UsageLine({ u }: { u: Usage }) {
+  const tip = [`输入 ${u.input.toLocaleString()} tokens`, u.cached ? `（其中缓存命中 ${u.cached.toLocaleString()}）` : "", `\n输出 ${u.output.toLocaleString()} tokens`, u.cost_usd != null ? `\n约 $${u.cost_usd.toFixed(4)}` : ""].join("");
+  return (
+    <span className="text-[11px] text-faint tabular-nums" title={tip}>
+      输入 {kfmt(u.input)} · 输出 {kfmt(u.output)} tokens
+    </span>
+  );
+}
+
+function Answer({ id, text, usage }: { id: string; text: string; usage?: Usage }) {
   const open = useAnsOpen((s) => !!s.open[id]);
   const toggle = useAnsOpen((s) => s.toggle);
   const box = useRef<HTMLDivElement>(null);
@@ -386,11 +400,16 @@ function Answer({ id, text }: { id: string; text: string }) {
       >
         <Md src={text} className={cx("!text-[13.5px] !leading-[1.75]", !open && long && "cursor-pointer")} />
       </div>
-      {long && (
-        <button onClick={() => toggle(id)} className="mt-0.5 flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5">
-          <ChevronDown className={cx("transition-transform", open && "rotate-180")} />
-          {open ? "收起" : "展开回答"}
-        </button>
+      {(long || usage) && (
+        <div className="mt-0.5 flex items-center gap-2">
+          {long && (
+            <button onClick={() => toggle(id)} className="flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5">
+              <ChevronDown className={cx("transition-transform", open && "rotate-180")} />
+              {open ? "收起" : "展开回答"}
+            </button>
+          )}
+          {usage && <UsageLine u={usage} />}
+        </div>
       )}
     </div>
   );
@@ -414,7 +433,7 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
   const resolved = !!(q as Qa & { resolved?: boolean }).resolved;
   const msgs = (q.turns || []).flatMap((t, i) => [
     ...(t.q ? [{ key: i + "q", who: "我", ai: false, text: t.q, at: t.at }] : []),
-    ...(t.a ? [{ key: i + "a", who: t.by || "AI", ai: true, text: t.a, at: t.at }] : []),
+    ...(t.a ? [{ key: i + "a", who: t.by || "AI", ai: true, text: t.a, at: t.at, usage: t.usage }] : []),
   ]);
   const set = (ch: Partial<Qa> & { resolved?: boolean }) => saveThread(it.id, (list) => list.map((x) => (x.id === q.id ? { ...x, ...ch } : x)));
   return (
@@ -437,7 +456,7 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
         <div key={m.key} className="group/msg flex gap-2.5">
           {avatar(m.who, m.ai, `${m.who} · ${new Date(m.at).toLocaleString()}`)}
           <div className="min-w-0 grow pt-px">
-            {m.ai ? <Answer id={q.id + ":" + m.key} text={m.text} /> : <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg-2">{highlightMentions(m.text, agents)}</div>}
+            {m.ai ? <Answer id={q.id + ":" + m.key} text={m.text} usage={"usage" in m ? m.usage : undefined} /> : <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg-2">{highlightMentions(m.text, agents)}</div>}
           </div>
           <span className="shrink-0 pt-1 text-[11px] text-faint opacity-0 transition-opacity group-hover/msg:opacity-100">
             {new Date(m.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}

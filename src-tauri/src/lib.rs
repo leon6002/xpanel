@@ -434,7 +434,7 @@ async fn ask_ai(
     prompt: String,
     images: Option<Vec<String>>,
     key: Option<String>,
-) -> Result<String, String> {
+) -> Result<agent::Answer, String> {
     let st = s.inner().clone();
     blocking(move || {
         let dir = std::path::Path::new(cwd.trim());
