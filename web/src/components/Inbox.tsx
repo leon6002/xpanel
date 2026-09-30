@@ -93,7 +93,7 @@ export function InboxList() {
           <Plus />
         </button>
       </div>
-      <div className="scroll-quiet -mr-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-2">
+      <div className="scroll-quiet -mx-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto px-2">
         {chats.map((c, i) => {
           const l = c.last || {};
           return (

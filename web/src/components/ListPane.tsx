@@ -139,7 +139,7 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
   return (
     <div
       className={cx(
-        "group flex items-start gap-2.5 rounded-xl px-3 py-2.5 transition-colors",
+        "group relative flex items-start gap-2.5 rounded-xl px-3 py-2.5 transition-colors",
         on ? "bg-surface-3" : "hover:bg-surface-2",
       )}
     >
@@ -158,18 +158,23 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
       </button>
       <button onClick={() => select(it.id)} className="flex min-w-0 grow flex-col gap-1 text-left">
         <span className={cx("text-sm", it.done ? "text-faint line-through" : "text-fg")}>
+          {it.pinned && !it.done && <Pin className="mr-1 inline size-3.5 align-[-2px] text-accent" />}
           <Pri p={it.done ? undefined : it.priority} />
           {it.title}
         </span>
         {(it.body || "").trim() && !it.done && <span className="line-clamp-1 text-xs text-muted">{plain(it.body)}</span>}
         <ItemMeta it={it} />
       </button>
-      <CopyBtn text={fullText(it)} />
+      {/* 悬停时浮在右上角，不单独占一列 */}
       <button
         aria-label={it.pinned ? "移出焦点" : "设为焦点"}
         title={it.pinned ? "移出焦点" : "设为焦点"}
         onClick={() => patchItem(it, { pinned: !it.pinned })}
-        className={cx("grid size-7 shrink-0 place-items-center rounded-md hover:bg-surface-3 [&_svg]:size-3.5", it.pinned ? "text-accent" : "text-faint opacity-0 group-hover:opacity-100")}
+        className={cx(
+          "absolute top-2 right-2 grid size-7 place-items-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-surface-3 [&_svg]:size-3.5",
+          on ? "bg-surface-3" : "bg-surface-2",
+          it.pinned ? "text-accent" : "text-faint hover:text-fg",
+        )}
       >
         <Pin />
       </button>
@@ -396,7 +401,7 @@ export function ListPane() {
           新建
         </Button>
       </div>
-      <div className="scroll-quiet -mr-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
+      <div className="scroll-quiet -mx-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
         {body.node}
       </div>
     </section>
