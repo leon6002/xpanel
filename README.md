@@ -35,7 +35,7 @@ Built with Tauri 2 (Rust). External AI tools can read and write through a REST A
 - **离线可用**：连接模式下连不上主机时照常能看、能记，恢复后自动补传；主机暂时存不了时改动也不会丢。
 - **外置硬盘同步**：左下角硬盘图标（或「设置 → 外置硬盘同步」）把整份数据（数据库和附件）和外置硬盘上的文件夹同步，
   谁在上次同步后改过就用谁的；两边都改过时让你选，被覆盖的一边先备份。出差时硬盘插到别的电脑（Windows / Mac），
-  把那台的数据文件夹设成硬盘上的文件夹即可；回来再同步一次。命令行：`xp sync --data D:\xpanel F:\xpanel`。
+  把那台的数据文件夹设成硬盘上的文件夹即可；回来再同步一次。命令行：`xp sync --data D:\xpanel F:\xpanel`。详见 [docs/drive-sync.md](docs/drive-sync.md)。
 - **备份**：每天自动备份数据库到 `backups/`，保留 60 份；可再设一个冷备份文件夹（比如大容量硬盘），每天复制一份过去。
 
 ## 对外接口（给 AI 和脚本）
