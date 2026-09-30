@@ -1,5 +1,5 @@
 /* 连接与设置：这台电脑存数据（主机）还是连接到主机、AI 命令、导入导出 */
-import { Download, FolderOpen, Plus, Upload, X } from "lucide-react";
+import { Download, FolderOpen, HardDrive, Plus, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { desk, errText, isApp } from "../lib/api";
 import { importItems, qc, setConfig, useAppState, useConfig } from "../lib/data";
@@ -8,6 +8,7 @@ import { useUi } from "../lib/store";
 import type { Agent, Config, Item, State } from "../lib/types";
 import { cx } from "../lib/cx";
 import { Button, ErrorText, Field, Toggle, inputCls } from "../components/ui";
+import { openDriveSync } from "./DriveSync";
 
 const say = (t: string) => useUi.getState().say(t);
 
@@ -220,6 +221,12 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
               <Button onClick={() => desk.openDataDir().catch((e) => say(errText(e)))}>
                 <FolderOpen className="size-4" />
                 打开数据文件夹
+              </Button>
+            )}
+            {c.mode === "host" && (
+              <Button onClick={() => openDriveSync()}>
+                <HardDrive className="size-4" />
+                外置硬盘同步
               </Button>
             )}
             <Button onClick={() => desk.createShortcut().then((p) => say("已放到桌面：" + p), (e) => say(errText(e)))}>桌面快捷方式</Button>

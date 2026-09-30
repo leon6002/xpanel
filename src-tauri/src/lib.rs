@@ -46,6 +46,8 @@ pub struct Config {
     pub cold_backup_dir: Option<String>,
     /// 这台电脑在设备表里的 id；空 = 还没选。界面不传这个字段时保留原值
     pub device_id: String,
+    /// 上次同步用的文件夹（外置硬盘上的，比如 F:\xpanel）。界面不传这个字段时保留原值
+    pub sync_dir: String,
 }
 
 impl Default for Config {
@@ -60,6 +62,7 @@ impl Default for Config {
             agent_cwd: String::new(),
             cold_backup_dir: None,
             device_id: String::new(),
+            sync_dir: String::new(),
         }
     }
 }
@@ -247,6 +250,9 @@ async fn save_config(s: St<'_>, cfg: Config) -> Result<Value, String> {
         if cfg.device_id.is_empty() {
             cfg.device_id = st.cfg().device_id;
         }
+        if cfg.sync_dir.is_empty() {
+            cfg.sync_dir = st.cfg().sync_dir;
+        }
         if cfg.cold_backup_dir.is_none() {
             cfg.cold_backup_dir = st.cfg().cold_backup_dir;
         }
@@ -372,6 +378,51 @@ fn asset_bytes(st: &AppState, name: &str) -> Result<Vec<u8>, String> {
         "client" => client::get_asset(&st.cfg().server_url, name),
         _ => not_set(),
     }
+}
+
+/// 和外置硬盘（或别的文件夹）同步：先看看该怎么同步
+fn sync_store(st: &AppState, dir: &str) -> Result<(Arc<Store>, PathBuf), String> {
+    let dir = dir.trim();
+    if dir.is_empty() {
+        return Err("先填外置硬盘上的文件夹，比如 F:\\xpanel".into());
+    }
+    if st.cfg().mode != "host" {
+        return Err("只有「本机存储」模式可以同步；连接模式的数据在主机上".into());
+    }
+    Ok((st.host_store()?, PathBuf::from(dir)))
+}
+
+#[tauri::command]
+async fn sync_plan(s: St<'_>, dir: String) -> Result<xp_store::SyncPlan, String> {
+    let st = s.inner().clone();
+    blocking(move || {
+        let (store, dir) = sync_store(&st, &dir)?;
+        store.sync_plan(&dir).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// 执行同步。direction：auto / push（本机 → 那边）/ pull（那边 → 本机）
+#[tauri::command]
+async fn sync_run(
+    s: St<'_>,
+    dir: String,
+    direction: String,
+) -> Result<xp_store::SyncReport, String> {
+    let st = s.inner().clone();
+    blocking(move || {
+        let (store, path) = sync_store(&st, &dir)?;
+        let r = store
+            .sync_run(&path, &direction)
+            .map_err(|e| e.to_string())?;
+        let mut cfg = st.cfg();
+        if cfg.sync_dir != dir.trim() {
+            cfg.sync_dir = dir.trim().to_string();
+            write_config(&st, &cfg)?;
+        }
+        Ok(r)
+    })
+    .await
 }
 
 /// 返回 data: 网址，界面直接当图片用
@@ -550,6 +601,8 @@ pub fn run() {
             set_this_device,
             api_call,
             ask_ai,
+            sync_plan,
+            sync_run,
             workspace::workspace_defaults,
             workspace::workspace_check,
             workspace::workspace_prepare,

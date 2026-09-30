@@ -76,6 +76,11 @@ export const TYPES: { k: ItemType; name: string; short?: string; check?: string;
 export const typeName = (t: ItemType) => (t === "inbox" ? "收件箱" : TYPES.find((x) => x.k === t)?.name ?? t);
 export const isCheckable = (t: ItemType) => !!TYPES.find((x) => x.k === t)?.check;
 
+/* ---- 外置硬盘同步 ---- */
+export interface SyncSide { exists: boolean; rev: number; items: number; assets: number; last_change: number; changed: boolean }
+export interface SyncPlan { action: "none" | "push" | "pull" | "conflict" | "choose"; local: SyncSide; remote: SyncSide; message: string }
+export interface SyncReport { action: string; assets_copied: number; message: string }
+
 /* ---- 桌面版配置（get_config） ---- */
 export interface Agent { name: string; cmd: string; ask?: string }
 export interface Config {
@@ -87,6 +92,8 @@ export interface Config {
   agents: Agent[];
   agentCwd: string;
   coldBackupDir?: string | null;
+  /** 上次同步用的文件夹（外置硬盘上的） */
+  syncDir?: string;
   deviceId: string;
 }
 export interface Lan { running: boolean; hostname?: string; urls: string[]; port?: number }
