@@ -4,7 +4,7 @@ export type Priority = "P0" | "P1" | "P2" | "P3";
 
 /** AI 回答一次用了多少 token（桌面版从 claude / codex 的输出里读；拿不到就没有） */
 export interface Usage { input: number; output: number; cached?: number; cost_usd?: number }
-export interface QaTurn { q: string; a: string; at: number; by?: string; usage?: Usage }
+export interface QaTurn { q: string; a: string; at: number; by?: string; usage?: Usage; /** 回答存成了哪篇笔记 */ saved?: string }
 export interface Qa { id: string; quote: string; prefix?: string; suffix?: string; at: number; turns: QaTurn[] }
 export interface Progress { at: number; by?: string; status: "working" | "done" | "blocked"; text: string; files?: string[] }
 export interface Workspace { deviceId?: string; hostname?: string; path: string; name: string; template?: string; createdAt?: number }
@@ -32,6 +32,8 @@ export interface Item {
   workspaces?: Workspace[];
   /** 父笔记（笔记、规范可以分层） */
   parentId?: string;
+  /** 关联的其他条目（见 lib/links.ts） */
+  links?: { id: string; label?: string }[];
   [k: string]: unknown;
 }
 

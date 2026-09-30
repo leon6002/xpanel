@@ -2,10 +2,12 @@
    位置记「原话 + 前后各 40 字」而不是字符位置，笔记后来插了内容也能找回；找不到时标「原文已删改」。 */
 import type { Element, ElementContent, Root, RootContent, Text } from "hast";
 import type { Item, Qa } from "./types";
+import { typeName } from "./types";
+import { entryTarget } from "./logic";
 
 export const QA_CTX = 40;
-/** 问答时笔记图片放在工作目录的哪里（桌面版写进去） */
-export const ASK_IMAGES = ".xpanel/ask-images";
+/** 问答时笔记里的图片和附件放在工作目录的哪里（桌面版写进去，和 src-tauri 的 ASK_FILES 一致） */
+export const ASK_FILES = ".xpanel/ask-files";
 
 function commonTail(a: string, b: string) {
   let i = 0;
@@ -146,19 +148,51 @@ export function selectionContext(root: HTMLElement, range: Range, itemId: string
 }
 
 /* ---- 提问用的提示词 ---- */
-export function buildAskPrompt(it: Item, ctx: { quote?: string; prefix?: string; suffix?: string }, question: string, prev?: { q: string; a: string }[]) {
-  // 图片由桌面版先写到工作目录的 .xpanel/ask-images/ 里（和 src-tauri 的 ASK_IMAGES 一致），这里换成相对路径
-  let nImg = 0;
-  const body = String(it.body || "").replace(/!\[([^\]]*)\]\(asset:([^)\s]+)\)/g, (_m, alt: string, name: string) => {
-    nImg++;
-    return `[图片${alt.replace(/\|\d+$/, "") ? "「" + alt.replace(/\|\d+$/, "") + "」" : ""}：${ASK_IMAGES}/${name}]`;
-  });
-  const L = [`你在帮我读一篇笔记，回答我关于它的问题。`, ``, `笔记标题：${it.title || "(无标题)"}`];
-  if (nImg) L.push(``, `笔记里有 ${nImg} 张图片，已经放在当前工作目录的 ${ASK_IMAGES}/ 下（正文里标着路径）。问题和图片有关时，先用读文件的工具打开对应图片看清内容再回答，不要说看不到。`);
+
+/** 正文里引用的所有附件（图片和文件）的名字 */
+export const assetRefs = (body?: string) => [...new Set([...String(body || "").matchAll(/\]\(asset:([A-Za-z0-9._-]+)\)/g)].map((m) => m[1]))];
+
+/** 图片、附件换成工作目录里的相对路径（桌面版先把文件写到 ASK_FILES 下）；[[引用]] 换成标题 */
+function forAi(body: string) {
+  return body
+    .replace(/!\[([^\]]*)\]\(asset:([^)\s]+)\)/g, (_m, alt: string, name: string) => {
+      const a = alt.replace(/\|\d+$/, "");
+      return `[图片${a ? "「" + a + "」" : ""}：${ASK_FILES}/${name}]`;
+    })
+    .replace(/\[([^\]]*)\]\(asset:([^)\s]+)\)/g, (_m, t: string, name: string) => `[附件「${t.replace(/^📎\s*/, "")}」：${ASK_FILES}/${name}]`)
+    .replace(/\[([^\]]*)\]\(xpanel:item\/[^)]+\)/g, "《$1》");
+}
+const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "\n…（后面省略）" : s);
+
+export function buildAskPrompt(
+  it: Item,
+  ctx: { quote?: string; prefix?: string; suffix?: string },
+  question: string,
+  prev?: { q: string; a: string }[],
+  related: { item: Item; label?: string }[] = [],
+) {
+  const kind = typeName(it.type);
+  const body = forAi(String(it.body || ""));
+  const L = [`你在帮我处理工作台里的一条「${kind}」，回答我关于它的问题。`, ``, `标题：${it.title || "(无标题)"}`];
   if (ctx.quote) L.push(``, `我选中的原文：`, ...ctx.quote.split("\n").map((l) => "> " + l), ``, `（前后文：…${ctx.prefix || ""}【${ctx.quote}】${ctx.suffix || ""}…）`);
-  L.push(``, `笔记全文：`, "```markdown", body.length > 12000 ? body.slice(0, 12000) + "\n…（后面省略）" : body, "```");
+  L.push(``, `正文：`, "```markdown", cut(body, 12000), "```");
+  if (related.length) {
+    L.push(``, `和它关联的 ${related.length} 条（标签说明了它们和这条的关系）：`);
+    let budget = 40000;
+    for (const r of related) {
+      const x = r.item;
+      const target = x.type === "link" ? entryTarget(x) : "";
+      const text = cut(forAi(String(x.body || "")), Math.max(800, Math.min(8000, budget)));
+      budget -= text.length;
+      L.push(``, `### ${r.label ? "【" + r.label + "】" : ""}${x.title || "(无标题)"}（${typeName(x.type)}）`);
+      if (target) L.push(`地址：${target}`);
+      if (text.trim()) L.push("```markdown", text, "```");
+    }
+  }
+  if (/\[(图片|附件)[^\]]*：\.xpanel\//.test(L.join("\n")))
+    L.push(``, `上面提到的图片和附件（比如简历 PDF）已经放在当前工作目录的 ${ASK_FILES}/ 下，标着路径。问题和它们有关时，先用读文件的工具打开看清内容再回答，不要说看不到。`);
   if (prev && prev.length) {
-    L.push(``, `之前关于这段的问答：`);
+    L.push(``, `之前的对话：`);
     prev.forEach((t) => L.push(`问：${t.q}`, `答：${t.a}`, ``));
   }
   L.push(``, `我的问题：${question}`, ``, `请用中文直接回答，Markdown 格式，准确、简洁，先给结论再解释；不确定的地方直说。不要修改任何文件。`);

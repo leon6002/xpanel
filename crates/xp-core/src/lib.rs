@@ -53,9 +53,26 @@ pub fn is_checkable(t: &str) -> bool {
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Op {
-    Upsert { item: Value },
-    Delete { id: String },
-    Import { items: Vec<Value> },
+    Upsert {
+        item: Value,
+    },
+    Delete {
+        id: String,
+    },
+    Import {
+        items: Vec<Value>,
+    },
+    /// 只改几个字段（其他字段以主机上的为准，不会被这边的旧数据盖掉）。
+    /// expect：这些字段在主机上应该还是这个值，否则说明别处刚改过，拒绝（冲突）
+    Patch {
+        id: String,
+        #[serde(default)]
+        set: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unset: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect: Option<Map<String, Value>>,
+    },
 }
 
 /// 只检查操作本身：不合格的操作无论重试多少次都会失败
@@ -64,6 +81,12 @@ pub fn validate_op(op: &Op) -> Result<(), String> {
         Op::Upsert { item } if id_of(item).is_none() => Err("条目缺少 id".into()),
         Op::Upsert { item } if !item.is_object() => Err("条目必须是 JSON 对象".into()),
         Op::Delete { id } if id.is_empty() => Err("要删除的条目缺少 id".into()),
+        Op::Patch { id, .. } if id.is_empty() => Err("要修改的条目缺少 id".into()),
+        Op::Patch { set, unset, .. }
+            if set.contains_key("id") || unset.iter().any(|k| k == "id") =>
+        {
+            Err("不能改条目的 id".into())
+        }
         _ => Ok(()),
     }
 }

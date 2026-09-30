@@ -771,3 +771,54 @@ fn deleting_a_parent_moves_children_up() {
     assert!(st.get("c").unwrap().get("parentId").is_none());
     let _ = fs::remove_dir_all(d);
 }
+
+#[test]
+fn patch_merges_fields_and_detects_conflicts() {
+    let d = tmp("patch");
+    let st = Store::open(&d).unwrap();
+    st.apply_op(Op::Import { items: vec![json!({"id": "n", "type": "note", "title": "t", "body": "A 写的", "tags": ["x"], "createdAt": 1, "updatedAt": 1})] }, "t").unwrap();
+    let m = |v: Value| v.as_object().unwrap().clone();
+    // 只改标签：正文不动
+    st.apply_op(
+        Op::Patch {
+            id: "n".into(),
+            set: m(json!({"tags": ["y"]})),
+            unset: vec![],
+            expect: None,
+        },
+        "t",
+    )
+    .unwrap();
+    let it = st.get("n").unwrap();
+    assert_eq!(it["body"], "A 写的");
+    assert_eq!(it["tags"], json!(["y"]));
+    // 基于旧正文改：冲突，不覆盖
+    let e = st
+        .apply_op(
+            Op::Patch {
+                id: "n".into(),
+                set: m(json!({"body": ""})),
+                unset: vec![],
+                expect: Some(m(json!({"body": "旧的"}))),
+            },
+            "t",
+        )
+        .unwrap_err();
+    assert!(matches!(e, StoreError::Conflict(_)));
+    assert_eq!(st.get("n").unwrap()["body"], "A 写的");
+    // 基于最新正文改：可以
+    st.apply_op(
+        Op::Patch {
+            id: "n".into(),
+            set: m(json!({"body": "B 接着写"})),
+            unset: vec!["tags".into()],
+            expect: Some(m(json!({"body": "A 写的"}))),
+        },
+        "t",
+    )
+    .unwrap();
+    let it = st.get("n").unwrap();
+    assert_eq!(it["body"], "B 接着写");
+    assert!(it.get("tags").is_none());
+    let _ = fs::remove_dir_all(d);
+}

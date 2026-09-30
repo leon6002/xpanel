@@ -49,7 +49,12 @@ export function getRev(): Promise<string | number> {
 }
 
 /** 写条目：走 v1 操作（桌面版连接模式断网时进离线队列，恢复后补传） */
-export type Op = { kind: "upsert"; item: Item } | { kind: "delete"; id: string } | { kind: "import"; items: Item[] };
+export type Op =
+  | { kind: "upsert"; item: Item }
+  | { kind: "delete"; id: string }
+  | { kind: "import"; items: Item[] }
+  /** 只改几个字段；expect 里的字段在主机上对不上就是冲突（别处刚改过） */
+  | { kind: "patch"; id: string; set: Record<string, unknown>; unset?: string[]; expect?: Record<string, unknown> };
 export function applyOp(op: Op): Promise<State> {
   if (invoke) return invoke<State>("apply_op", { op });
   return http<State>("/api/op", { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(op) });

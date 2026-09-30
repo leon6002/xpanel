@@ -39,7 +39,13 @@ export function editorExtensions(extra: AnyExtension[] = [], views: { image?: An
     StarterKit.configure({
       hardBreak: false,
       ...(views.codeBlock ? { codeBlock: false } : {}),
-      link: { openOnClick: false, autolink: true, defaultProtocol: "https" },
+      // asset:（附件）和 xpanel:item/ID（引用另一条）也是合法链接
+      link: {
+        openOnClick: false,
+        autolink: true,
+        defaultProtocol: "https",
+        isAllowedUri: (url, ctx) => /^(asset|xpanel):/i.test(url) || ctx.defaultValidate(url),
+      },
       heading: { levels: [1, 2, 3, 4] },
     }),
     XHardBreak,

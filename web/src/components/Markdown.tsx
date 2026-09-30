@@ -6,7 +6,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { assetSrc, copyText, isApp, openTarget } from "../lib/api";
 import { useUi } from "../lib/store";
-import { useConfig } from "../lib/data";
+import { useAppState, useConfig } from "../lib/data";
+import { noteTitle } from "../lib/logic";
 import { rehypeImgIndex, rehypePaths, rehypeQaMarks } from "../lib/qa";
 import type { Qa } from "../lib/types";
 import { cx } from "../lib/cx";
@@ -179,9 +180,28 @@ export function useOpenAsset() {
   };
 }
 
+/** 正文里引用的另一条：显示成小块，点了在右侧打开；显示的是它现在的标题 */
+function RefLink({ id, children }: { id: string; children?: ReactNode }) {
+  const it = useAppState().data?.items.find((x) => x.id === id);
+  return (
+    <a
+      href="#"
+      className={cx("xp-ref", !it && "line-through opacity-60")}
+      title={it ? "在右侧打开" : "这条已经删除了"}
+      onClick={(e) => {
+        e.preventDefault();
+        if (it) useUi.getState().openPeek(id);
+      }}
+    >
+      {it ? (it.type === "note" ? noteTitle(it) : it.title) || children : children}
+    </a>
+  );
+}
+
 function Link({ href, children }: { href?: string; children?: ReactNode }) {
   const openAsset = useOpenAsset();
   const h = String(href || "");
+  if (h.startsWith("xpanel:item/")) return <RefLink id={h.slice(12)}>{children}</RefLink>;
   if (h.startsWith("asset:")) {
     return (
       <a
@@ -222,7 +242,7 @@ function Mark(props: { children?: ReactNode; className?: string; "data-qa"?: str
   );
 }
 
-const transform = (url: string) => (url.startsWith("asset:") ? url : defaultUrlTransform(url));
+const transform = (url: string) => (/^(asset|xpanel):/.test(url) ? url : defaultUrlTransform(url));
 /* ---- 一键复制：代码块右上角按钮；行内代码、路径点一下就复制 ---- */
 const copied = async (v: string) => useUi.getState().say((await copyText(v)) ? "已复制：" + (v.length > 40 ? v.slice(0, 40) + "…" : v) : "复制失败");
 function Pre(props: { children?: ReactNode }) {
