@@ -3,9 +3,10 @@
    thread = {id, quote, prefix, suffix, at, resolved?, turns:[{q, a, at, by}]}
    - q：人写的话（可能为空：同一条评论 @ 了多个 AI 时，后面几个 AI 的回答各占一轮）
    - a：AI 的回答（没 @ AI 时为空），by：回答的 AI */
-import { AtSign, Check, Copy, CornerDownRight, FileText, MessageSquare, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { AtSign, Check, ChevronDown, Copy, CornerDownRight, FileText, MessageSquare, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { create } from "zustand";
 import { copyText, desk, errText, isApp, newId } from "../lib/api";
 import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
 import { buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
@@ -109,11 +110,26 @@ function splitMentions(text: string, agents: Agent[]) {
   return { names: found, rest: rest.replace(/[ \t]{2,}/g, " ").replace(/^[ \t]+/, "") };
 }
 
+/** AI 头像上的字：多个词取首字母（Claude Code → CC），一个词取前两个字母（Codex → Co），名字不同就分得开 */
+export function initials(name: string) {
+  const w = name.trim().split(/[\s_-]+/).filter(Boolean);
+  if (w.length > 1) return (w[0][0] + w[1][0]).toUpperCase();
+  const n = w[0] || "?";
+  return /^[a-z]/i.test(n) ? n[0].toUpperCase() + (n[1] || "").toLowerCase() : n.slice(0, 1);
+}
+/** 每个 AI 一个固定的颜色（暖色系里挑），头像一看就知道是谁 */
+const AGENT_COLORS = ["#b0532c", "#4d6b8a", "#5f7a3a", "#8a5a9e", "#a0782a", "#3f7f7a"];
+export function agentColor(name: string) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return AGENT_COLORS[h % AGENT_COLORS.length];
+}
+
 /** @ 到的 AI 显示成标签：头像字 + 名字 */
 export function AgentTag({ name, onRemove, small }: { name: string; onRemove?: () => void; small?: boolean }) {
   return (
     <span className={cx("inline-flex shrink-0 items-center gap-1 rounded-full bg-accent-soft pr-2 pl-0.5 align-middle font-medium text-accent-strong", small ? "h-[22px] text-[12.5px]" : "h-6 text-[13px]")}>
-      <span className="grid size-[18px] place-items-center rounded-full bg-accent text-[10.5px] font-bold text-on-accent">{name.slice(0, 1).toUpperCase()}</span>
+      <span style={{ background: agentColor(name) }} className="grid size-[18px] place-items-center rounded-full text-[9px] font-bold text-white">{initials(name)}</span>
       {name}
       {onRemove && (
         <button
@@ -222,10 +238,15 @@ export function Composer({
         onClick={() => ta.current?.focus()}
         className={cx("flex cursor-text items-end gap-2 rounded-xl bg-surface-2 py-1.5 pr-1.5 pl-2.5 transition-colors focus-within:bg-surface-3/60", compact && "rounded-lg")}
       >
-        <div className="flex min-w-0 grow flex-wrap items-center gap-1 self-center py-0.5">
-          {tags.map((n) => (
-            <AgentTag key={n} name={n} onRemove={() => setTags((t) => t.filter((x) => x !== n))} />
-          ))}
+        {/* @ 到的 AI 单独一行，下面是整行宽的输入框 */}
+        <div className="flex min-w-0 grow flex-col gap-1 self-center py-0.5">
+          {tags.length > 0 && (
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              {tags.map((n) => (
+                <AgentTag key={n} name={n} onRemove={() => setTags((t) => t.filter((x) => x !== n))} />
+              ))}
+            </div>
+          )}
           <textarea
             ref={ta}
             rows={1}
@@ -253,7 +274,7 @@ export function Composer({
               }
             }}
             placeholder={tags.length ? "想问什么…" : placeholder || (isApp ? "写评论，输入 @ 可以叫 AI 来回答…" : "写评论…")}
-            className="scroll-quiet min-w-[8em] grow basis-0 resize-none bg-transparent px-0.5 py-0.5 text-[13.5px] leading-6 outline-none placeholder:text-faint"
+            className="scroll-quiet w-full resize-none bg-transparent px-0.5 py-0.5 text-[13.5px] leading-6 outline-none placeholder:text-faint"
           />
         </div>
         {isApp && agents.length > 0 && (
@@ -298,7 +319,7 @@ export function Composer({
               onClick={() => choose(a)}
               className={cx("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px]", i === pick.i ? "bg-surface-2 text-fg" : "text-fg-2")}
             >
-              <span className="grid size-5 place-items-center rounded-full bg-accent text-[10.5px] font-bold text-on-accent">{a.name.slice(0, 1).toUpperCase()}</span>
+              <span style={{ background: agentColor(a.name) }} className="grid size-5 place-items-center rounded-full text-[9.5px] font-bold text-white">{initials(a.name)}</span>
               <span className="grow truncate">{a.name}</span>
               {!canAsk(a) && <span className="text-[11px] text-faint">需填问答命令</span>}
             </button>
@@ -323,8 +344,66 @@ function highlightMentions(text: string, agents: Agent[]) {
   return text.split(re).map((p, i) => (i % 2 ? <AgentTag key={i} name={p} small /> : p));
 }
 
-const avatar = (name: string, ai: boolean) => (
-  <span className={cx("grid size-6 shrink-0 place-items-center rounded-full text-[11px] font-bold", ai ? "bg-accent text-on-accent" : "bg-surface-3 text-fg-2")}>{name.slice(0, 1)}</span>
+/* ---------------------------------------------------------------- AI 的回答：默认收起，记住每条的展开状态 */
+
+const useAnsOpen = create<{ open: Record<string, 1>; toggle: (id: string) => void }>((set) => ({
+  open: (() => {
+    try {
+      return JSON.parse(ls.get("wb-ans-open") || "{}");
+    } catch {
+      return {};
+    }
+  })(),
+  toggle: (id) =>
+    set((s) => {
+      const open = { ...s.open };
+      if (open[id]) delete open[id];
+      else open[id] = 1;
+      // 只留最近的 500 条，免得越存越多
+      const keys = Object.keys(open);
+      if (keys.length > 500) keys.slice(0, keys.length - 500).forEach((k) => delete open[k]);
+      ls.set("wb-ans-open", JSON.stringify(open));
+      return { open };
+    }),
+}));
+
+function Answer({ id, text }: { id: string; text: string }) {
+  const open = useAnsOpen((s) => !!s.open[id]);
+  const toggle = useAnsOpen((s) => s.toggle);
+  const box = useRef<HTMLDivElement>(null);
+  const [long, setLong] = useState(true);
+  // 本来就很短的回答不用收起
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (el) setLong(el.scrollHeight > 130);
+  }, [text]);
+  return (
+    <div>
+      <div
+        ref={box}
+        className={cx("relative", !open && long && "max-h-[112px] overflow-hidden [mask-image:linear-gradient(to_bottom,black_55%,transparent)]")}
+        onClick={() => !open && long && toggle(id)}
+      >
+        <Md src={text} className={cx("!text-[13.5px] !leading-[1.75]", !open && long && "cursor-pointer")} />
+      </div>
+      {long && (
+        <button onClick={() => toggle(id)} className="mt-0.5 flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5">
+          <ChevronDown className={cx("transition-transform", open && "rotate-180")} />
+          {open ? "收起" : "展开回答"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const avatar = (name: string, ai: boolean, title?: string) => (
+  <span
+    title={title || name}
+    style={ai ? { background: agentColor(name) } : undefined}
+    className={cx("grid size-6 shrink-0 place-items-center rounded-full text-[10.5px] font-bold", ai ? "text-white" : "bg-surface-3 text-fg-2")}
+  >
+    {ai ? initials(name) : name.slice(0, 1)}
+  </span>
 );
 
 function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJump: () => void }) {
@@ -339,7 +418,14 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
   ]);
   const set = (ch: Partial<Qa> & { resolved?: boolean }) => saveThread(it.id, (list) => list.map((x) => (x.id === q.id ? { ...x, ...ch } : x)));
   return (
-    <div data-qa-card={q.id} className={cx("group/th flex flex-col gap-2.5 rounded-[14px] p-3.5 transition-colors", resolved ? "opacity-60" : "bg-surface-2/60")}>
+    <div data-qa-card={q.id} className="group/th flex flex-col gap-2.5 rounded-[14px] bg-surface-2/60 p-3.5">
+      {/* 这里多是问答，标了「已解决」也照常显示，只多一个小标记 */}
+      {resolved && (
+        <span className="-mb-1 inline-flex items-center gap-1 self-start text-[11.5px] text-ok [&_svg]:size-3">
+          <Check strokeWidth={3} />
+          已解决
+        </span>
+      )}
       {q.quote && (
         <button className="line-clamp-2 self-start rounded-md bg-mark/70 px-1.5 py-0.5 text-left text-xs text-mark-fg hover:bg-mark" title="定位到原文" onClick={onJump}>
           {q.quote}
@@ -347,15 +433,15 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
         </button>
       )}
       {msgs.map((m) => (
-        <div key={m.key} className="flex gap-2.5">
-          {avatar(m.who, m.ai)}
-          <div className="min-w-0 grow">
-            <div className="flex items-baseline gap-2 text-xs">
-              <b className="text-fg">{m.who}</b>
-              <span className="text-faint">{new Date(m.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-            </div>
-            {m.ai ? <Md src={m.text} className="!text-[13.5px] !leading-[1.75]" /> : <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg-2">{highlightMentions(m.text, agents)}</div>}
+        // 头像就代表是谁（悬停看名字和时间），不再单独写一行名字
+        <div key={m.key} className="group/msg flex gap-2.5">
+          {avatar(m.who, m.ai, `${m.who} · ${new Date(m.at).toLocaleString()}`)}
+          <div className="min-w-0 grow pt-px">
+            {m.ai ? <Answer id={q.id + ":" + m.key} text={m.text} /> : <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg-2">{highlightMentions(m.text, agents)}</div>}
           </div>
+          <span className="shrink-0 pt-1 text-[11px] text-faint opacity-0 transition-opacity group-hover/msg:opacity-100">
+            {new Date(m.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+          </span>
         </div>
       ))}
       {pending.map((p, i) => (
@@ -452,22 +538,14 @@ function jumpTo(root: HTMLElement | null, q: Qa) {
 }
 
 export function CommentsSection({ it, lost, root }: { it: Item; lost: Set<string>; root: React.RefObject<HTMLElement | null> }) {
-  const [showResolved, setShowResolved] = useState(false);
   const pendingNew = ((useUi((s) => s.qaPending[it.id]) as PendingQ[] | undefined) || []).filter((p) => !p.thread);
   const all = it.qa || [];
-  const open = all.filter((q) => !(q as Qa & { resolved?: boolean }).resolved);
-  const done = all.filter((q) => (q as Qa & { resolved?: boolean }).resolved);
-  const list = useMemo(() => [...open, ...(showResolved ? done : [])].sort((a, b) => a.at - b.at), [open, done, showResolved]);
+  const list = useMemo(() => all.slice().sort((a, b) => a.at - b.at), [all]);
   return (
     <section className="qasec mt-12 flex flex-col gap-3" aria-label="评论" data-qa-skip>
       <h3 className="flex items-center gap-1.5 text-sm font-semibold text-muted">
-        <MessageSquare className="size-4" /> 评论 <span className="font-normal text-faint">{open.length || ""}</span>
+        <MessageSquare className="size-4" /> 评论 <span className="font-normal text-faint">{all.length || ""}</span>
         <span className="grow" />
-        {done.length > 0 && (
-          <Button tone="ghost" className="h-7 px-2 text-xs" onClick={() => setShowResolved((v) => !v)}>
-            {showResolved ? "隐藏已解决" : `已解决 ${done.length}`}
-          </Button>
-        )}
         {all.length > 0 && (
           <Button
             tone="ghost"
@@ -518,10 +596,11 @@ export function SelectionComment({ sel, at, onClose, initial }: { sel: QaSel; at
       window.removeEventListener("keydown", key);
     };
   }, []);
-  const left = Math.max(12, Math.min(at.x - 20, window.innerWidth - 392));
-  const top = Math.min(at.y, window.innerHeight - 180);
+  const width = Math.min(560, window.innerWidth - 24);
+  const left = Math.max(12, Math.min(at.x - 40, window.innerWidth - width - 12));
+  const top = Math.min(at.y, window.innerHeight - 200);
   return createPortal(
-    <div ref={box} className="fixed z-40 flex w-[380px] flex-col gap-2 rounded-[14px] bg-surface p-3 shadow-3" style={{ left, top }}>
+    <div ref={box} className="fixed z-40 flex flex-col gap-2 rounded-[14px] bg-surface p-3 shadow-3" style={{ left, top, width }}>
       <div className="line-clamp-2 self-start rounded-md bg-mark/70 px-1.5 py-0.5 text-xs text-mark-fg">{sel.quote}</div>
       <Composer itemId={sel.itemId} sel={sel} initial={initial} autoFocus onDone={onClose} placeholder={isApp ? "评论这段，@ 可以叫 AI 解释…" : "评论这段…"} />
     </div>,
