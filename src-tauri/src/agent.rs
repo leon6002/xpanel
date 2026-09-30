@@ -175,15 +175,21 @@ pub fn ask_command(a: &Agent) -> Option<String> {
 /// 问答时笔记里的图片放在工作目录的这个子目录（界面写提示词时用同样的相对路径）
 pub const ASK_IMAGES: &str = ".xpanel/ask-images";
 
+fn exe_is(cmdline: &str, name: &str) -> bool {
+    cmdline.split_whitespace().next().is_some_and(|x| {
+        x.trim_matches('"')
+            .trim_end_matches(".exe")
+            .trim_end_matches(".cmd")
+            .rsplit(['/', '\\'])
+            .next()
+            .is_some_and(|b| b.eq_ignore_ascii_case(name))
+    })
+}
+
 /// codex exec 看不了文件里的图片，要用 -i 附上：插在最后的「-」（从标准输入读提示词）前面
 fn with_images(cmdline: &str, images: &[std::path::PathBuf]) -> String {
     let t = cmdline.trim_end();
-    let is_codex = t.split_whitespace().next().is_some_and(|x| {
-        x.trim_end_matches(".exe")
-            .trim_end_matches(".cmd")
-            .ends_with("codex")
-    });
-    if images.is_empty() || !is_codex || !t.contains(" exec") || !t.ends_with(" -") {
+    if images.is_empty() || !exe_is(t, "codex") || !t.contains(" exec") || !t.ends_with(" -") {
         return cmdline.to_string();
     }
     let args: String = images
@@ -193,6 +199,150 @@ fn with_images(cmdline: &str, images: &[std::path::PathBuf]) -> String {
     format!("{}{} -", &t[..t.len() - 2], args)
 }
 
+/// 一次问答用了多少 token（拿不到时整个为空）
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct Usage {
+    /// 输入（含缓存命中的部分）
+    pub input: u64,
+    pub output: u64,
+    /// 输入里有多少是缓存命中的
+    pub cached: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Answer {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+}
+
+/// 怎么拿到用量：claude 加 --output-format json（一整段 JSON，里面有 result 和 usage）；
+/// codex 加 --json（事件流里有 token 用量）和 -o 文件（最后的回答）。别的命令原样输出。
+enum Stats {
+    None,
+    Claude,
+    Codex(std::path::PathBuf),
+}
+
+fn with_stats(cmdline: &str) -> (String, Stats) {
+    let t = cmdline.trim_end();
+    if exe_is(t, "claude")
+        && (t.contains(" -p") || t.contains(" --print"))
+        && !t.contains("--output-format")
+    {
+        return (format!("{t} --output-format json"), Stats::Claude);
+    }
+    if exe_is(t, "codex")
+        && t.contains(" exec")
+        && t.ends_with(" -")
+        && !t.contains("--json")
+        && !t.contains(" -o ")
+    {
+        let f = std::env::temp_dir().join(format!(
+            "xpanel-codex-{}-{}.txt",
+            std::process::id(),
+            now_nanos()
+        ));
+        return (
+            format!(
+                "{} --json -o \"{}\" -",
+                &t[..t.len() - 2],
+                f.to_string_lossy()
+            ),
+            Stats::Codex(f),
+        );
+    }
+    (cmdline.to_string(), Stats::None)
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
+fn num(v: &serde_json::Value, k: &str) -> u64 {
+    v.get(k).and_then(|x| x.as_u64()).unwrap_or(0)
+}
+
+/// claude -p --output-format json 的输出
+fn parse_claude(out: &str) -> Option<Result<Answer, String>> {
+    let v: serde_json::Value = serde_json::from_str(out.trim()).ok()?;
+    let text = v.get("result")?.as_str()?.trim().to_string();
+    if v.get("is_error").and_then(|x| x.as_bool()) == Some(true) {
+        return Some(Err(if text.is_empty() {
+            "AI 返回了错误".into()
+        } else {
+            text
+        }));
+    }
+    let usage = v.get("usage").map(|u| {
+        let cached = num(u, "cache_read_input_tokens");
+        Usage {
+            input: num(u, "input_tokens") + num(u, "cache_creation_input_tokens") + cached,
+            output: num(u, "output_tokens"),
+            cached,
+            cost_usd: v.get("total_cost_usd").and_then(|x| x.as_f64()),
+        }
+    });
+    Some(Ok(Answer { text, usage }))
+}
+
+/// codex exec --json 的事件流：找最后一个带 input_tokens / output_tokens 的用量，和最后一条回答
+fn parse_codex(out: &str) -> (Option<String>, Option<Usage>) {
+    fn find_usage(v: &serde_json::Value) -> Option<Usage> {
+        match v {
+            serde_json::Value::Object(m) => {
+                // 旧版的 token_count 事件里 total_token_usage 才是整次的总数
+                if let Some(t) = m.get("total_token_usage") {
+                    if let Some(u) = find_usage(t) {
+                        return Some(u);
+                    }
+                }
+                if m.get("input_tokens").is_some_and(|x| x.is_u64())
+                    && m.get("output_tokens").is_some_and(|x| x.is_u64())
+                {
+                    return Some(Usage {
+                        input: num(v, "input_tokens"),
+                        output: num(v, "output_tokens"),
+                        cached: num(v, "cached_input_tokens"),
+                        cost_usd: None,
+                    });
+                }
+                m.values().find_map(find_usage)
+            }
+            serde_json::Value::Array(a) => a.iter().find_map(find_usage),
+            _ => None,
+        }
+    }
+    let mut usage = None;
+    let mut text = None;
+    for line in out.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+        if let Some(u) = find_usage(&v) {
+            usage = Some(u);
+        }
+        // 新版：{"type":"item.completed","item":{"type":"agent_message","text":…}}；旧版：{"msg":{"type":"agent_message","message":…}}
+        for it in [v.get("item"), v.get("msg")].into_iter().flatten() {
+            if it.get("type").and_then(|x| x.as_str()) == Some("agent_message") {
+                if let Some(t) = it
+                    .get("text")
+                    .or_else(|| it.get("message"))
+                    .and_then(|x| x.as_str())
+                {
+                    text = Some(t.trim().to_string());
+                }
+            }
+        }
+    }
+    (text, usage)
+}
+
 /// 跑一次非交互的 AI 命令：提示词从标准输入传进去，返回标准输出。最多等 timeout 秒。
 pub fn ask(
     a: &Agent,
@@ -200,7 +350,7 @@ pub fn ask(
     prompt: &str,
     images: &[std::path::PathBuf],
     timeout: u64,
-) -> Result<String, String> {
+) -> Result<Answer, String> {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     let cmdline = ask_command(a).ok_or_else(|| {
@@ -209,7 +359,7 @@ pub fn ask(
             a.name
         )
     })?;
-    let cmdline = with_images(&cmdline, images);
+    let (cmdline, stats) = with_stats(&with_images(&cmdline, images));
     let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg(&cmdline);
@@ -282,13 +432,41 @@ pub fn ask(
             .into_iter()
             .rev()
             .collect();
+        if let Stats::Codex(f) = &stats {
+            let _ = fs::remove_file(f);
+        }
+        // claude 出错时也会把 JSON 打到标准输出
+        if let (Stats::Claude, Some(Err(e))) = (&stats, parse_claude(&out)) {
+            return Err(e);
+        }
         return Err(if tail.is_empty() {
             format!("「{cmdline}」没有返回内容")
         } else {
             tail
         });
     }
-    Ok(out)
+    match stats {
+        Stats::Claude => parse_claude(&out).unwrap_or(Ok(Answer {
+            text: out,
+            usage: None,
+        })),
+        Stats::Codex(f) => {
+            let last = fs::read_to_string(&f)
+                .ok()
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty());
+            let _ = fs::remove_file(&f);
+            let (text, usage) = parse_codex(&out);
+            match last.or(text) {
+                Some(text) => Ok(Answer { text, usage }),
+                None => Err("codex 没有返回回答".into()),
+            }
+        }
+        Stats::None => Ok(Answer {
+            text: out,
+            usage: None,
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -318,6 +496,51 @@ mod ask_tests {
     }
 
     #[test]
+    fn stats_flags_and_parsing() {
+        let (c, s) = with_stats("claude -p");
+        assert_eq!(c, "claude -p --output-format json");
+        assert!(matches!(s, Stats::Claude));
+        let (c, s) = with_stats("codex exec -i \"a.png\" -");
+        assert!(
+            c.starts_with("codex exec -i \"a.png\" --json -o \"") && c.ends_with("\" -"),
+            "{c}"
+        );
+        assert!(matches!(s, Stats::Codex(_)));
+        assert!(matches!(with_stats("dsh --once").1, Stats::None));
+        let a = parse_claude(r#"{"type":"result","is_error":false,"result":" 好 ","total_cost_usd":0.01,"usage":{"input_tokens":10,"cache_creation_input_tokens":100,"cache_read_input_tokens":1000,"output_tokens":42}}"#)
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.text, "好");
+        assert_eq!(
+            a.usage.unwrap(),
+            Usage {
+                input: 1110,
+                output: 42,
+                cached: 1000,
+                cost_usd: Some(0.01)
+            }
+        );
+        assert!(parse_claude(r#"{"is_error":true,"result":"额度用完"}"#)
+            .unwrap()
+            .is_err());
+        let (t, u) = parse_codex(
+            "{\"type\":\"thread.started\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"答案\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":500,\"cached_input_tokens\":300,\"output_tokens\":20}}",
+        );
+        assert_eq!(t.as_deref(), Some("答案"));
+        assert_eq!(
+            u.unwrap(),
+            Usage {
+                input: 500,
+                output: 20,
+                cached: 300,
+                cost_usd: None
+            }
+        );
+        let (_, u) = parse_codex("{\"msg\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":7,\"output_tokens\":3},\"last_token_usage\":{\"input_tokens\":1,\"output_tokens\":1}}}}");
+        assert_eq!(u.unwrap().input, 7);
+    }
+
+    #[test]
     fn codex_gets_images_as_flags() {
         let imgs = vec![std::path::PathBuf::from("/t/a.png")];
         assert_eq!(
@@ -336,7 +559,7 @@ mod ask_tests {
             cmd: String::new(),
             ask: "tr a-z A-Z".into(),
         };
-        assert_eq!(ask(&a, "", "hello", &[], 10).unwrap(), "HELLO");
+        assert_eq!(ask(&a, "", "hello", &[], 10).unwrap().text, "HELLO");
         let bad = Agent {
             name: "t".into(),
             cmd: String::new(),
