@@ -51,7 +51,7 @@ function DeviceForm({ d, onDone }: { d: Device | null; onDone: () => void }) {
   }
   const rowCls = "grid items-center gap-2";
   return (
-    <div className="flex flex-col gap-3 rounded-[14px] border-2 border-accent p-4">
+    <div className="flex flex-col gap-3 rounded-[14px] bg-surface-2/60 p-4 shadow-sel">
       <div className="grid grid-cols-[1fr_160px] gap-3">
         <Field label="名称（条目里 @名称 就会关联到这台）">
           <input autoFocus className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="如 台式机、BASE" />
@@ -185,7 +185,7 @@ function DeviceCard({ d, me, onEdit }: { d: Device; me: boolean; onEdit: () => v
   if ((d.aliases || []).length) kv.push(["别名", (d.aliases || []).join("、")]);
   const open = items.filter((i) => i.device === d.name && !i.done).length;
   return (
-    <div className="flex flex-col gap-2 rounded-[14px] border border-line p-4" data-dev-id={d.id}>
+    <div className="flex flex-col gap-2 rounded-[14px] p-4 shadow-1" data-dev-id={d.id}>
       <div className="flex items-center gap-2">
         <span className={cx("size-2 rounded-full", devOnline(d) ? "bg-ok" : "bg-line")} />
         <b>{d.name}</b>

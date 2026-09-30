@@ -142,7 +142,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
   }
   return (
     <div className={cx("group relative flex items-end justify-end gap-2 pt-7", ui.peek?.id === it.id && "[&_.bub]:ring-2 [&_.bub]:ring-accent")} data-iid={it.id}>
-      <div className="absolute top-0 right-0 z-10 hidden items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5 shadow-2 group-hover:flex">
+      <div className="absolute top-0 right-0 z-10 hidden items-center gap-0.5 rounded-lg bg-surface p-0.5 shadow-3 group-hover:flex">
         {TRIAGE.map(({ k, icon: Icon }) => (
           <button key={k} className={tool} title={`归到「${typeName(k)}」`} onClick={() => triage(k)}>
             <Icon style={{ color: `var(--${k})` }} />
@@ -524,7 +524,7 @@ export function InboxMain() {
 
   return (
     <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface shadow-2">
-      <header className="flex items-center gap-2.5 border-b border-line-soft px-5 py-3">
+      <header className="flex items-center gap-2.5 px-5 pt-3.5 pb-2">
         <h1 className="truncate text-[16px] font-bold" title={c?.name}>
           {c ? c.name : "随手记"}
         </h1>
@@ -570,7 +570,7 @@ export function InboxMain() {
           </div>
         )}
       </div>
-      <footer className="border-t border-line-soft px-5 py-3">
+      <footer className="px-5 pt-2 pb-4">
         {sel.size > 0 ? (
           <div className="flex flex-wrap items-center gap-2 text-[13px]">
             已选 <b>{sel.size}</b> 条<span className="grow" />
@@ -683,7 +683,7 @@ function Composer({ devices, onSent }: { devices: ReturnType<typeof useDevices>;
   return (
     <div className="flex flex-col gap-2">
       <PendingFiles box="inbox" />
-      <div className="flex items-end gap-2 rounded-[14px] border border-line bg-surface-2 py-1.5 pr-1.5 pl-3.5 focus-within:border-accent">
+      <div className="flex items-end gap-2 rounded-[14px] bg-surface-2/80 py-1.5 pr-1.5 pl-3.5 transition-shadow focus-within:bg-surface focus-within:shadow-2">
         <textarea
           ref={ta}
           id="xp-inbox-input"

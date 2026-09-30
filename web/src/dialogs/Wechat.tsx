@@ -280,7 +280,7 @@ function AppendDialog({ it, close }: { it: Item; close: () => void }) {
   }
   return (
     <Dialog title="追加到笔记" desc="这条内容（文字和截图）会接在所选笔记的末尾，然后从收件箱移走。" onClose={close}>
-      <label className="flex h-9 items-center gap-2 rounded-[10px] border border-line px-3 text-muted focus-within:border-accent">
+      <label className="flex h-9 items-center gap-2 rounded-[10px] bg-surface-2/70 px-3 text-muted">
         <Search className="size-4" />
         <input autoFocus className="min-w-0 grow bg-transparent text-fg outline-none" value={q} onChange={(e) => setQ(e.target.value)} placeholder="找笔记" aria-label="找笔记" />
       </label>

@@ -50,7 +50,7 @@ export function Dialog({
           onEscapeKeyDown={(e) => !dismissable && e.preventDefault()}
           onPointerDownOutside={(e) => !dismissable && e.preventDefault()}
           className={cx(
-            "fixed top-1/2 left-1/2 z-40 flex max-h-[min(88vh,900px)] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[18px] border border-line bg-surface shadow-3 outline-none",
+            "fixed top-1/2 left-1/2 z-40 flex max-h-[min(88vh,900px)] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[18px] bg-surface shadow-3 outline-none",
             wide ? "max-w-[860px]" : "max-w-[560px]",
           )}
         >
@@ -66,7 +66,7 @@ export function Dialog({
             )}
           </div>
           <div className="scroll-quiet flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-3">{children}</div>
-          {footer && <div className="flex flex-wrap items-center gap-2 border-t border-line-soft px-6 py-3.5">{footer}</div>}
+          {footer && <div className="flex flex-wrap items-center gap-2 px-6 pt-2 pb-5">{footer}</div>}
         </D.Content>
       </D.Portal>
     </D.Root>

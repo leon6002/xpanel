@@ -82,8 +82,8 @@ function NoteCard({ it, on }: { it: Item; on: boolean }) {
       onClick={() => select(it.id)}
       aria-current={on || undefined}
       className={cx(
-        "flex w-full flex-col gap-1.5 rounded-[14px] border-2 bg-surface px-4 py-3.5 text-left transition-shadow",
-        on ? "border-accent shadow-[0_6px_18px_rgb(47_91_234/0.10)]" : "border-transparent shadow-1 hover:shadow-2",
+        "flex w-full flex-col gap-1.5 rounded-[14px] bg-surface px-4 py-3.5 text-left transition-shadow",
+        on ? "shadow-sel" : "shadow-1 hover:shadow-2",
       )}
     >
       <span className="line-clamp-2 text-[15px] font-semibold text-fg">
@@ -110,8 +110,8 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
   return (
     <div
       className={cx(
-        "group flex items-start gap-2.5 rounded-xl border-2 bg-surface px-3 py-2.5 transition-shadow",
-        on ? "border-accent" : "border-transparent shadow-1 hover:shadow-2",
+        "group flex items-start gap-2.5 rounded-xl bg-surface px-3 py-2.5 transition-shadow",
+        on ? "shadow-sel" : "shadow-1 hover:shadow-2",
       )}
     >
       <button
@@ -153,7 +153,7 @@ function LinkRow({ it, on }: { it: Item; on: boolean }) {
   const ui = useUi();
   const t = entryTarget(it);
   return (
-    <div className={cx("group flex items-center gap-2 rounded-xl border-2 bg-surface px-3.5 py-2.5", on ? "border-accent" : "border-transparent shadow-1 hover:shadow-2")}>
+    <div className={cx("group flex items-center gap-2 rounded-xl bg-surface px-3.5 py-2.5 transition-shadow", on ? "shadow-sel" : "shadow-1 hover:shadow-2")}>
       <button onClick={() => ui.select(it.id)} className="flex min-w-0 grow flex-col text-left">
         <span className="truncate text-[14px] font-semibold">
           {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}

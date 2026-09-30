@@ -11,7 +11,7 @@ function FileChip({ box, f }: { box: Box; f: ReturnType<typeof useDrafts.getStat
   const src = f.url || saved;
   const [big, setBig] = useState(false);
   return (
-    <div className={cx("group relative h-14 overflow-hidden rounded-lg border border-line bg-surface-2", f.uploading && "opacity-60")} title={f.label}>
+    <div className={cx("group relative h-14 overflow-hidden rounded-lg bg-surface-2 shadow-1", f.uploading && "opacity-60")} title={f.label}>
       {f.isImg ? (
         src ? (
           <img src={src} alt={f.label} className="h-full w-auto max-w-[120px] cursor-zoom-in object-cover" onClick={() => setBig(true)} />

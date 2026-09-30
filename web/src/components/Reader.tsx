@@ -1,5 +1,5 @@
 /* 阅读 / 编辑一条：主界面右边的阅读区，和任何页面都能打开的右侧浮出面板（Peek）共用 */
-import { Copy, ExternalLink, Folder, Maximize2, Minimize2, PanelRightOpen, Pin, Plus, Sparkles, Trash2, X, FileText } from "lucide-react";
+import { CalendarDays, Copy, ExternalLink, Flag, Folder, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Plus, Sparkles, Trash2, X, FileText } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
@@ -70,7 +70,7 @@ function ProgressList({ it }: { it: Item }) {
   const list = (it.agentProgress || []).slice().reverse();
   if (!list.length) return null;
   return (
-    <section className="mt-8 border-t border-line pt-4">
+    <section className="mt-12">
       <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-muted">
         <Sparkles className="size-4" /> AI 进展
       </h3>
@@ -113,7 +113,7 @@ function QaSection({ it, lost, root }: { it: Item; lost: Set<string>; root: Reac
   const [armed, setArmed] = useState<string | null>(null);
   if (!list.length && !pending.length)
     return (
-      <section className="qasec mt-8 flex flex-wrap items-center gap-2 border-t border-line-soft pt-4 text-xs text-faint" data-qa-skip>
+      <section className="qasec mt-12 flex flex-wrap items-center gap-2 text-xs text-faint" data-qa-skip>
         选中正文里的一段文字就能「问 AI」，问答会挂在原文旁边。
         <Button tone="ghost" className="h-7 px-2 text-xs" onClick={() => openAsk({ itemId: it.id, quote: "", prefix: "", suffix: "" })}>
           <Sparkles className="size-3.5" />
@@ -150,7 +150,7 @@ function QaSection({ it, lost, root }: { it: Item; lost: Set<string>; root: Reac
         )}
       </h3>
       {pending.map((p, i) => (
-        <div key={"p" + i} className="flex flex-col gap-1.5 rounded-[14px] border border-dashed border-line p-3">
+        <div key={"p" + i} className="flex flex-col gap-1.5 rounded-[14px] bg-surface-2/60 p-3">
           <span className="line-clamp-2 rounded bg-mark px-1.5 text-xs text-mark-fg">{p.quote || "整篇笔记"}</span>
           <div className="text-[13.5px] font-semibold">{p.q}</div>
           <div className="flex items-center gap-2 text-xs text-muted">
@@ -169,7 +169,7 @@ function QaSection({ it, lost, root }: { it: Item; lost: Set<string>; root: Reac
             {lost.has(q.id) && <span className="ml-1.5 rounded bg-danger-soft px-1 text-danger">原文已删改</span>}
           </button>
           {(q.turns || []).map((t, i) => (
-            <div key={i} className={cx("flex flex-col gap-1", i > 0 && "border-t border-dashed border-line pt-2")}>
+            <div key={i} className={cx("flex flex-col gap-1", i > 0 && "mt-2")}>
               <div className="text-[13.5px] font-semibold text-fg">{t.q}</div>
               <Md src={t.a} className="!text-[13px] !leading-[1.75]" />
               <div className="text-xs text-faint">
@@ -265,7 +265,18 @@ async function insertFiles(files: File[], ta: HTMLTextAreaElement, setBody: (fn:
   }
 }
 
-const smallInput = "h-8 rounded-lg bg-surface-2 px-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent/40";
+/* 编辑时的属性（分类、标签、设备…）：平时就是一行淡色文字，鼠标移上去 / 输入时才有浅底色，不画框 */
+const quiet =
+  "h-7 min-w-0 appearance-none rounded-md bg-transparent px-1.5 text-[13px] text-muted outline-none transition-colors placeholder:text-faint hover:bg-surface-2 focus:bg-surface-2 focus:text-fg";
+const smallInput = quiet;
+function Prop({ icon: Icon, children, title }: { icon: typeof Folder; children: ReactNode; title: string }) {
+  return (
+    <span className="inline-flex items-center gap-0.5 text-faint [&>svg]:size-3.5 [&>svg]:shrink-0" title={title}>
+      <Icon />
+      {children}
+    </span>
+  );
+}
 
 function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) => void; focusTitle?: boolean }) {
   const { data } = useAppState();
@@ -330,7 +341,7 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
   const x = latest(it);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3" data-editor>
+    <div className="flex min-h-0 flex-1 flex-col gap-2" data-editor>
       <input
         ref={titleRef}
         value={title}
@@ -340,57 +351,69 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
         }}
         onBlur={flush}
         placeholder={x.type === "note" ? noteTitle({ ...x, title: "" }) : x.type === "link" ? "名称，如：项目面板" : "标题"}
-        className="bg-transparent text-[24px] font-bold text-fg outline-none placeholder:text-faint"
+        className="bg-transparent text-[26px] leading-snug font-bold text-fg outline-none placeholder:text-faint"
         aria-label="标题"
       />
-      <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        <input
-          list="xp-cats"
-          defaultValue={x.category || ""}
-          key={"c" + (x.category || "")}
-          onBlur={(e) => {
-            const v = normCat(e.target.value);
-            if (v !== (x.category || "")) set({ category: v || undefined }).then(() => say(v ? "已放到「" + v + "」" : "已设为未分类"));
-          }}
-          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-          placeholder="分类，如 工作/周报"
-          className={smallInput + " w-44"}
-          aria-label="分类"
-        />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+        <Prop icon={Folder} title="分类（可用 / 分层）">
+          <input
+            list="xp-cats"
+            defaultValue={x.category || ""}
+            key={"c" + (x.category || "")}
+            onBlur={(e) => {
+              const v = normCat(e.target.value);
+              if (v !== (x.category || "")) set({ category: v || undefined }).then(() => say(v ? "已放到「" + v + "」" : "已设为未分类"));
+            }}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            placeholder="未分类"
+            className={quiet + " field-sizing-content min-w-12"}
+            aria-label="分类"
+          />
+        </Prop>
         <datalist id="xp-cats">
           {cats.map((c) => (
             <option key={c} value={c} />
           ))}
         </datalist>
-        <TagInput tags={x.tags || []} all={tags} onChange={(t) => set({ tags: t })} />
-        <select value={x.device || ""} onChange={(e) => set({ device: e.target.value })} className={smallInput} aria-label="设备">
-          <option value="">不限设备</option>
-          {[...new Set([...devices.map((d) => d.name), ...(x.device ? [x.device] : [])])].map((d) => (
-            <option key={d}>{d}</option>
-          ))}
-        </select>
+        <Prop icon={Hash} title="标签">
+          <TagInput tags={x.tags || []} all={tags} onChange={(t) => set({ tags: t })} />
+        </Prop>
+        {(devices.length > 0 || x.device) && (
+          <Prop icon={Monitor} title="相关设备">
+            <select value={x.device || ""} onChange={(e) => set({ device: e.target.value })} className={quiet} aria-label="设备">
+              <option value="">不限设备</option>
+              {[...new Set([...devices.map((d) => d.name), ...(x.device ? [x.device] : [])])].map((d) => (
+                <option key={d}>{d}</option>
+              ))}
+            </select>
+          </Prop>
+        )}
         {isCheckable(x.type) && (
           <>
-            <select value={x.priority || ""} onChange={(e) => set({ priority: (e.target.value || undefined) as Priority | undefined })} className={smallInput} aria-label="优先级">
-              <option value="">无优先级</option>
-              <option value="P0">P0 紧急</option>
-              <option value="P1">P1 高</option>
-              <option value="P2">P2 中</option>
-              <option value="P3">P3 低</option>
-            </select>
-            <input type="date" value={x.due || ""} onChange={(e) => set({ due: e.target.value || undefined })} className={smallInput} aria-label="截止日期" />
-            <span className="flex gap-0.5 text-xs">
-              {["今天", "明天", "下周一"].map((w) => (
-                <button key={w} className="rounded-md px-1.5 py-1 text-muted hover:bg-surface-3 hover:text-fg" onClick={() => set({ due: parseDue(w) || undefined })}>
-                  {w}
-                </button>
-              ))}
-              {x.due && (
-                <button className="rounded-md px-1.5 py-1 text-muted hover:bg-surface-3 hover:text-fg" title="清除日期" onClick={() => set({ due: undefined })}>
-                  ×
-                </button>
-              )}
-            </span>
+            <Prop icon={Flag} title="优先级">
+              <select value={x.priority || ""} onChange={(e) => set({ priority: (e.target.value || undefined) as Priority | undefined })} className={quiet} aria-label="优先级">
+                <option value="">无优先级</option>
+                <option value="P0">P0 紧急</option>
+                <option value="P1">P1 高</option>
+                <option value="P2">P2 中</option>
+                <option value="P3">P3 低</option>
+              </select>
+            </Prop>
+            <Prop icon={CalendarDays} title="截止日期">
+              <input type="date" value={x.due || ""} onChange={(e) => set({ due: e.target.value || undefined })} className={quiet} aria-label="截止日期" />
+              <span className="flex gap-0.5 text-xs">
+                {["今天", "明天", "下周一"].map((w) => (
+                  <button key={w} className="rounded-md px-1.5 py-1 text-faint hover:bg-surface-2 hover:text-fg" onClick={() => set({ due: parseDue(w) || undefined })}>
+                    {w}
+                  </button>
+                ))}
+                {x.due && (
+                  <button className="rounded-md px-1.5 py-1 text-faint hover:bg-surface-2 hover:text-fg" title="清除日期" onClick={() => set({ due: undefined })}>
+                    ×
+                  </button>
+                )}
+              </span>
+            </Prop>
           </>
         )}
         <span className="ml-auto text-xs text-faint">{saved}</span>
@@ -422,7 +445,8 @@ function Editor({ it, onLive, focusTitle }: { it: Item; onLive?: (body: string) 
             ? "网址或路径，如 \\\\NAS\\share、http://192.168.1.10:8080；下面可以写备注"
             : "支持 Markdown：# 标题、- 列表、- [ ] 待办、`代码`、表格…  截图可以直接粘贴，文件可以拖进来"
         }
-        className="min-h-0 flex-1 resize-none rounded-xl bg-surface-2 px-4 pt-4 pb-28 font-mono text-[13.5px] leading-[1.8] text-fg outline-none focus:ring-2 focus:ring-accent/30"
+        spellCheck={false}
+        className="mt-2 min-h-0 flex-1 resize-none bg-transparent pb-40 text-[15px] leading-[1.85] text-fg-2 outline-none placeholder:text-faint"
         aria-label="正文"
       />
     </div>
@@ -439,9 +463,9 @@ function TagInput({ tags, all, onChange }: { tags: string[]; all: string[]; onCh
   return (
     <span className="flex flex-wrap items-center gap-1">
       {tags.map((t) => (
-        <span key={t} className="inline-flex items-center gap-0.5 rounded-md bg-surface-3 pl-2 text-xs text-fg-2">
-          #{t}
-          <button aria-label={"去掉标签 " + t} title="去掉" className="px-1.5 text-faint hover:text-danger" onClick={() => onChange(tags.filter((x) => x !== t))}>
+        <span key={t} className="group/tag inline-flex items-center rounded-md pl-1 text-[13px] text-fg-2 hover:bg-surface-2">
+          {t}
+          <button aria-label={"去掉标签 " + t} title="去掉" className="px-1 text-faint opacity-0 group-hover/tag:opacity-100 hover:text-danger" onClick={() => onChange(tags.filter((x) => x !== t))}>
             ×
           </button>
         </span>
@@ -457,8 +481,8 @@ function TagInput({ tags, all, onChange }: { tags: string[]; all: string[]; onCh
           }
         }}
         onBlur={add}
-        placeholder="+ 标签"
-        className={smallInput + " w-24"}
+        placeholder={tags.length ? "+" : "添加标签"}
+        className={smallInput + " field-sizing-content min-w-6"}
         aria-label="添加标签"
       />
       <datalist id="xp-tags">
@@ -487,7 +511,7 @@ function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-5 py-3.5">
+      <div className="flex flex-wrap items-center gap-2 px-5 pt-3.5 pb-1">
         <Segmented
           label="显示方式"
           value={mode}
@@ -569,7 +593,7 @@ function ItemView({ it, mode, setMode, bar, wide, focusTitle }: { it: Item; mode
           <ReadBody it={it} onEdit={() => setMode("edit")} />
         </div>
       ) : (
-        <div className={cx("flex min-h-0 flex-1 gap-6 px-8 py-5", mode === "split" && "flex-row")}>
+        <div className={cx("flex min-h-0 flex-1 gap-8 px-8 pt-6", mode === "split" && "flex-row")}>
           <div className={cx("flex min-h-0 flex-col", mode === "split" ? "w-1/2" : "flex-1")}>
             <Editor key={it.id} it={it} onLive={mode === "split" ? setLive : undefined} focusTitle={focusTitle} />
           </div>
@@ -649,7 +673,7 @@ export function Peek() {
     <aside
       aria-label="右侧阅读"
       style={full ? undefined : { width: w }}
-      className={cx("fixed top-4 right-4 bottom-4 z-30 flex flex-col overflow-hidden rounded-[18px] border border-line bg-surface shadow-3", full && "left-4")}
+      className={cx("fixed top-4 right-4 bottom-4 z-30 flex flex-col overflow-hidden rounded-[18px] bg-surface shadow-3", full && "left-4")}
     >
       {!full && (
         <div

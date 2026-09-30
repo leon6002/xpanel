@@ -129,7 +129,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
       tabIndex={0}
       onClick={() => setMode(k)}
       onKeyDown={(e) => e.key === " " && setMode(k)}
-      className={cx("flex cursor-pointer flex-col gap-2.5 rounded-[14px] border-2 p-4", mode === k ? "border-accent bg-accent-soft/40" : "border-line hover:border-faint")}
+      className={cx("flex cursor-pointer flex-col gap-2.5 rounded-[14px] p-4 transition-shadow", mode === k ? "shadow-sel" : "shadow-1 hover:shadow-2")}
     >
       <h3 className="text-[14.5px] font-semibold">{title}</h3>
       <p className="text-xs text-muted">{desc}</p>

@@ -333,7 +333,7 @@ function TemplatesDialog({ close }: { close: () => void }) {
       }
     >
       {(list || []).map((t, i) => (
-        <div key={t.id} className="flex flex-col gap-2.5 rounded-xl border border-line p-3.5">
+        <div key={t.id} className="flex flex-col gap-2.5 rounded-xl bg-surface-2/60 p-3.5">
           <div className="flex items-center gap-2">
             <input className={inputCls + " max-w-[240px] font-semibold"} value={t.name} onChange={(e) => upd(i, { name: e.target.value })} placeholder="模板名" />
             <span className="text-xs text-faint">id：{t.id}</span>
