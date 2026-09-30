@@ -173,6 +173,9 @@
 .prose-x input[type="checkbox"] { accent-color: var(--accent); margin-right: 0.5em; }
 .prose-x a { color: var(--fg); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent); text-underline-offset: 3px; }
 .prose-x a:hover { color: var(--accent-strong); text-decoration-color: currentColor; }
+/* 引用另一条：浅底小块，不画下划线 */
+.prose-x a.xp-ref, .xp-editor a[href^="xpanel:"] { background: var(--accent-soft); color: var(--accent-strong); text-decoration: none; border-radius: 5px; padding: 0 4px; cursor: pointer; }
+.prose-x a.xp-ref::before, .xp-editor a[href^="xpanel:"]::before { content: "↗ "; font-size: 0.85em; opacity: 0.7; }
 .prose-x strong { color: var(--fg); }
 .prose-x code { font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-2); border-radius: 6px; padding: 0.1em 0.4em; }
 .prose-x pre { background: var(--surface-2); border-radius: 12px; padding: 14px 16px; overflow-x: auto; line-height: 1.7; }

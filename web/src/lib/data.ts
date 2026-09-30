@@ -113,13 +113,27 @@ export function saveItem(item: Item) {
   });
 }
 
-export function patchItem(it: Item, ch: Partial<Item>) {
+/** 改一条的几个字段：只把改的字段发给主机，在主机的最新内容上合并（本机缓存旧了也不会把别处的改动盖掉）。
+ *  expect：这些字段在主机上应该还是这个值，对不上就拒绝（冲突），见编辑器的冲突处理 */
+export function patchItem(it: Item, ch: Partial<Item>, opts: { expect?: Partial<Item> } = {}) {
   const cur = qc.getQueryData<State>(["state"])?.items.find((x) => x.id === it.id) ?? it;
-  const next: Item = { ...cur, ...ch, updatedAt: Date.now() };
+  const now = Date.now();
+  const set: Record<string, unknown> = { updatedAt: now };
+  const unset: string[] = [];
+  for (const [k, v] of Object.entries(ch)) {
+    if (k === "id") continue;
+    if (v === undefined) unset.push(k);
+    else set[k] = v;
+  }
   // 勾选完成时记下完成时间
-  if (ch.done === true && !cur.done) next.doneAt = Date.now();
-  if (ch.done === false) delete next.doneAt;
-  return saveItem(next);
+  if (ch.done === true && !cur.done) set.doneAt = now;
+  if (ch.done === false) unset.push("doneAt");
+  const next = { ...cur, ...set } as Item;
+  for (const k of unset) delete (next as Record<string, unknown>)[k];
+  return commit({ kind: "patch", id: cur.id, set, unset, ...(opts.expect ? { expect: opts.expect as Record<string, unknown> } : {}) }, (s) => ({
+    ...s,
+    items: s.items.map((x) => (x.id === cur.id ? next : x)),
+  }));
 }
 
 export async function addItem(p: Partial<Item> & { type: Item["type"]; title: string }) {

@@ -20,6 +20,10 @@
   （`src-tauri/src/agent.rs` 的 `ask`，提示词走标准输入，claude → `claude -p`、codex → `codex exec -`）。界面在 `web/src/components/Comments.tsx`。
   存在条目的 `qa`（`{id, quote, prefix, suffix, at, resolved?, turns:[{q,a,at,by}]}`：q 是人写的、a 是 AI 的回答、by 是哪个 AI），
   按原话 + 前后文定位；全文索引包含评论内容；MCP 的 `xpanel_add_qa` 写的也是这个字段。
+- 关联：条目的 `links: [{id, label?}]`（发起方存，另一边显示「关联了这条」）；正文里 `[标题](xpanel:item/ID)` 是引用（编辑器里输入 `[[`）。
+  界面 `web/src/lib/links.ts` + `web/src/components/Related.tsx`。评论里 @AI 时关联条目的内容和附件一起给 AI；AI 的回答可以「存为笔记」并以「产出」关联回来。
+- 多台电脑同时改：界面改字段用 `patch` 操作（`xp-core` 的 `Op::Patch`，只发改动的字段，在主机的最新内容上合并）；
+  编辑器保存标题、正文时带 `expect`（这边最后同步到的内容），主机上对不上就返回冲突（409），界面提示「用对方的 / 用我的 / 两份都留」，不会静默覆盖。
 - 子笔记：条目的 `parentId` 指向父笔记（笔记、规范）。找不到父笔记就当顶层；删除父笔记时子笔记挪到上一层（`xp-store` 的 `soft_delete`）。
   界面 `web/src/lib/tree.ts` + `web/src/components/Tree.tsx`（路径、子笔记列表、移动到…、列表里拖动改层级）。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。

@@ -46,14 +46,17 @@ pub enum StoreError {
     NotFound(String),
     /// 暂时存不了、读不了，比如磁盘问题（503，客户端应稍后重试）
     Unavailable(String),
+    /// 别处刚改过，这次修改基于旧内容（409，界面让用户选留哪份）
+    Conflict(String),
 }
 
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            StoreError::Invalid(m) | StoreError::NotFound(m) | StoreError::Unavailable(m) => {
-                f.write_str(m)
-            }
+            StoreError::Invalid(m)
+            | StoreError::NotFound(m)
+            | StoreError::Unavailable(m)
+            | StoreError::Conflict(m) => f.write_str(m),
         }
     }
 }
@@ -243,6 +246,12 @@ impl Store {
         let (_, rev) = self.write(|tx| {
             match op {
                 Op::Upsert { item } => upsert(tx, item, actor, now)?,
+                Op::Patch {
+                    id,
+                    set,
+                    unset,
+                    expect,
+                } => patch(tx, &id, set, unset, expect, actor, now)?,
                 Op::Delete { id } => {
                     soft_delete(tx, &id, actor, now)?;
                 }
@@ -718,6 +727,48 @@ fn upsert(tx: &Connection, mut item: Value, actor: &str, now: f64) -> Result<()>
         Some(&item),
         None,
     )
+}
+
+/// 按字段改一条：在主机上的最新内容上合并，expect 对不上就是冲突
+fn patch(
+    tx: &Connection,
+    id: &str,
+    set: Map<String, Value>,
+    unset: Vec<String>,
+    expect: Option<Map<String, Value>>,
+    actor: &str,
+    now: f64,
+) -> Result<()> {
+    let Some(row) = read_row(tx, id)?.filter(|r| r.deleted_at.is_none()) else {
+        return Err(StoreError::NotFound(format!(
+            "找不到条目 {id}（可能已经在别处删除了）"
+        )));
+    };
+    let mut item = row.data;
+    // 没有这个字段和空字符串算一样（界面上都是空）
+    let norm = |v: Option<&Value>| match v {
+        None | Some(Value::Null) => Value::String(String::new()),
+        Some(v) => v.clone(),
+    };
+    for (k, v) in expect.iter().flatten() {
+        if norm(item.get(k)) != norm(Some(v)) {
+            return Err(StoreError::Conflict(
+                "另一台电脑刚改过这条，这次修改没有保存（以免覆盖对方的内容）".into(),
+            ));
+        }
+    }
+    let Some(o) = item.as_object_mut() else {
+        return Err(invalid("条目不是 JSON 对象"));
+    };
+    for k in &unset {
+        o.remove(k);
+    }
+    let stamped = set.contains_key("updatedAt");
+    o.extend(set);
+    if !stamped {
+        o.insert("updatedAt".into(), json!(now));
+    }
+    upsert(tx, item, actor, now)
 }
 
 /// 软删除；返回是否真的删了（本来就不存在或已删则为 false）。

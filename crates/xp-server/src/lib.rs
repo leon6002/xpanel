@@ -82,6 +82,7 @@ impl From<StoreError> for ApiError {
             StoreError::Invalid(m) => ApiError(StatusCode::BAD_REQUEST, m),
             StoreError::NotFound(m) => ApiError(StatusCode::NOT_FOUND, m),
             StoreError::Unavailable(m) => ApiError(StatusCode::SERVICE_UNAVAILABLE, m),
+            StoreError::Conflict(m) => ApiError(StatusCode::CONFLICT, m),
         }
     }
 }

@@ -37,7 +37,10 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { copyText, errText, putAsset } from "../lib/api";
 import { editorExtensions, tidyMarkdown, useGentleMarkdown, XImage } from "../lib/editor";
-import { clipFiles, fileLabel, isImgFile } from "../lib/logic";
+import { clipFiles, fileLabel, isImgFile, noteTitle } from "../lib/logic";
+import { qc } from "../lib/data";
+import { REF_PREFIX } from "../lib/links";
+import { typeName, type State } from "../lib/types";
 import { useUi } from "../lib/store";
 import { cx } from "../lib/cx";
 import { Lightbox, ResizableImage, useAssetUrl, useOpenAsset } from "./Markdown";
@@ -130,7 +133,7 @@ const BLOCKS: Cmd[] = [
 /** 在块菜单里「转换为」能用的 */
 const TURN = BLOCKS.filter((b) => !["table", "hr", "img"].some((k) => b.key.startsWith(k)));
 
-const useSlash = create<{ open: boolean; items: Cmd[]; index: number; rect: DOMRect | null; pick: ((c: Cmd) => void) | null }>(() => ({
+const useSlash = create<{ owner?: unknown; open: boolean; items: Cmd[]; index: number; rect: DOMRect | null; pick: ((c: Cmd) => void) | null }>(() => ({
   open: false,
   items: [],
   index: 0,
@@ -172,6 +175,97 @@ const setHover = (editor: Editor, pos: number | null) => {
   editor.view.dispatch(editor.state.tr.setMeta(hoverKey, pos).setMeta("addToHistory", false));
 };
 
+/* ---------------------------------------------------------------- [[ 引用另一条 */
+
+type Ref = { id: string; title: string; kind: string };
+const useRefMenu = create<{ owner?: unknown; open: boolean; items: Ref[]; index: number; rect: DOMRect | null; pick: ((r: Ref) => void) | null }>(() => ({
+  open: false,
+  items: [],
+  index: 0,
+  rect: null,
+  pick: null,
+}));
+/** 正在编辑的是哪条（引用里排除自己） */
+let editingId = "";
+
+const RefCommand = Extension.create({
+  name: "xpRef",
+  addProseMirrorPlugins() {
+    return [
+      Suggestion<Ref, Ref>({
+        editor: this.editor,
+        pluginKey: new PluginKey("xpRef"),
+        char: "[[",
+        allowSpaces: true,
+        allowedPrefixes: null,
+        items: ({ query }) => {
+          const w = query.toLowerCase().split(/\s+/).filter(Boolean);
+          const items = qc.getQueryData<State>(["state"])?.items ?? [];
+          return items
+            .filter((x) => x.id !== editingId && x.type !== "inbox")
+            .map((x) => ({ id: x.id, title: x.type === "note" ? noteTitle(x) : x.title || "(无标题)", kind: typeName(x.type), at: x.updatedAt }))
+            .filter((x) => w.every((k) => x.title.toLowerCase().includes(k)))
+            .sort((a, b) => b.at - a.at)
+            .slice(0, 8);
+        },
+        command: ({ editor, range, props }) => {
+          editor
+            .chain()
+            .focus()
+            .deleteRange(range as Range)
+            .insertContent([
+              { type: "text", text: props.title, marks: [{ type: "link", attrs: { href: REF_PREFIX + props.id } }] },
+              { type: "text", text: " " },
+            ])
+            .run();
+        },
+        render: () => ({
+          onStart: (p) => useRefMenu.setState({ owner: p.editor, open: true, items: p.items, index: 0, rect: p.clientRect?.() ?? null, pick: (c) => p.command(c) }),
+          onUpdate: (p) => useRefMenu.setState({ owner: p.editor, open: true, items: p.items, index: 0, rect: p.clientRect?.() ?? null, pick: (c) => p.command(c) }),
+          onKeyDown: ({ event }) => {
+            const s = useRefMenu.getState();
+            if (!s.open || !s.items.length) return false;
+            if (event.key === "ArrowDown") return useRefMenu.setState({ index: (s.index + 1) % s.items.length }), true;
+            if (event.key === "ArrowUp") return useRefMenu.setState({ index: (s.index - 1 + s.items.length) % s.items.length }), true;
+            if (event.key === "Enter") return s.pick?.(s.items[s.index]), true;
+            if (event.key === "Escape") return useRefMenu.setState({ open: false }), true;
+            return false;
+          },
+          // 编辑器重建时旧的那个退出，别把新的菜单关掉
+          onExit: (p) => useRefMenu.getState().owner === p.editor && useRefMenu.setState({ open: false, pick: null }),
+        }),
+      }),
+    ];
+  },
+});
+
+function RefMenu() {
+  const { open, items, index, rect, pick } = useRefMenu();
+  if (!open || !rect) return null;
+  const below = rect.bottom + 320 < window.innerHeight;
+  return (
+    <div
+      className="fixed z-50 w-72 overflow-hidden rounded-xl bg-surface p-1 shadow-3"
+      style={{ left: Math.min(rect.left, window.innerWidth - 300), ...(below ? { top: rect.bottom + 6 } : { bottom: window.innerHeight - rect.top + 6 }) }}
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      <div className="px-2.5 pt-1 pb-1.5 text-[11px] text-faint">引用另一条（也会算作关联）</div>
+      {items.map((c, i) => (
+        <button
+          key={c.id}
+          onClick={() => pick?.(c)}
+          onMouseEnter={() => useRefMenu.setState({ index: i })}
+          className={cx("flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13.5px]", i === index ? "bg-surface-2 text-fg" : "text-fg-2")}
+        >
+          <span className="w-10 shrink-0 text-[11px] text-faint">{c.kind}</span>
+          <span className="grow truncate">{c.title}</span>
+        </button>
+      ))}
+      {!items.length && <div className="px-2.5 py-2 text-xs text-faint">没有找到，换个词试试</div>}
+    </div>
+  );
+}
+
 const SlashCommand = Extension.create({
   name: "slash",
   addProseMirrorPlugins() {
@@ -189,8 +283,8 @@ const SlashCommand = Extension.create({
           props.run(editor);
         },
         render: () => ({
-          onStart: (p) => useSlash.setState({ open: true, items: p.items, index: 0, rect: p.clientRect?.() ?? null, pick: (c) => p.command(c) }),
-          onUpdate: (p) => useSlash.setState({ items: p.items, index: 0, rect: p.clientRect?.() ?? null, pick: (c) => p.command(c) }),
+          onStart: (p) => useSlash.setState({ owner: p.editor, open: true, items: p.items, index: 0, rect: p.clientRect?.() ?? null, pick: (c) => p.command(c) }),
+          onUpdate: (p) => useSlash.setState({ owner: p.editor, open: true, items: p.items, index: 0, rect: p.clientRect?.() ?? null, pick: (c) => p.command(c) }),
           onKeyDown: ({ event }) => {
             const s = useSlash.getState();
             if (!s.open || !s.items.length) return false;
@@ -200,7 +294,7 @@ const SlashCommand = Extension.create({
             if (event.key === "Escape") return useSlash.setState({ open: false }), true;
             return false;
           },
-          onExit: () => useSlash.setState({ open: false, pick: null }),
+          onExit: (p) => useSlash.getState().owner === p.editor && useSlash.setState({ open: false, pick: null }),
         }),
       }),
     ];
@@ -268,6 +362,9 @@ function MenuItem({ icon: Icon, children, onSelect, danger }: { icon: typeof Cop
   );
 }
 
+/* 要是固定的对象：DragHandle 在它变化时会重新注册插件，所有插件视图都跟着重建，打到一半的 / 和 [[ 菜单就被关掉了 */
+const HANDLE_POS = { placement: "left-start", strategy: "absolute" } as const;
+
 function BlockHandle({ editor }: { editor: Editor }) {
   const cur = useRef<{ node: PMNode | null; pos: number }>({ node: null, pos: -1 });
   const [menu, setMenu] = useState(false);
@@ -308,7 +405,7 @@ function BlockHandle({ editor }: { editor: Editor }) {
         cur.current = { node, pos };
         setHover(editor, node ? pos : null);
       }}
-      computePositionConfig={{ placement: "left-start", strategy: "absolute" }}
+      computePositionConfig={HANDLE_POS}
     >
       <div className="flex items-center pr-1.5 text-faint">
         <button title="在下面插入（也可以输入 /）" onClick={addBelow} className="grid size-6 place-items-center rounded-md hover:bg-surface-2 hover:text-fg [&_svg]:size-4">
@@ -391,15 +488,19 @@ export function BlockEditor({
 }: {
   value: string;
   onChange: (md: string) => void;
-  api: React.MutableRefObject<(() => string | null) | null>;
+  /** 取当前正文（没改过返回 null）；peek = 只看，不打断还没交出去的改动 */
+  api: React.MutableRefObject<((peek?: boolean) => string | null) | null>;
   itemId: string;
 }) {
   const dirty = useRef(false);
   const timer = useRef<number | undefined>(undefined);
+  /** 有改动还没通过 onChange 交出去 */
+  const pending = useRef(false);
+  editingId = itemId;
   const openAsset = useOpenAsset();
   const editor = useEditor(
     {
-      extensions: editorExtensions([SlashCommand, BlockHover], { image: XImageView as never, codeBlock: XCodeBlock }),
+      extensions: editorExtensions([SlashCommand, RefCommand, BlockHover], { image: XImageView as never, codeBlock: XCodeBlock }),
       content: value,
       contentType: "markdown",
       immediatelyRender: true,
@@ -424,6 +525,12 @@ export function BlockEditor({
         handleClickOn: (_view, _pos, node, _npos, e) => {
           // Ctrl / ⌘ + 点击链接：打开
           const a = (e.target as HTMLElement).closest("a");
+          // 引用另一条：直接点就在右侧打开
+          const ref = a?.getAttribute("href") || "";
+          if (ref.startsWith(REF_PREFIX)) {
+            useUi.getState().openPeek(ref.slice(REF_PREFIX.length));
+            return true;
+          }
           if (a && (e.ctrlKey || e.metaKey)) {
             const h = a.getAttribute("href") || "";
             if (h.startsWith("asset:")) openAsset(h.slice(6));
@@ -437,22 +544,29 @@ export function BlockEditor({
       onUpdate: ({ editor: ed, transaction }) => {
         if (!transaction.docChanged) return;
         dirty.current = true;
+        pending.current = true;
         window.clearTimeout(timer.current);
-        timer.current = window.setTimeout(() => onChange(tidyMarkdown(ed.getMarkdown())), 400);
+        timer.current = window.setTimeout(() => {
+          pending.current = false;
+          onChange(tidyMarkdown(ed.getMarkdown()));
+        }, 400);
       },
     },
     [itemId],
   );
   useGentleMarkdown(editor);
   useEffect(() => {
-    api.current = () => {
+    api.current = (peek) => {
       if (!dirty.current || !editor || editor.isDestroyed) return null;
-      window.clearTimeout(timer.current);
+      if (!peek) {
+        window.clearTimeout(timer.current);
+        pending.current = false;
+      }
       return tidyMarkdown(editor.getMarkdown());
     };
     return () => {
-      // 卸载前把最后的改动交出去
-      if (dirty.current && editor && !editor.isDestroyed) onChange(tidyMarkdown(editor.getMarkdown()));
+      // 卸载前把还没交出去的改动交出去（已经交过的不再交：内容可能已经换成了别的电脑的版本）
+      if (pending.current && editor && !editor.isDestroyed) onChange(tidyMarkdown(editor.getMarkdown()));
       window.clearTimeout(timer.current);
       api.current = null;
     };
@@ -464,6 +578,7 @@ export function BlockEditor({
       <BlockHandle editor={editor} />
       <EditorContent editor={editor} className="pb-8" />
       <SlashMenu />
+      <RefMenu />
     </div>
   );
 }

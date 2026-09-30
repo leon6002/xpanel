@@ -68,6 +68,8 @@ fn item_fields() -> Value {
         "category": {"type":"string","description":"分类路径，如 工作/AutoSAR"},
         "device": {"type":"string","description":"相关设备名"},
         "parentId": {"type":"string","description":"可选。父笔记的 id：写成它的子笔记（笔记和规范可以分层）"},
+        "links": {"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"label":{"type":"string"}},"required":["id"]},
+                  "description":"可选。关联的其他条目，label 写关系（如 岗位、简历、题库、流程、工具、产出）。读一条时顺着 links 用 xpanel_get_item 取关联内容"},
         "id": {"type":"string","description":"可选。指定 id 就是幂等写入：重复提交只会更新，不会多出一条"}
     })
 }
@@ -78,11 +80,11 @@ pub fn tools() -> Value {
          "inputSchema": {"type":"object","properties": with(filter_props(), json!({
             "limit":{"type":"integer","default":50,"maximum":5000},"offset":{"type":"integer","default":0}}))},
          "annotations":{"readOnlyHint":true}},
-        {"name":"xpanel_get_item","description":"读取一条完整的条目（含正文）。",
+        {"name":"xpanel_get_item","description":"读取一条完整的条目（含正文）。links 里是关联的条目 id 和关系标签（岗位、简历、题库等），需要时再逐个读取。",
          "inputSchema":{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]},"annotations":{"readOnlyHint":true}},
         {"name":"xpanel_create_items","description":"新建一条或多条条目。每条至少要有 title；指定 id 可以幂等写入。",
          "inputSchema":{"type":"object","properties":{"items":{"type":"array","minItems":1,"items":{"type":"object","properties":item_fields(),"required":["title"]}}},"required":["items"]}},
-        {"name":"xpanel_update_item","description":"按字段修改一条条目：只改传了的字段，值为 null 表示删除这个字段。可改 title/body/type/priority/due/tags/category/device/pinned/done/parentId 等。",
+        {"name":"xpanel_update_item","description":"按字段修改一条条目：只改传了的字段，值为 null 表示删除这个字段。可改 title/body/type/priority/due/tags/category/device/pinned/done/parentId/links 等（links 要整体传新数组）。",
          "inputSchema":{"type":"object","properties":{"id":{"type":"string"},"patch":{"type":"object","description":"要改的字段，如 {\"priority\":\"P1\",\"due\":\"2026-10-08\"}"}},"required":["id","patch"]},
          "annotations":{"idempotentHint":true}},
         {"name":"xpanel_complete_item","description":"把待办 / 问题 / 灵感标成完成（done=false 则取消完成）。",

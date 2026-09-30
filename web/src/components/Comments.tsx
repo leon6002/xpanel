@@ -3,17 +3,17 @@
    thread = {id, quote, prefix, suffix, at, resolved?, turns:[{q, a, at, by}]}
    - q：人写的话（可能为空：同一条评论 @ 了多个 AI 时，后面几个 AI 的回答各占一轮）
    - a：AI 的回答（没 @ AI 时为空），by：回答的 AI */
-import { AtSign, Check, ChevronDown, Copy, CornerDownRight, FileText, MessageSquare, RotateCcw, Send, Trash2, X } from "lucide-react";
+import { AtSign, Check, ChevronDown, Copy, FilePlus2, CornerDownRight, FileText, MessageSquare, RotateCcw, Send, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { copyText, desk, errText, isApp, newId } from "../lib/api";
-import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
-import { buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
+import { addItem, patchItem, qc, useAppState, useConfig, useThisDevice } from "../lib/data";
+import { assetRefs, buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
+import { addLink, relatedOf } from "../lib/links";
 import { ls, useUi } from "../lib/store";
 import type { Agent, Item, Qa, State, Usage } from "../lib/types";
 import { myWorkspace } from "../lib/ws";
-import { imageRefs } from "../lib/logic";
 import { cx } from "../lib/cx";
 import { Md } from "./Markdown";
 import { Button } from "./ui";
@@ -69,7 +69,10 @@ export async function postComment(opts: { itemId: string; text: string; sel?: Om
       const p: PendingQ = { q: question, quote: thread?.quote || "", agent: a.name, thread: tid };
       pend((l) => [...l, p]);
       try {
-        const r = await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev), imageRefs(it.body), it.id);
+        // 关联的条目（岗位、简历、题库…）一起给 AI，里面的图片和附件也一起放进工作目录
+        const rel = relatedOf(qc.getQueryData<State>(["state"])?.items ?? [], it).slice(0, 20);
+        const files = [...new Set([it, ...rel.map((r) => r.item)].flatMap((x) => assetRefs(x.body)))];
+        const r = await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev, rel), files, it.id);
         const answer = String(r.text || "").trim();
         const usage = r.usage ? { usage: r.usage } : {};
         await saveThread(itemId, (list) => {
@@ -381,7 +384,24 @@ function UsageLine({ u }: { u: Usage }) {
   );
 }
 
-function Answer({ id, text, usage }: { id: string; text: string; usage?: Usage }) {
+/** 把一条 AI 回答存成笔记，并关联回这条（标签「产出」）；标题取回答里的第一个标题，没有就用问题 */
+async function saveAnswer(it: Item, q: Qa, ti: number, agents: Agent[]) {
+  const t = (q.turns || [])[ti];
+  if (!t?.a) return;
+  const ask = [...(q.turns || []).slice(0, ti + 1)].reverse().find((x) => x.q)?.q || "";
+  const h = t.a.match(/^#{1,3}\s+(.+)$/m)?.[1];
+  const qTitle = stripMentions(ask, agents);
+  const title = (h && !/^(结论|总结|回答)$/.test(h.trim()) ? h : qTitle || h || "AI 回答").replace(/[*`#]/g, "").trim().slice(0, 40);
+  const quote = q.quote ? q.quote.split("\n").map((l) => "> " + l).join("\n") + "\n\n" : "";
+  const n = await addItem({ type: "note", title, body: quote + t.a, category: it.category || undefined, tags: [...(it.tags || [])] }).catch(() => null);
+  if (!n) return say("没存成");
+  await addLink(it, n.id, "产出").catch(() => {});
+  await saveThread(it.id, (list) => list.map((x) => (x.id === q.id ? { ...x, turns: x.turns.map((y, i) => (i === ti ? { ...y, saved: n.id } : y)) } : x)));
+  useUi.getState().say(`已存为笔记「${title}」并关联`, { label: "打开", run: () => useUi.getState().openPeek(n.id) });
+}
+
+function Answer({ id, text, usage, saved, onSave }: { id: string; text: string; usage?: Usage; saved?: string; onSave?: () => void }) {
+  const savedItem = useAppState().data?.items.find((x) => x.id === saved);
   const open = useAnsOpen((s) => !!s.open[id]);
   const toggle = useAnsOpen((s) => s.toggle);
   const box = useRef<HTMLDivElement>(null);
@@ -400,13 +420,26 @@ function Answer({ id, text, usage }: { id: string; text: string; usage?: Usage }
       >
         <Md src={text} className={cx("!text-[13.5px] !leading-[1.75]", !open && long && "cursor-pointer")} />
       </div>
-      {(long || usage) && (
-        <div className="mt-0.5 flex items-center gap-2">
+      {(long || usage || onSave) && (
+        <div className="mt-0.5 flex flex-wrap items-center gap-2">
           {long && (
             <button onClick={() => toggle(id)} className="flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5">
               <ChevronDown className={cx("transition-transform", open && "rotate-180")} />
               {open ? "收起" : "展开回答"}
             </button>
+          )}
+          {savedItem ? (
+            <button onClick={() => useUi.getState().openPeek(savedItem.id)} className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5" title="打开存下来的笔记">
+              <FileText />
+              已存为「{savedItem.title}」
+            </button>
+          ) : (
+            onSave && (
+              <button onClick={onSave} className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5" title="存成一篇笔记，并关联到这条">
+                <FilePlus2 />
+                存为笔记
+              </button>
+            )
           )}
           {usage && <UsageLine u={usage} />}
         </div>
@@ -433,7 +466,7 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
   const resolved = !!(q as Qa & { resolved?: boolean }).resolved;
   const msgs = (q.turns || []).flatMap((t, i) => [
     ...(t.q ? [{ key: i + "q", who: "我", ai: false, text: t.q, at: t.at }] : []),
-    ...(t.a ? [{ key: i + "a", who: t.by || "AI", ai: true, text: t.a, at: t.at, usage: t.usage }] : []),
+    ...(t.a ? [{ key: i + "a", who: t.by || "AI", ai: true, text: t.a, at: t.at, usage: t.usage, ti: i, saved: t.saved }] : []),
   ]);
   const set = (ch: Partial<Qa> & { resolved?: boolean }) => saveThread(it.id, (list) => list.map((x) => (x.id === q.id ? { ...x, ...ch } : x)));
   return (
@@ -456,7 +489,9 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
         <div key={m.key} className="group/msg flex gap-2.5">
           {avatar(m.who, m.ai, `${m.who} · ${new Date(m.at).toLocaleString()}`)}
           <div className="min-w-0 grow pt-px">
-            {m.ai ? <Answer id={q.id + ":" + m.key} text={m.text} usage={"usage" in m ? m.usage : undefined} /> : <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg-2">{highlightMentions(m.text, agents)}</div>}
+            {m.ai && "ti" in m && m.ti != null ? (
+              <Answer id={q.id + ":" + m.key} text={m.text} usage={m.usage} saved={m.saved} onSave={() => saveAnswer(it, q, m.ti!, agents)} />
+            ) : <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-fg-2">{highlightMentions(m.text, agents)}</div>}
           </div>
           <span className="shrink-0 pt-1 text-[11px] text-faint opacity-0 transition-opacity group-hover/msg:opacity-100">
             {new Date(m.at).toLocaleString([], { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}

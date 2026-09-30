@@ -211,6 +211,18 @@ fn apply_local(items: &mut Vec<Value>, op: Op) {
             None => items.push(item),
         },
         Op::Delete { id } => items.retain(|x| id_of(x).as_deref() != Some(id.as_str())),
+        Op::Patch { id, set, unset, .. } => {
+            if let Some(o) = items
+                .iter_mut()
+                .find(|x| id_of(x).as_deref() == Some(id.as_str()))
+                .and_then(|x| x.as_object_mut())
+            {
+                for k in &unset {
+                    o.remove(k);
+                }
+                o.extend(set);
+            }
+        }
         Op::Import { items: incoming } => {
             for it in incoming {
                 let Some(id) = id_of(&it) else { continue };

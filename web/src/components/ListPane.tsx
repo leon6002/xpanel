@@ -1,5 +1,5 @@
 /* 中间的列表：事项（焦点 + 三栏）、笔记、入口（按所在机器分组）、规范 */
-import { Check, ChevronRight, Copy, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Search, Server, Star } from "lucide-react";
+import { Check, ChevronRight, Copy, Link2, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Search, Server, Star } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { copyText, openTarget } from "../lib/api";
 
@@ -30,6 +30,7 @@ import { cx } from "../lib/cx";
 import { Thumb } from "./Markdown";
 import { rootDropProps, SubRows, useNoteDnd } from "./Tree";
 import { buildTree, useOpenNodes } from "../lib/tree";
+import { linksOf } from "../lib/links";
 import { Button, Chip, Pri } from "./ui";
 
 export function useFilter() {
@@ -74,6 +75,11 @@ function ItemMeta({ it }: { it: Item }) {
       {di && <Chip tone={di.tone === "late" ? "danger" : di.tone === "soon" ? "warn" : "plain"}>{di.text}</Chip>}
       {it.category && ui.cat !== it.category && <span className="text-muted">{it.category}</span>}
       {(it.qa || []).length > 0 && <Chip>{(it.qa || []).length} 条评论</Chip>}
+      {linksOf(it).length > 0 && (
+        <span className="inline-flex items-center gap-0.5 text-muted [&_svg]:size-3" title="关联的条目">
+          <Link2 /> {linksOf(it).length}
+        </span>
+      )}
       {p && <Chip tone={p.status === "blocked" ? "danger" : p.status === "done" ? "accent" : "warn"}>AI {p.status === "blocked" ? "卡住了" : p.status === "done" ? "完成" : "进行中"}</Chip>}
       {ws && (
         <Chip>

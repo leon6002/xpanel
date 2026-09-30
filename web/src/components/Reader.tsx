@@ -1,9 +1,10 @@
 /* 阅读 / 编辑一条：主界面右边的阅读区，和任何页面都能打开的右侧浮出面板（Peek）共用 */
-import { CalendarDays, Copy, ExternalLink, FilePlus2, FoldHorizontal, UnfoldHorizontal, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
+import { CalendarDays, Copy, Link2, ExternalLink, FilePlus2, FoldHorizontal, UnfoldHorizontal, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
 import { create } from "zustand";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
-import { patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
+import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
+import { addLink } from "../lib/links";
 import { autoTitle, dueInfo, entryTarget, findTarget, noteTitle, normCat, allCats, allTags, parseDue, setImageWidth, ago, assetMd, fileLabel, isImgFile, clipFiles } from "../lib/logic";
 import { ls, useUi, type View } from "../lib/store";
 import type { Item, ItemType, Priority, State } from "../lib/types";
@@ -15,6 +16,7 @@ import { openAgent } from "../dialogs/Agent";
 import { Md } from "./Markdown";
 import { CommentsSection, flash } from "./Comments";
 import { Breadcrumb, ChildNotes, openMove, type OpenFn } from "./Tree";
+import { RelatedSection, openLinkPicker } from "./Related";
 import { addChild, canNest } from "../lib/tree";
 import { Button, Chip, IconButton, Segmented } from "./ui";
 
@@ -122,6 +124,7 @@ function ReadBody({ it, onEdit, open }: { it: Item; onEdit: () => void; open: Op
         </div>
         <ProgressList it={it} />
       </article>
+      {it.type !== "inbox" && <RelatedSection it={it} />}
       {canNest(it) && <ChildNotes it={it} open={open} />}
       <CommentsSection it={it} lost={lost} root={root} />
     </div>
@@ -168,8 +171,17 @@ const BlockEditor = lazy(() => import("./BlockEditor").then((m) => ({ default: m
 
 /** rich：所见即所得的块编辑器；否则是 Markdown 源码 */
 function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focusTitle?: boolean; open: OpenFn }) {
-  const richApi = useRef<(() => string | null) | null>(null);
+  const richApi = useRef<((peek?: boolean) => string | null) | null>(null);
   const { data } = useAppState();
+  /* 多台电脑同时开着同一篇：base 是这边最后一次和主机一致的内容。
+     - 这边没改过、别处改了 → 直接换成别处的版本（不会拿旧内容去覆盖）
+     - 两边都改了 → 不自动保存，提示选用哪一份 */
+  const base = useRef({ title: it.title || "", body: it.body || "" });
+  const [conflict, setConflict] = useState<Item | null>(null);
+  const conflictRef = useRef<Item | null>(null);
+  conflictRef.current = conflict;
+  const alive = useRef(true);
+  const [rev, setRev] = useState(0);
   const devices = useDevices();
   const [title, setTitle] = useState(it.title);
   const [body, setBodyRaw] = useState(it.body || "");
@@ -181,14 +193,48 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
   const titleRef = useRef<HTMLInputElement>(null);
   const edRoot = useRef<HTMLDivElement>(null);
 
+  /** 这边现在的内容（peek：不打断编辑器里还没交出来的改动） */
+  const mine = (peek?: boolean) => {
+    const fresh = richApi.current?.(peek);
+    if (fresh != null && !peek) cur.current = { ...cur.current, body: fresh };
+    return { title: cur.current.title, body: fresh ?? cur.current.body };
+  };
+  const changed = (m: { title: string; body: string }) => m.title.trim() !== base.current.title.trim() || m.body !== base.current.body;
+  const remoteMoved = (x: Item) => (x.title || "") !== base.current.title || (x.body || "") !== base.current.body;
+  const adopt = (x: Item) => {
+    base.current = { title: x.title || "", body: x.body || "" };
+    cur.current = { ...base.current };
+    setTitle(base.current.title);
+    setBodyRaw(base.current.body);
+    setRev((r) => r + 1);
+  };
+  /** 两边都改了、又没法问（比如关掉了）：把这边的另存一篇并关联，不覆盖别处的 */
+  const keepMineAsCopy = async (m: { title: string; body: string }, x: Item) => {
+    const n = await addItem({ type: "note", title: `${m.title.trim() || x.title || "笔记"}（冲突时这台电脑的版本）`, body: m.body, category: x.category || undefined, tags: [...(x.tags || [])] }).catch(() => null);
+    if (!n) return;
+    await addLink(x, n.id, "冲突版本").catch(() => {});
+    say(`另一台电脑也改了「${x.title || "这篇"}」，这边的修改另存为一篇并关联了`, { label: "打开", run: () => useUi.getState().openPeek(n.id) });
+  };
+
   const flush = () => {
     window.clearTimeout(timer.current);
     timer.current = undefined;
     const x = latest(it);
-    let t = cur.current.title.trim();
-    const fresh = richApi.current?.();
-    if (fresh != null) cur.current = { ...cur.current, body: fresh };
-    const b = cur.current.body;
+    const m = mine();
+    if (!changed(m)) return alive.current && setSaved("已保存");
+    if (remoteMoved(x)) {
+      // 别处也改过：内容正好一样就算了，否则不覆盖
+      if ((x.body || "") === m.body && (x.title || "") === m.title.trim()) {
+        base.current = { title: x.title || "", body: x.body || "" };
+        return alive.current && setSaved("已保存");
+      }
+      if (!alive.current) return void keepMineAsCopy(m, x);
+      setConflict(x);
+      return setSaved("没保存：另一台电脑也改了");
+    }
+    if (conflictRef.current) return;
+    let t = m.title.trim();
+    const b = m.body;
     if (!t && x.type === "link") {
       const tg = findTarget(b);
       if (tg) t = autoTitle(tg);
@@ -198,12 +244,40 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
       if (b === (x.body || "")) return;
       t = x.title;
     }
-    if (t === x.title && b === (x.body || "")) return setSaved("已保存");
-    patchItem(x, { title: t, body: b }).then(
-      () => setSaved("已保存"),
-      () => setSaved("保存失败"),
+    if (t === x.title && b === (x.body || "")) return alive.current && setSaved("已保存");
+    // 主机上的标题、正文应该还是这边最后一次同步到的样子；对不上（别处刚改过）主机会拒绝，不会被覆盖
+    const prev = base.current;
+    base.current = { title: t, body: b };
+    patchItem(x, { title: t, body: b }, { expect: { title: prev.title, body: prev.body } }).then(
+      () => alive.current && setSaved("已保存"),
+      (e) => {
+        base.current = prev;
+        // 编辑器已经关了：这边的改动另存一篇，别丢
+        if (!alive.current) return void (/另一台电脑/.test(errText(e)) && keepMineAsCopy({ title: t, body: b }, latest(it)));
+        setSaved(/另一台电脑/.test(errText(e)) ? "没保存：另一台电脑也改了" : "保存失败");
+      },
     );
   };
+  // 主机上的内容变了（别的电脑改的）
+  useEffect(() => {
+    const x = latest(it);
+    if (!remoteMoved(x)) return;
+    const m = mine(true);
+    if ((x.body || "") === m.body && (x.title || "") === m.title.trim()) {
+      base.current = { title: x.title || "", body: x.body || "" };
+      return;
+    }
+    if (!changed(m)) {
+      adopt(x);
+      setSaved("已换成其他电脑刚保存的内容");
+      return;
+    }
+    window.clearTimeout(timer.current);
+    timer.current = undefined;
+    setConflict(x);
+    setSaved("没保存：另一台电脑也改了");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [it.title, it.body]);
   const schedule = () => {
     setSaved("正在保存…");
     window.clearTimeout(timer.current);
@@ -222,7 +296,15 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
     window.addEventListener("beforeunload", save);
     return () => {
       window.removeEventListener("beforeunload", save);
-      save();
+      alive.current = false;
+      // 有冲突没处理就关掉了：这边的另存一份；否则照常保存（flush 自己会再检查一次）
+      const c = conflictRef.current;
+      if (c) {
+        const m = mine();
+        if (changed(m)) void keepMineAsCopy(m, latest(it));
+      } else save();
+      // 编辑器卸载时可能还会交出最后的改动，稍后再存一次
+      window.setTimeout(() => !conflictRef.current && flush(), 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -311,13 +393,65 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
         )}
         <span className="ml-auto text-xs text-faint">{saved}</span>
       </div>
+      {conflict && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-warn-soft px-3.5 py-2.5 text-[13px] text-warn-fg">
+          <span className="grow">
+            <b>另一台电脑也改了这篇</b>，这边还有没保存的修改，先选一下留哪份。
+          </span>
+          <Button
+            tone="ghost"
+            className="h-7 px-2 text-xs"
+            title="换成另一台电脑的版本；这边的修改复制到剪贴板"
+            onClick={async () => {
+              const m = mine();
+              await copyText(m.body);
+              const x = latest(it);
+              setConflict(null);
+              adopt(x);
+              setSaved("已换成另一台电脑的版本");
+              say("已换成另一台电脑的版本，你这边的内容复制到剪贴板了");
+            }}
+          >
+            用对方的
+          </Button>
+          <Button
+            tone="ghost"
+            className="h-7 px-2 text-xs"
+            title="用这边的内容覆盖另一台电脑的"
+            onClick={() => {
+              const x = latest(it);
+              base.current = { title: x.title || "", body: x.body || "" };
+              setConflict(null);
+              conflictRef.current = null;
+              flush();
+            }}
+          >
+            用我的
+          </Button>
+          <Button
+            tone="soft"
+            className="h-7 px-2.5 text-xs"
+            title="这边的另存为一篇并关联，这篇换成另一台电脑的版本"
+            onClick={async () => {
+              const m = mine();
+              const x = latest(it);
+              setConflict(null);
+              adopt(x);
+              await keepMineAsCopy(m, x);
+            }}
+          >
+            两份都留
+          </Button>
+        </div>
+      )}
       {rich ? (
         <div ref={edRoot} className="-ml-12 mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto scroll-quiet">
           <Suspense fallback={<div className="flex-[1_0_auto] pl-12 text-sm text-faint">正在打开编辑器…</div>}>
-            <BlockEditor value={body} itemId={it.id} api={richApi} onChange={(md) => setBody(() => md)} />
+            <BlockEditor key={rev} value={body} itemId={it.id} api={richApi} onChange={(md) => setBody(() => md)} />
           </Suspense>
           {x.type !== "link" && (
             <div className="pb-40 pl-12" data-qa-skip>
+              <RelatedSection it={x} />
               <CommentsSection it={x} lost={noLost} root={edRoot} />
             </div>
           )}
@@ -509,6 +643,11 @@ function ItemView({
               <FolderInput />
             </IconButton>
           </>
+        )}
+        {it.type !== "inbox" && (
+          <IconButton label="关联…（岗位、简历、题库等）" onClick={() => openLinkPicker(latest(it))}>
+            <Link2 />
+          </IconButton>
         )}
         <IconButton label={ws ? "继续交给 AI（笔记有更新时只交新增的）" : isApp ? "交给 AI" : "复制给 AI 的提示词"} onClick={() => openAgent(latest(it))}>
           <Sparkles />

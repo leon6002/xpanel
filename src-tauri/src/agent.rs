@@ -172,8 +172,8 @@ pub fn ask_command(a: &Agent) -> Option<String> {
     }
 }
 
-/// 问答时笔记里的图片放在工作目录的这个子目录（界面写提示词时用同样的相对路径）
-pub const ASK_IMAGES: &str = ".xpanel/ask-images";
+/// 问答时笔记（和关联条目）里的图片、附件放在工作目录的这个子目录（界面写提示词时用同样的相对路径）
+pub const ASK_FILES: &str = ".xpanel/ask-files";
 
 fn exe_is(cmdline: &str, name: &str) -> bool {
     cmdline.split_whitespace().next().is_some_and(|x| {
@@ -192,10 +192,22 @@ fn with_images(cmdline: &str, images: &[std::path::PathBuf]) -> String {
     if images.is_empty() || !exe_is(t, "codex") || !t.contains(" exec") || !t.ends_with(" -") {
         return cmdline.to_string();
     }
+    // -i 只能附图片；PDF 之类的附件 codex 自己去读文件
     let args: String = images
         .iter()
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+                matches!(
+                    e.to_ascii_lowercase().as_str(),
+                    "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+                )
+            })
+        })
         .map(|p| format!(" -i \"{}\"", p.to_string_lossy()))
         .collect();
+    if args.is_empty() {
+        return cmdline.to_string();
+    }
     format!("{}{} -", &t[..t.len() - 2], args)
 }
 
@@ -542,7 +554,10 @@ mod ask_tests {
 
     #[test]
     fn codex_gets_images_as_flags() {
-        let imgs = vec![std::path::PathBuf::from("/t/a.png")];
+        let imgs = vec![
+            std::path::PathBuf::from("/t/a.png"),
+            std::path::PathBuf::from("/t/cv.pdf"),
+        ];
         assert_eq!(
             with_images("codex exec -", &imgs),
             "codex exec -i \"/t/a.png\" -"

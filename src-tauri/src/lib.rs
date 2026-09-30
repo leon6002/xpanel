@@ -424,8 +424,8 @@ async fn run_agent(
 }
 
 /// 问 AI 一个问题（不开窗口），返回回答。cwd 是笔记展开的项目目录时，AI 能看到里面的材料。
-/// images 是笔记里的图片（附件名）：先写到工作目录的 `.xpanel/ask-images/` 里，提示词里写的就是这些相对路径，
-/// AI 用读文件的工具就能看到图片内容（codex 另外用 -i 直接附上）。
+/// images 是笔记和关联条目里的图片、附件（附件名）：先写到工作目录的 `.xpanel/ask-files/` 里，提示词里写的就是这些相对路径，
+/// AI 用读文件的工具就能看到内容（图片 codex 另外用 -i 直接附上）。
 #[tauri::command]
 async fn ask_ai(
     s: St<'_>,
@@ -454,7 +454,7 @@ async fn ask_ai(
         let mut files = vec![];
         let names = images.unwrap_or_default();
         if !names.is_empty() {
-            let d = run.join(agent::ASK_IMAGES);
+            let d = run.join(agent::ASK_FILES);
             std::fs::create_dir_all(&d).map_err(|e| format!("建图片目录失败：{e}"))?;
             for n in names.iter().take(40) {
                 let Ok(n) = xp_store::safe_asset_name(n) else {
