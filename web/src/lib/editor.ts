@@ -102,3 +102,39 @@ export function tidyMarkdown(md: string) {
     .join("")
     .replace(/\s+$/, "");
 }
+
+/* ---- 粘贴 Markdown ----
+   从 VS Code、终端、AI 对话里复制的通常只有纯文本（或者没有结构的 HTML），直接粘贴会把 # > - ``` 当成普通文字。
+   看着像 Markdown 就按 Markdown 解析再插入；网页里复制的有结构的内容（标题、列表、表格标签）照旧按网页格式粘贴。 */
+export function looksLikeMarkdown(t: string) {
+  if (!/\n/.test(t)) return /\*\*[^*\n]+\*\*|\[[^\]\n]+\]\([^)\s]+\)|^#{1,6}\s/.test(t);
+  let score = 0;
+  for (const l of t.split(/\r?\n/)) {
+    if (/^#{1,6}\s/.test(l) || /^```/.test(l)) score += 2;
+    else if (/^\s*([-*+]|\d+[.)])\s+\S/.test(l) || /^>\s?/.test(l) || /^\|.*\|\s*$/.test(l) || /^\s*[-*+]\s+\[[ xX]\]\s/.test(l) || /^(-{3,}|\*{3,})\s*$/.test(l)) score += 1;
+    if (score >= 3) return true;
+  }
+  if (/\*\*[^*\n]+\*\*/.test(t)) score += 1;
+  if (/\[[^\]\n]+\]\([^)\s]+\)/.test(t)) score += 1;
+  return score >= 2;
+}
+/** 剪贴板里的 HTML 带不带结构（从网页复制的）；编辑器、终端给的 HTML 只有 div/span */
+export const isRichHtml = (html: string) => /<(h[1-6]|ul|ol|li|table|blockquote|strong|em|a|img)[\s>]/i.test(html);
+
+/** 以前按纯文本粘进来的 Markdown（# > ``` 被转义成了普通文字，每行各成一段）：
+ *  去掉转义；被误认成代码块的缩进行还原成缩进；代码块和引用里每行之间多出来的空行去掉 */
+export function repairMarkdown(md: string) {
+  // 1. 真正的无语言代码块（原来缩进 4 格的行被当成了代码）还原成缩进的行，下一步和前后的 ``` 拼回一个代码块
+  let s = md.includes("\\`\\`\\`") ? md.replace(/^```\n([\s\S]*?)\n```$/gm, (_m, code: string) => code.split("\n").map((l) => "    " + l).join("\n")) : md;
+  // 2. 去掉转义
+  s = s
+    .replace(/\\([\\`*_{}[\]()#+\-.!>~|<])/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+  // 3. 代码块里每行之间的空行
+  s = s.replace(/^```[^\n]*\n[\s\S]*?^```/gm, (block) => block.replace(/\n\n/g, "\n"));
+  // 4. 连续的引用行之间的空行（本来是同一段引用）
+  s = s.replace(/^(>.*)\n\n(?=>)/gm, "$1\n");
+  return s;
+}
