@@ -242,6 +242,18 @@ export function fileLabel(f: File) {
 export const assetMd = (isImg: boolean, label: string, name: string) => (isImg ? `![${label}](asset:${name})` : `[📎 ${label}](asset:${name})`);
 /** 只有截图、没写字时自动起的标题 */
 export const INBOX_AUTO = /^(截图|附件) \d+-\d+ \d\d:\d\d$/;
+/** 收件箱里的一条，标题要不要和正文一起显示（复制、合并、追加到笔记时同理）。下面两种标题是多余的，返回空：
+    - 只发了图片或附件时自动起的「截图 10-09 18:45」；
+    - 发的字太长时从开头截出来的（末尾带 …，全文在正文里），或者正文第一行就是标题。 */
+export function inboxTitle(it: { title?: string; body?: string }) {
+  const t = (it.title || "").trim();
+  const b = (it.body || "").trim();
+  if (!t || !b) return t;
+  if (INBOX_AUTO.test(t)) return "";
+  if (t.endsWith("…") && t.length > 1 && b.startsWith(t.slice(0, -1))) return "";
+  if (b.split("\n", 1)[0].trim() === t) return "";
+  return t;
+}
 export const hm = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 export function dayLabel(d: string) {
   if (d === dateStr(new Date())) return "今天";

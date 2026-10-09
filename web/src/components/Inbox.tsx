@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { copyText, errText, v1, v1Text } from "../lib/api";
 import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useChats, useDevices, useMe } from "../lib/data";
 import { useDrafts } from "../lib/drafts";
-import { INBOX_AUTO, assetMd, dateStr, dayLabel, dueInfo, findTarget, hm, nowLabel, parseCapture, shortTime } from "../lib/logic";
+import { INBOX_AUTO, assetMd, inboxTitle, dateStr, dayLabel, dueInfo, findTarget, hm, nowLabel, parseCapture, shortTime } from "../lib/logic";
 import { useUi } from "../lib/store";
 import type { Chat, Item, ItemType, Msg } from "../lib/types";
 import { typeName } from "../lib/types";
@@ -120,7 +120,7 @@ export function InboxList() {
 function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecting: boolean; toggle: () => void }) {
   const ui = useUi();
   const d = new Date(it.createdAt || 0);
-  const showTitle = !(INBOX_AUTO.test(it.title || "") && it.body);
+  const title = inboxTitle(it);
   const di = dueInfo(it);
   const tool = "inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5";
   async function triage(type: ItemType) {
@@ -161,7 +161,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
         <button className={tool} title="在右侧打开" aria-label="在右侧打开" onClick={() => ui.openPeek(it.id)}>
           <PanelRight />
         </button>
-        <button className={tool} title="复制文字" aria-label="复制文字" onClick={async () => say((await copyText([it.title, it.body].filter(Boolean).join("\n"))) ? "已复制" : "复制失败")}>
+        <button className={tool} title="复制文字" aria-label="复制文字" onClick={async () => say((await copyText([title, it.body].filter(Boolean).join("\n"))) ? "已复制" : "复制失败")}>
           <Copy />
         </button>
         <button
@@ -192,7 +192,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
           className={cx("bub rounded-[16px] rounded-br-[6px] px-3.5 py-2.5 text-[14px] break-words", sel ? "bg-ink text-on-ink [&_.prose-x]:text-on-ink" : "bg-accent-soft text-fg")}
           onClick={(e) => selecting && !(e.target as HTMLElement).closest("a,img") && toggle()}
         >
-          {showTitle && <div className="whitespace-pre-wrap">{it.title}</div>}
+          {title && <div className="whitespace-pre-wrap">{title}</div>}
           {it.body && <Md src={it.body} className="!text-[14px] [&_img]:max-h-[280px]" />}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 text-[11.5px] text-faint">
@@ -397,8 +397,7 @@ export function InboxMain() {
       const first = list[0];
       const parts = list
         .map((it, i) => {
-          const t = INBOX_AUTO.test(it.title || "") && it.body ? "" : it.title;
-          return i === 0 ? it.body || "" : [t, it.body].filter(Boolean).join("\n");
+          return i === 0 ? it.body || "" : [inboxTitle(it), it.body].filter(Boolean).join("\n");
         })
         .filter(Boolean);
       await patchItem(first, {

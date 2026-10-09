@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { errText, fileB64, v1 } from "../lib/api";
 import { patchItem, qc, removeItem, useAppState, useChats, useMe } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
-import { INBOX_AUTO, ago, byRecent, dayLabel, noteTitle, shortTime } from "../lib/logic";
+import { ago, inboxTitle, byRecent, dayLabel, noteTitle, shortTime } from "../lib/logic";
 import { ls, useUi } from "../lib/store";
 import type { Bundle, Chat, Item, WxPreview } from "../lib/types";
 import { Button, ConfirmButton, ErrorText, Field, inputCls } from "../components/ui";
@@ -266,7 +266,7 @@ function AppendDialog({ it, close }: { it: Item; close: () => void }) {
     })
     .slice(0, 30);
   async function pick(n: Item) {
-    const title = INBOX_AUTO.test(it.title || "") && it.body ? "" : it.title;
+    const title = inboxTitle(it);
     const add = [title, it.body].filter(Boolean).join("\n\n");
     close();
     try {
