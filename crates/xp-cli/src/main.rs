@@ -4,6 +4,7 @@
 //! 身份：环境变量 XPANEL_KEY（用 `xp key create <名字>` 在主机上生成）
 
 mod mcp;
+mod vault;
 mod ws;
 
 use clap::{Args, Parser, Subcommand};

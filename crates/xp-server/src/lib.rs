@@ -9,6 +9,7 @@ mod inbox;
 mod legacy;
 mod openapi;
 mod v1;
+mod vault;
 mod web;
 
 use axum::http::StatusCode;

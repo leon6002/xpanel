@@ -247,7 +247,7 @@ export function ListPane() {
   }, [sel, ui.view]);
 
   const title =
-    ui.cat === "none" ? "未分类" : ui.cat ? ui.cat.split("/").pop() : ui.tag ? "#" + ui.tag : { inbox: "收件箱", work: "事项", notes: "笔记", links: "入口", rules: "规范与工作流" }[ui.view];
+    ui.cat === "none" ? "未分类" : ui.cat ? ui.cat.split("/").pop() : ui.tag ? "#" + ui.tag : { inbox: "收件箱", work: "事项", notes: "笔记", links: "入口", rules: "规范与工作流", vault: "密码库" }[ui.view];
 
   const body = useMemo(() => {
     const empty = (text: string) => <div className="px-1 py-6 text-center text-[13px] text-faint">{filtering ? "没有匹配的内容" : text}</div>;

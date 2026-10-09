@@ -314,7 +314,14 @@ async fn openapi_lists_every_route() {
             || p.ends_with("/qa")
             || p.contains("/wechat/")
             || p.starts_with("/inbox/messages/");
-        let m = if post_only { Method::POST } else { Method::GET };
+        let put_only = p.starts_with("/vault/keys/") || p.starts_with("/vault/secrets/");
+        let m = if put_only {
+            Method::PUT
+        } else if post_only {
+            Method::POST
+        } else {
+            Method::GET
+        };
         let (c, _) = call(&st, m, &format!("/api/v1{real}"), None, &[]).await;
         assert_ne!(c, StatusCode::METHOD_NOT_ALLOWED, "{p}");
         if *p == "/backup/merge" {
@@ -798,4 +805,83 @@ async fn ui_is_served() {
     let (s, old) = call(&st, Method::GET, "/old/", None, &[]).await;
     assert_eq!(s, StatusCode::OK);
     assert!(old.contains("wb-ui-version"));
+}
+
+#[tokio::test]
+async fn vault_api_round_trip() {
+    let (st, d) = setup("vault");
+    let ui = [("x-actor", "ui")];
+    let (c, _) = call(
+        &st,
+        Method::PUT,
+        "/api/v1/vault/keys/k1abcd",
+        Some(json!({"data": {"kdf": {"alg": "scrypt"}, "salt": "c2FsdA", "n": "bm9uY2U", "c": "d3JhcA"}})),
+        &ui,
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK);
+    let (c, b) = call(
+        &st,
+        Method::PUT,
+        "/api/v1/vault/secrets/sec1",
+        Some(json!({"kid": "k1abcd", "title": "GitHub", "kind": "apikey", "n": "bm9uY2U", "c": "Y2lwaGVy"})),
+        &ui,
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK, "{b}");
+    let (_, b) = call(&st, Method::GET, "/api/v1/vault", None, &ui).await;
+    assert_eq!(j(&b)["secrets"][0]["c"], "Y2lwaGVy");
+    // 给 AI 的列表没有密文；条目接口里也看不到密码库
+    let (_, b) = call(&st, Method::GET, "/api/v1/vault/index", None, &[]).await;
+    assert_eq!(j(&b)["secrets"][0]["title"], "GitHub");
+    assert!(!b.contains("Y2lwaGVy"));
+    for path in ["/api/v1/items", "/api/state", "/api/v1/export?format=json"] {
+        let (_, b) = call(&st, Method::GET, path, None, &[]).await;
+        assert!(!b.contains("GitHub") && !b.contains("Y2lwaGVy"), "{path}");
+    }
+    // AI 请求取用 → 用户允许 → 取到加密后的内容
+    let pk = "p".repeat(44);
+    let (c, b) = call(
+        &st,
+        Method::POST,
+        "/api/v1/vault/requests",
+        Some(json!({"secretId": "sec1", "reason": "推代码", "pub": pk})),
+        &[("x-actor", "claude")],
+    )
+    .await;
+    assert_eq!(c, StatusCode::CREATED, "{b}");
+    let rid = j(&b)["id"].as_str().unwrap().to_string();
+    let (_, b) = call(
+        &st,
+        Method::GET,
+        &format!("/api/v1/vault/requests/{rid}"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(j(&b)["status"], "pending");
+    let (_, b) = call(&st, Method::GET, "/api/v1/vault/requests", None, &ui).await;
+    assert_eq!(j(&b)["requests"][0]["actor"], "claude");
+    assert_eq!(j(&b)["requests"][0]["reason"], "推代码");
+    let (c, _) = call(
+        &st,
+        Method::POST,
+        &format!("/api/v1/vault/requests/{rid}"),
+        Some(json!({"approve": true, "sealed": {"epk": "e", "n": "n", "c": "sealed"}})),
+        &ui,
+    )
+    .await;
+    assert_eq!(c, StatusCode::NO_CONTENT);
+    let (_, b) = call(
+        &st,
+        Method::GET,
+        &format!("/api/v1/vault/requests/{rid}"),
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(j(&b)["sealed"]["c"], "sealed");
+    let (c, _) = call(&st, Method::DELETE, "/api/v1/vault/secrets/sec1", None, &ui).await;
+    assert_eq!(c, StatusCode::NO_CONTENT);
+    let _ = std::fs::remove_dir_all(d);
 }

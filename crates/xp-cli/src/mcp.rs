@@ -21,7 +21,9 @@ const INSTRUCTIONS: &str = "xpanel 是用户的个人工作台：待办（todo�
 建议：写入前先用 xpanel_list_items 查一下有没有重复；批量改优先级先 dryRun 给用户看，确认后再提交；\
 处理微信消息时用 xpanel_chat_messages 取「未处理」的，处理完用 xpanel_chat_mark_processed 标记，下次就不会重复。\n\
 如果当前目录是 xpanel 生成的项目（有 .xpanel/TASK.md）：开始和每次继续前先调 xpanel_workspace_sync 拉取最新笔记，\
-有阶段性进展、做完或卡住时调 xpanel_report 回写（itemId 可以不填，自动用当前项目对应的条目）。";
+有阶段性进展、做完或卡住时调 xpanel_report 回写（itemId 可以不填，自动用当前项目对应的条目）。\n\
+密码库：账号、密码、API key 不在条目里，要用时先用 xpanel_vault_list 看有哪些，再用 xpanel_vault_get 取，每次都要用户在 xpanel 里点允许。\
+取到的内容只用在当前这件事上，不要写进笔记、文件、提交、日志，也不要回写到 xpanel。";
 
 fn filter_props() -> Map<String, Value> {
     let mut m = Map::new();
@@ -150,7 +152,14 @@ pub fn tools() -> Value {
             "question":{"type":"string"},"answer":{"type":"string","description":"Markdown"}},"required":["question","answer"]}},
         {"name":"xpanel_audit","description":"操作记录：谁在什么时候改了什么（可以只看某一条）。",
          "inputSchema":{"type":"object","properties":{"itemId":{"type":"string"},"limit":{"type":"integer","default":50}}},
-         "annotations":{"readOnlyHint":true}}
+         "annotations":{"readOnlyHint":true}},
+        {"name":"xpanel_vault_list","description":"密码库里有哪些条目：只有 id、名称和种类（login 网站账号 / apikey / server 服务器和设备），没有内容。",
+         "inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":true}},
+        {"name":"xpanel_vault_get","description":"取用密码库里一条的内容（网址、用户名、密码或 key、备注）。每次都要用户在 xpanel 界面上点「允许」才拿得到，所以调用前先告诉用户你要用哪一条、用来做什么，reason 里也写清楚（会显示给用户）。最多等 45 秒；用户还没确认时返回 requestId，带着它再调一次接着等（两分钟后作废）。用户拒绝后不要重复请求。取到的内容只用于当前这件事，不要写进笔记、文件、提交、日志，也不要回写到 xpanel。",
+         "inputSchema":{"type":"object","properties":{
+            "id":{"type":"string","description":"条目 id（xpanel_vault_list 返回的）"},
+            "reason":{"type":"string","description":"用来做什么，一句话，显示给用户"},
+            "requestId":{"type":"string","description":"上次返回的请求号：接着等，不用再传 id"}}}}
     ])
 }
 
@@ -372,6 +381,15 @@ fn call(c: &Client, name: &str, a: &Value) -> Result<Out, String> {
                 q.push(("itemId", i.to_string()));
             }
             Out::Json(c.get("/audit", &q)?)
+        }
+        "xpanel_vault_list" => Out::Json(crate::vault::list(c)?),
+        "xpanel_vault_get" => {
+            match crate::vault::get(c, s(a, "id"), s(a, "reason").unwrap_or(""), s(a, "requestId"))? {
+                Ok(v) => Out::Json(v),
+                Err(rid) => Out::Text(format!(
+                    "用户还没有在 xpanel 里确认。请提醒用户打开 xpanel 点「允许」，然后再调一次 xpanel_vault_get，只传 requestId: \"{rid}\"（两分钟内有效）"
+                )),
+            }
         }
         _ => return Err(format!("没有这个工具：{name}")),
     })

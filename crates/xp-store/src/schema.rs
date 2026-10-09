@@ -119,6 +119,25 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE items ADD COLUMN origin TEXT NOT NULL DEFAULT '';
     INSERT OR IGNORE INTO meta(key, value) VALUES ('replica_id', lower(hex(randomblob(6))));
     "#,
+    // v6：密码库。只存密文：钥匙（主密码包着的密码库密钥）和条目（名称、种类是明文，其余在 data 的密文里）
+    r#"
+    CREATE TABLE vault_keys (
+        kid        TEXT PRIMARY KEY,
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        data       TEXT NOT NULL
+    );
+    CREATE TABLE secrets (
+        id         TEXT PRIMARY KEY,
+        kid        TEXT NOT NULL,
+        title      TEXT NOT NULL,
+        kind       TEXT NOT NULL DEFAULT '',
+        created_at REAL NOT NULL,
+        updated_at REAL NOT NULL,
+        deleted_at REAL,
+        data       TEXT NOT NULL
+    );
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

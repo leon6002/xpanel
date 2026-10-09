@@ -1172,3 +1172,238 @@ fn drive_dir_is_separate_from_cold_backup() {
         let _ = fs::remove_dir_all(x);
     }
 }
+
+fn vault_key(st: &Store, kid: &str) {
+    st.vault_put_key(
+        kid,
+        &json!({"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "c2FsdA", "n": "bm9uY2U", "c": "d3JhcHBlZA"}),
+        None,
+        ACTOR_UI,
+    )
+    .unwrap();
+}
+
+fn secret(kid: &str, title: &str, c: &str, expect: Option<f64>) -> Value {
+    let mut v = json!({"kid": kid, "title": title, "kind": "login", "n": "bm9uY2U", "c": c});
+    if let Some(e) = expect {
+        v["expect"] = json!(e);
+    }
+    v
+}
+
+/// 密码库只存密文：设主密码、增删改（别处刚改过就拒绝）、AI 的取用请求要等用户确认
+#[test]
+fn vault_stores_ciphertext_and_gates_requests() {
+    let d = tmp("vault");
+    let st = Store::open(&d).unwrap();
+    assert_eq!(st.vault_state().unwrap()["keys"], json!([]));
+    // 还没设主密码不能存条目
+    assert!(matches!(
+        st.vault_put_secret("sec1", &secret("k1abcd", "GitHub", "AAAA", None), ACTOR_UI),
+        Err(StoreError::Invalid(_))
+    ));
+    vault_key(&st, "k1abcd");
+    // 已经设过主密码，不能再新建一把；改主密码要带对 expect
+    assert!(matches!(
+        st.vault_put_key(
+            "k2abcd",
+            &json!({"kdf": {}, "salt": "a", "n": "b", "c": "c"}),
+            None,
+            ACTOR_UI
+        ),
+        Err(StoreError::Conflict(_))
+    ));
+    let at = st.vault_state().unwrap()["keys"][0]["updatedAt"]
+        .as_f64()
+        .unwrap();
+    assert!(matches!(
+        st.vault_put_key(
+            "k1abcd",
+            &json!({"kdf": {}, "salt": "a", "n": "b", "c": "c"}),
+            Some(at - 1.0),
+            ACTOR_UI
+        ),
+        Err(StoreError::Conflict(_))
+    ));
+    let s = st
+        .vault_put_key(
+            "k1abcd",
+            &json!({"kdf": {}, "salt": "a", "n": "b", "c": "新的"}),
+            Some(at),
+            ACTOR_UI,
+        )
+        .unwrap();
+    assert_eq!(s["keys"][0]["c"], "新的");
+
+    let a = st
+        .vault_put_secret("sec1", &secret("k1abcd", "GitHub", "AAAA", None), ACTOR_UI)
+        .unwrap();
+    assert_eq!(a["c"], "AAAA");
+    let t = a["updatedAt"].as_f64().unwrap();
+    // 同一个 id 再新建、或者基于旧内容改：冲突
+    assert!(matches!(
+        st.vault_put_secret("sec1", &secret("k1abcd", "GitHub", "BBBB", None), ACTOR_UI),
+        Err(StoreError::Conflict(_))
+    ));
+    assert!(matches!(
+        st.vault_put_secret(
+            "sec1",
+            &secret("k1abcd", "GitHub", "BBBB", Some(t - 1.0)),
+            ACTOR_UI
+        ),
+        Err(StoreError::Conflict(_))
+    ));
+    let b = st
+        .vault_put_secret(
+            "sec1",
+            &secret("k1abcd", "GitHub 改名", "BBBB", Some(t)),
+            ACTOR_UI,
+        )
+        .unwrap();
+    assert!(b["updatedAt"].as_f64().unwrap() > t);
+    // 给 AI 看的列表只有名称和种类
+    let idx = st.vault_index().unwrap();
+    assert_eq!(idx[0]["title"], "GitHub 改名");
+    assert!(idx[0].get("c").is_none() && idx[0].get("n").is_none());
+    // 不是条目：不会出现在条目列表和搜索里
+    assert!(st.all_items().unwrap().is_empty());
+
+    // 取用请求：没有这条 → 找不到；用户没点之前拿不到内容
+    assert!(matches!(
+        st.vault_request_create("nope", "", &"p".repeat(44), "claude"),
+        Err(StoreError::NotFound(_))
+    ));
+    let r = st
+        .vault_request_create("sec1", "部署要用", &"p".repeat(44), "claude")
+        .unwrap();
+    let rid = r["id"].as_str().unwrap().to_string();
+    assert_eq!(st.vault_request_get(&rid).unwrap()["status"], "pending");
+    let p = st.vault_requests_pending();
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0]["title"], "GitHub 改名");
+    assert_eq!(p[0]["actor"], "claude");
+    // 允许但没带加密后的内容：不算
+    assert!(matches!(
+        st.vault_request_resolve(&rid, true, None, ACTOR_UI),
+        Err(StoreError::Invalid(_))
+    ));
+    st.vault_request_resolve(
+        &rid,
+        true,
+        Some(json!({"epk": "e", "n": "n", "c": "c"})),
+        ACTOR_UI,
+    )
+    .unwrap();
+    assert!(st.vault_requests_pending().is_empty());
+    let got = st.vault_request_get(&rid).unwrap();
+    assert_eq!(got["status"], "approved");
+    assert_eq!(got["sealed"]["c"], "c");
+    // 取走一次就没了
+    assert!(st.vault_request_get(&rid).is_err());
+    // 拒绝
+    let r = st
+        .vault_request_create("sec1", "", &"p".repeat(44), "codex")
+        .unwrap();
+    let rid = r["id"].as_str().unwrap().to_string();
+    st.vault_request_resolve(&rid, false, None, ACTOR_UI)
+        .unwrap();
+    assert_eq!(st.vault_request_get(&rid).unwrap()["status"], "denied");
+
+    st.vault_delete_secret("sec1", ACTOR_UI).unwrap();
+    assert_eq!(st.vault_state().unwrap()["secrets"], json!([]));
+    assert!(st.vault_delete_secret("sec1", ACTOR_UI).is_err());
+    let _ = fs::remove_dir_all(d);
+}
+
+/// 外置硬盘合并带上密码库：只有一边改过的跟着改，两边都改过的留较新的、旧的另存一条
+#[test]
+fn vault_merges_between_computers() {
+    let (da, db, drive) = (tmp("vault-a"), tmp("vault-b"), tmp("vault-drive"));
+    let a = Store::open(&da).unwrap();
+    let b = Store::open(&db).unwrap();
+    a.set_drive_dir(Some(drive.clone()));
+    b.set_drive_dir(Some(drive.clone()));
+    let merge = |st: &Store| -> Value {
+        let p = st.merge_preview().unwrap();
+        let file = p["latest"]["file"].as_str().unwrap().to_string();
+        st.merge_apply(&file, &HashMap::new()).unwrap()
+    };
+    let titles = |st: &Store| -> Vec<String> {
+        st.vault_state().unwrap()["secrets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| {
+                format!(
+                    "{}={}",
+                    s["title"].as_str().unwrap(),
+                    s["c"].as_str().unwrap()
+                )
+            })
+            .collect()
+    };
+    let at = |st: &Store, id: &str| -> f64 {
+        st.vault_state().unwrap()["secrets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap()["updatedAt"]
+            .as_f64()
+            .unwrap()
+    };
+    vault_key(&a, "k1abcd");
+    for (id, t) in [("sec1", "网站"), ("sec2", "服务器"), ("sec3", "令牌")] {
+        a.vault_put_secret(id, &secret("k1abcd", t, "v1", None), ACTOR_UI)
+            .unwrap();
+    }
+    a.backup_to_drive(false).unwrap();
+    // 另一台：钥匙和三条都带过来了
+    let r = merge(&b);
+    assert_eq!(r["other"]["vault"]["keys"], 1);
+    assert_eq!(r["other"]["vault"]["secrets"], 3);
+    assert_eq!(titles(&b), ["令牌=v1", "服务器=v1", "网站=v1"]);
+    b.backup_to_drive(false).unwrap();
+    merge(&a);
+
+    // a 改 s1、删 s2；b 改 s1（更晚）、改 s3
+    a.vault_put_secret(
+        "sec1",
+        &secret("k1abcd", "网站", "a2", Some(at(&a, "sec1"))),
+        ACTOR_UI,
+    )
+    .unwrap();
+    a.vault_delete_secret("sec2", ACTOR_UI).unwrap();
+    a.backup_to_drive(false).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    b.vault_put_secret(
+        "sec1",
+        &secret("k1abcd", "网站", "b2", Some(at(&b, "sec1"))),
+        ACTOR_UI,
+    )
+    .unwrap();
+    b.vault_put_secret(
+        "sec3",
+        &secret("k1abcd", "令牌", "b2", Some(at(&b, "sec3"))),
+        ACTOR_UI,
+    )
+    .unwrap();
+    let r = merge(&b);
+    // s2 只有 a 动过 → 跟着删；s1 两边都改 → 留较新的（b），a 的另存；s3 只有 b 改过 → 不动
+    assert_eq!(r["other"]["vault"]["keptOld"], 1);
+    assert_eq!(
+        titles(&b),
+        ["令牌=b2", "网站=b2", "网站（合并时保留的旧版本）=a2"]
+    );
+    // 再合并一次不会重复另存
+    b.backup_to_drive(false).unwrap();
+    let r = merge(&a);
+    assert_eq!(r["other"]["vault"]["keptOld"], 0);
+    assert_eq!(
+        titles(&a),
+        ["令牌=b2", "网站=b2", "网站（合并时保留的旧版本）=a2"]
+    );
+    for d in [da, db, drive] {
+        let _ = fs::remove_dir_all(d);
+    }
+}

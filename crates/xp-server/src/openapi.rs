@@ -58,6 +58,12 @@ pub const PATHS: &[&str] = &[
     "/inbox/messages/to-item",
     "/inbox/markdown",
     "/inbox/me",
+    "/vault",
+    "/vault/index",
+    "/vault/keys/{id}",
+    "/vault/secrets/{id}",
+    "/vault/requests",
+    "/vault/requests/{id}",
 ];
 
 pub fn spec() -> Value {
@@ -286,6 +292,27 @@ fn inbox_paths(err: &Value) -> Value {
             "/inbox/me": {
                 "get": { "summary": "哪些发送人是「我」", "responses": { "200": { "description": "{me}" } } },
                 "put": { "summary": "设置哪些发送人是「我」", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "me": { "type": "array", "items": { "type": "string" } } } } } } }, "responses": { "200": { "description": "{me}" } } }
+            },
+            "/vault": {
+                "get": { "summary": "密码库（密文）：keys 是钥匙（主密码包着的密码库密钥），secrets 是条目（title、kind 是明文，n、c 是密文）。界面拿去在本地解密，接口这边没有明文", "responses": { "200": { "description": "{keys, secrets}" } } }
+            },
+            "/vault/index": {
+                "get": { "summary": "密码库里有哪些条目：只有 id、title、kind（login 网站账号 / apikey / server 服务器和设备），没有内容", "responses": { "200": { "description": "{secrets}" } } }
+            },
+            "/vault/keys/{id}": {
+                "put": { "summary": "界面用：第一次设主密码（新建钥匙），或改主密码（带 expect = 原来的 updatedAt）", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["data"], "properties": { "data": { "type": "object" }, "expect": { "type": "number" } } } } } }, "responses": { "200": { "description": "{keys, secrets}" }, "400": err.clone(), "409": err.clone() } }
+            },
+            "/vault/secrets/{id}": {
+                "put": { "summary": "界面用：新建或修改一条（内容已经加密）。改已有的带 expect = 原来的 updatedAt，对不上返回 409", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["kid", "title", "kind", "n", "c"], "properties": { "kid": { "type": "string" }, "title": { "type": "string" }, "kind": { "type": "string", "enum": ["login", "apikey", "server"] }, "n": { "type": "string" }, "c": { "type": "string" }, "expect": { "type": "number" } } } } } }, "responses": { "200": { "description": "条目" }, "400": err.clone(), "404": err.clone(), "409": err.clone() } },
+                "delete": { "summary": "删除一条", "parameters": [id_param()], "responses": { "204": { "description": "已删除" }, "404": err.clone() } }
+            },
+            "/vault/requests": {
+                "get": { "summary": "界面用：等用户确认的取用请求", "responses": { "200": { "description": "{requests}" } } },
+                "post": { "summary": "请求取用一条的内容。pub 是你的 X25519 临时公钥（base64）。之后轮询 GET /vault/requests/{id}：用户在界面上允许后返回 sealed（epk、n、c），用 X25519 + HKDF-SHA256 + XChaCha20-Poly1305 解开；两分钟没人确认就过期。直接用 MCP 的 xpanel_vault_get 更省事", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["secretId", "pub"], "properties": { "secretId": { "type": "string" }, "reason": { "type": "string", "description": "为什么要用，会显示给用户" }, "pub": { "type": "string" } } } } } }, "responses": { "201": { "description": "{id, status, expiresAt}" }, "400": err.clone(), "404": err.clone(), "503": err.clone() } }
+            },
+            "/vault/requests/{id}": {
+                "get": { "summary": "取用请求的结果：status 是 pending / approved（带 sealed，取走一次就没了）/ denied / expired", "parameters": [id_param()], "responses": { "200": { "description": "{status, title, sealed}" }, "404": err.clone() } },
+                "post": { "summary": "界面用：用户的决定。approve = true 时带 sealed（界面用请求方公钥加密好的内容）", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["approve"], "properties": { "approve": { "type": "boolean" }, "sealed": { "type": "object" } } } } } }, "responses": { "204": { "description": "已处理" }, "400": err.clone(), "404": err.clone() } }
             }
     })
 }

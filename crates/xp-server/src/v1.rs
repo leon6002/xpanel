@@ -56,6 +56,7 @@ pub fn routes() -> Router<AppState> {
             get(get_device).patch(update_device).delete(delete_device),
         )
         .nest("/inbox", crate::inbox::routes())
+        .nest("/vault", crate::vault::routes())
 }
 
 // ---------------------------------------------------------------- 身份

@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { setWindowTheme } from "./api";
 import type { ItemType } from "./types";
 
-export type View = "inbox" | "work" | "notes" | "links" | "rules";
+export type View = "inbox" | "work" | "notes" | "links" | "rules" | "vault";
 export type Theme = "system" | "light" | "dark";
 
 const ls = {

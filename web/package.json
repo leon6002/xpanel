@@ -9,6 +9,9 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
+    "@noble/ciphers": "^2.4.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-dropdown-menu": "^2.1.24",
     "@radix-ui/react-toggle-group": "^1.1.19",

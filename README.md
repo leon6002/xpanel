@@ -7,7 +7,7 @@ A self-hosted personal dashboard for todos, issues, ideas, Markdown notes and en
 One machine stores the data (SQLite); other machines, browsers and AI agents connect to it over the LAN.
 Built with Tauri 2 (Rust). External AI tools can read and write through a REST API (`/api/v1`, OpenAPI) and the `xp` CLI.
 
-文档：[开发指南](docs/development.md) · [开发进度](docs/progress.md) · [外置硬盘同步](docs/drive-sync.md)
+文档：[开发指南](docs/development.md) · [开发进度](docs/progress.md) · [外置硬盘同步](docs/drive-sync.md) · [密码库](docs/vault.md)
 
 ## 功能
 
@@ -39,6 +39,8 @@ Built with Tauri 2 (Rust). External AI tools can read and write through a REST A
   离开前「备份到外置硬盘」，到另一台电脑（Windows / Mac）「从外置硬盘合并」。合并按条目来：列出在别的电脑上新增、修改、删除的条目，
   两边改了同一条时逐条选用哪边，或两份都留；合并前本机自动留一份备份。还没合并就备份会先提醒，不会把别的电脑的改动盖掉。
   命令行：`xp sync --data D:\xpanel F:\xpanel`。详见 [docs/drive-sync.md](docs/drive-sync.md)。
+- **密码库**：网站账号、API key、服务器和设备的登录信息，用一个主密码加密后保存；加解密在界面里做，主机、备份、外置硬盘上只有密文，
+  网页版也能用。AI 只能看到条目名称，要用某一条时界面弹窗，你点了允许才交给它（每次都要确认）。详见 [docs/vault.md](docs/vault.md)。
 - **备份**：每天自动备份数据库到 `backups/`，保留 60 份；可再设一个冷备份文件夹（比如大容量硬盘），每天在后台复制一份备份和新增附件过去。
 
 ## 对外接口（给 AI 和脚本）
@@ -74,6 +76,7 @@ curl "http://主机:8765/api/v1/stats"
 | `GET /api/v1/export` | 导出 md / csv / json |
 | `GET /api/v1/stats` | 各类型数量、优先级分布、逾期、长期未动、最近 8 周趋势 |
 | `GET /api/v1/audit` | 操作记录：谁在什么时候改了什么 |
+| `GET /api/v1/vault/index`、`POST /api/v1/vault/requests`、`GET /api/v1/vault/requests/{id}` | 密码库：有哪些条目（只有名称）；请求取用一条，用户在界面上允许后才拿得到（内容加密转交，建议直接用 MCP） |
 | `GET/POST /api/v1/backup` | 外置硬盘同步的状态；一键备份到外置硬盘上的文件夹（数据库快照 + 补齐附件） |
 | `GET/POST /api/v1/backup/merge` | 从外置硬盘合并：预览（每条在哪台电脑改的）、按选择合并 |
 | `GET/POST/DELETE /api/v1/categories`、`POST /categories/rename` | 分类列表（带数量）、新建、改名 / 移动、删除 |

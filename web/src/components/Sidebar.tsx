@@ -1,5 +1,5 @@
 /* 左侧：导航、分类树、标签、设备、连接状态和外观 */
-import { BookMarked, ChevronDown, ChevronRight, FileText, HardDrive, Inbox, Link2, Moon, Plus, Settings2, SquareCheck, Sun, SunMoon, Tags, MonitorSmartphone } from "lucide-react";
+import { BookMarked, KeyRound, ChevronDown, ChevronRight, FileText, HardDrive, Inbox, Link2, Moon, Plus, Settings2, SquareCheck, Sun, SunMoon, Tags, MonitorSmartphone } from "lucide-react";
 import { useMemo, useState } from "react";
 import { isApp } from "../lib/api";
 import { useAppState, useChats, useConfig, useThisDevice } from "../lib/data";
@@ -17,6 +17,7 @@ const NAV: { k: View; name: string; icon: typeof Inbox }[] = [
   { k: "notes", name: "笔记", icon: FileText },
   { k: "links", name: "入口", icon: Link2 },
   { k: "rules", name: "规范", icon: BookMarked },
+  { k: "vault", name: "密码库", icon: KeyRound },
 ];
 
 function greet() {
@@ -57,6 +58,7 @@ export function Sidebar() {
     notes: items.filter((i) => i.type === "note").length,
     links: items.filter((i) => i.type === "link").length,
     rules: items.filter((i) => i.type === "rule").length,
+    vault: 0,
   };
   const cats = useMemo(() => allCats(items, data?.categories ?? []), [items, data?.categories]);
   const tags = useMemo(() => allTags(items).slice(0, 24), [items]);
@@ -137,7 +139,7 @@ export function Sidebar() {
       </div>
 
       <div className="scroll-quiet -mr-1.5 flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-1.5 max-[1200px]:invisible">
-        {ui.view !== "inbox" && (
+        {ui.view !== "inbox" && ui.view !== "vault" && (
           <>
             <div className="flex flex-col gap-0.5">
               <div className={secH}>

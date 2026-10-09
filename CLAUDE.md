@@ -1,6 +1,6 @@
 # 开发说明（给 AI 编程助手和贡献者）
 
-给人看的开发指南（环境、设计规则、测试、换电脑）在 `docs/development.md`，当前进度、已知问题和待办在 `docs/progress.md`。
+给人看的开发指南（环境、设计规则、测试、换电脑）在 `docs/development.md`，密码库的说明在 `docs/vault.md`，当前进度、已知问题和待办在 `docs/progress.md`。
 开始工作前先看这两篇；做完一批改动后更新 `docs/progress.md`。
 
 ## 结构
@@ -33,6 +33,11 @@
   + `xp-store/src/sync.rs`（每个数据文件夹一个 `replica_id`，条目 `origin` 列记在哪改的；同步点 `sync/base.db`；本机 / 外置硬盘 / 同步点三方对比，按条目合并，冲突逐条选）。
   接口 `/api/v1/backup`、`/api/v1/backup/merge`；界面 `web/src/dialogs/DriveSync.tsx`（`lib/api.ts` 的 `drive`，桌面版和浏览器都能用）；
   外置硬盘上的文件夹是桌面版配置的 `syncDir`（命令 `set_sync_dir` → `Store::set_drive_dir`，没设置时用冷备份位置）；命令行 `xp sync`、`xp serve --drive`。说明见 `docs/drive-sync.md`。
+- 密码库：`xp-store/src/vault.rs`（表 `vault_keys`、`secrets`，**只存密文**，和条目分开；修改带 `expect`；AI 的取用请求只在内存里；外置硬盘合并 `merge_vault`）
+  + `xp-server/src/vault.rs`（`/api/v1/vault/*`）+ 界面 `web/src/lib/vault.ts`（加解密都在界面里：scrypt + XChaCha20-Poly1305，用纯 JS 的 @noble 库，
+  因为局域网的明文 HTTP 页面没有 `crypto.subtle`）和 `web/src/components/Vault.tsx`（整页 + AI 取用的确认弹窗 `VaultRequests`）
+  + MCP `xp-cli/src/vault.rs`（`xpanel_vault_list` 只有名称；`xpanel_vault_get` 要用户点允许，内容用临时 X25519 公钥加密后经主机转交）。
+  规矩：主密码和明文不发给主机、不进日志和操作记录；密码库的内容不要接进条目、搜索、导出、@AI 上下文、项目目录。说明见 `docs/vault.md`。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。
 - `src-tauri`：桌面版。主机模式用 xp-store + xp-server；连接模式（`client.rs`）读写主机的 v1 接口，离线队列 `pending.json`。
 - `web/`：界面（Vite + React 19 + TypeScript + Tailwind v4 + Radix），构建到 `web/dist`。桌面版直接用它（`tauri.conf.json` 的 frontendDist，`beforeBuildCommand` 先构建），

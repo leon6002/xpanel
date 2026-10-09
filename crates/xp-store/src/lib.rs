@@ -14,6 +14,7 @@ mod inbox;
 mod keys;
 mod schema;
 mod sync;
+mod vault;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Map, Value};
@@ -90,6 +91,8 @@ pub struct Store {
     cold_job: Mutex<Option<std::thread::JoinHandle<()>>>,
     backed_up_day: Mutex<String>,
     events: broadcast::Sender<u64>,
+    /// 密码库：AI 发来、等用户确认的取用请求（只在内存里）
+    vault_requests: Mutex<std::collections::HashMap<String, vault::Request>>,
 }
 
 /// 旧版 workbench.json 的读取（数组，或 {version, items}）
@@ -157,6 +160,7 @@ impl Store {
             cold_job: Mutex::new(None),
             backed_up_day: Mutex::new(String::new()),
             events,
+            vault_requests: Mutex::new(Default::default()),
         };
         st.init_replica()?;
         st.import_v1()?;

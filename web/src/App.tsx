@@ -8,6 +8,7 @@ import { ListPane } from "./components/ListPane";
 import { Peek, Reader } from "./components/Reader";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
+import { Vault, VaultRequests } from "./components/Vault";
 import { DebugPanel } from "./components/Debug";
 import { SettingsForm } from "./dialogs/Settings";
 import { isApp } from "./lib/api";
@@ -70,6 +71,8 @@ function Shell() {
               <InboxList />
               <InboxMain />
             </>
+          ) : view === "vault" ? (
+            <Vault />
           ) : (
             <>
               <ListPane />
@@ -78,10 +81,11 @@ function Shell() {
           )}
         </div>
       </div>
-      {view !== "inbox" && <Capture />}
+      {view !== "inbox" && view !== "vault" && <Capture />}
       <Peek />
       <QaFloat />
       <DialogHost />
+      <VaultRequests enabled={!isApp || !!cfg.data?.config.mode} />
       <Toast />
       <DebugPanel />
       {dropping && (

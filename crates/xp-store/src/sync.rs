@@ -462,6 +462,11 @@ impl Store {
         let remote = load_items(&rconn)?;
         let base = self.base_rows(&manifest)?;
         let remote_names = meta_json(&rconn, "replicas")?;
+        // 密码库也按同步点三方对比（同步点能用时才打开）
+        let base_conn = match &base {
+            Some(_) => Some(open_copy(&self.dir.join(SYNC_DIR).join(BASE_DB))?),
+            None => None,
+        };
         let now = now_ms();
         let (summary, _) = self.write(|tx| {
             let local = load_items(tx)?;
@@ -504,7 +509,8 @@ impl Store {
                 )?;
                 *n.entry(c.kind.name()).or_default() += 1;
             }
-            let other = merge_other(tx, &rconn)?;
+            let mut other = merge_other(tx, &rconn)?;
+            other["vault"] = crate::vault::merge_vault(tx, &rconn, base_conn.as_ref())?;
             if let Some(names) = remote_names.as_object() {
                 add_replica_names(tx, names)?;
             }
