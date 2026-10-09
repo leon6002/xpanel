@@ -67,6 +67,8 @@ export interface Fields {
   /** 标签和置顶也在密文里：锁着时和给 AI 的列表里看不到 */
   tags?: string[];
   pinned?: boolean;
+  /** 是不是邮箱账号。没记的自己认（纯邮箱服务，或者账号是平台自家邮箱的地址）；记了的以它为准 */
+  mail?: boolean;
   /** 待整理的：记下来的原文 */
   raw?: string;
 }

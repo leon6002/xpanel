@@ -2,13 +2,13 @@
    编辑不常驻，要改时弹出来。加解密在 lib/vault.ts，主机只有密文。
    三种状态：还没设主密码 → 设置；锁着 → 输主密码；解开 → 列表。十分钟不碰自动锁上，刷新页面也会锁上。 */
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Landmark, Lock, NotebookPen, Pencil, Pin, Plus, Search, Server, StickyNote, Trash2, X } from "lucide-react";
+import { ChevronDown, Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Landmark, Lock, Mail, NotebookPen, Pencil, Pin, Plus, Search, Server, StickyNote, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, newId } from "../lib/api";
 import { qc } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { ago } from "../lib/logic";
-import { PLATFORMS, composeTitle, detectPlatform, platformById, platformOf, shortTitle, type Platform } from "../lib/platforms";
+import { PLATFORMS, composeTitle, detectPlatform, emailOf, isMailbox, platformById, platformOf, shortTitle, type Platform } from "../lib/platforms";
 import { useUi } from "../lib/store";
 import {
   KINDS,
@@ -271,7 +271,7 @@ function Row({ id, label, value, secret, tail, mono = true }: { id: string; labe
 }
 
 /** 展开一条：所有的栏、备注，和少用的操作（编辑、置顶、删除）。平时不占地方 */
-function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boolean }) {
+function Expanded({ e, keys, hasKey, all }: { e: Entry; keys: KeyRec[]; hasKey: boolean; all: Entry[] }) {
   const { s, f } = e;
   const [sure, setSure] = useState(false);
   const [p, setP] = useState("");
@@ -330,6 +330,12 @@ function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boole
     );
   const raw = f.kind === "raw";
   const specs = raw ? [] : specsFor(f);
+  // 邮箱和别的账号的关联，按账号栏填的地址自动对上：邮箱下面列出用它注册的；别的账号指回库里的那个邮箱
+  const addr = raw ? undefined : emailOf(f);
+  const mailbox = isMailbox(f);
+  const same = addr ? all.filter((x) => x.s.id !== s.id && x.f && x.f.kind !== "raw" && emailOf(x.f) === addr) : [];
+  const linked = mailbox ? same.filter((x) => !isMailbox(x.f)) : same.filter((x) => isMailbox(x.f));
+  const jump = (id: string) => useVaultUi.getState().setSel(id);
   return (
     <div className="mx-3 mb-2 flex flex-col gap-2 rounded-xl bg-surface-2 p-2">
       {!raw && (f.title !== s.title || f.kind !== s.kind) && (
@@ -348,6 +354,17 @@ function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boole
         ))}
       </div>
       <Row id={s.id} label="备注" value={f.notes} mono={false} />
+      {!!linked.length && (
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-1">
+          <span className="mr-1 text-xs text-muted">{mailbox ? `用这个邮箱注册的（${linked.length}）` : "登录用的邮箱在库里"}</span>
+          {linked.map((x) => (
+            <button key={x.s.id} onClick={() => jump(x.s.id)} title="点一下跳到这一条" className="flex items-center gap-1.5 rounded-lg bg-surface px-2 py-1 text-[12.5px] text-fg-2 hover:bg-surface-3">
+              <EntryIcon e={x} size={14} />
+              {titleOf(x)}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 px-1 pb-1">
         <Button tone={raw ? "primary" : "soft"} className="bg-surface hover:bg-surface-3" onClick={() => openEditor(e)}>
           <Pencil className="size-4" />
@@ -365,7 +382,7 @@ function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boole
         </Button>
         <span className="grow" />
         <span className="text-xs text-faint">
-          {raw ? "随手记下的，还没分成各栏。点「整理」会先帮你拆好。" : `${[platformOf(f)?.name, groupOf(f), ...(f.tags ?? []).map((t) => "#" + t)].filter(Boolean).join(" · ")} · ${ago(s.updatedAt)}改的`}
+          {raw ? "随手记下的，还没分成各栏。点「整理」会先帮你拆好。" : `${[platformOf(f)?.name, groupOf(f), mailbox ? "邮箱" : "", ...(f.tags ?? []).map((t) => "#" + t)].filter(Boolean).join(" · ")} · ${ago(s.updatedAt)}改的`}
         </span>
       </div>
     </div>
@@ -433,6 +450,8 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
   const [plat, setPlat] = useState<string | null | undefined>(init?.platform === "none" ? null : init?.platform);
   const [label, setLabel] = useState(init?.label ?? "");
   const [more, setMore] = useState(false);
+  // 是不是邮箱账号：undefined = 没动过，自己认
+  const [mail, setMail] = useState<boolean | undefined>(init?.mail);
   const [title, setTitle] = useState(init?.title ?? "");
   const [f, setF] = useState<Partial<Fields>>(init ?? {});
   const [tags, setTags] = useState((init?.tags ?? []).join(" "));
@@ -450,6 +469,8 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
   const P = picked && !!picked.bank === bank ? picked : guessed;
   const specs = specOf(kind, bsub, P?.idLabel);
   const choices = PLATFORMS.filter((p) => !!p.bank === bank);
+  const mailAuto = isMailbox({ kind, title, url: f.url, username: f.username, platform: plat === null ? "none" : P?.id });
+  const isMail = kind === "login" && (mail ?? mailAuto);
   const pick = (p: Platform) => {
     if (P?.id === p.id) return setPlat(null);
     setPlat(p.id);
@@ -476,6 +497,7 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
       title: composeTitle(base, use),
       kind,
       sub: kind === "bank" ? bsub : undefined,
+      mail: kind === "login" && mail !== undefined && mail !== mailAuto ? mail : undefined,
       platform: plat === null ? (detectPlatform({ title: base, url: f.url }, bank) ? "none" : undefined) : P?.id,
       label: use || undefined,
       notes: f.notes?.trim() || undefined,
@@ -530,6 +552,13 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
           }}
           options={KINDS.map((k) => [k.k, k.name] as [SecretKind, string])} />
         {kind === "bank" && <Segmented label="银行的哪一种" value={bsub} onChange={setBsub} options={SUBS.map((k) => [k.k, k.name] as [BankSub, string])} />}
+        {kind === "login" && (
+          <span className="ml-auto self-center" title="邮箱账号可以在列表上方点「邮箱」单独看；展开时还会列出用这个邮箱注册的其他账号">
+            <Toggle checked={isMail} onChange={setMail}>
+              这是邮箱账号
+            </Toggle>
+          </span>
+        )}
       </div>
       {/* 换种类时各部分的位置不动：平台固定占两行，各栏都排成两行，窗口高度也固定 */}
       <div role="group" aria-label={bank ? "哪家银行" : "平台"} className="flex min-h-[62px] shrink-0 flex-wrap content-start items-center gap-1.5">
@@ -615,7 +644,7 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
 
 /* ---------------------------------------------------------------- 整页：一屏看全，点一下就复制 */
 
-type Filter = "all" | "raw" | SecretKind;
+type Filter = "all" | "raw" | "mail" | SecretKind;
 /** 一行的几格怎么分，看这一行自己有多宽（分成两三栏时每行就窄）：
     窄：名称（账号写在名称下面）· 密码 · 操作；中：名称 · 账号 · 密码 · 操作；宽：再加一格放其他栏和标签 */
 const GRID =
@@ -651,7 +680,7 @@ function Mini({ id, label, value, hide, tail }: { id: string; label: string; val
 }
 
 /** group：这一行排在某个平台的小组里。组里几行都是同一个平台，名称那一格改放用途（美区、工作），用来分清是哪个号 */
-function ListRow({ e, open, keys, hasKey, onToggle, group }: { e: Entry; open: boolean; keys: KeyRec[]; hasKey: boolean; onToggle: () => void; group?: Platform }) {
+function ListRow({ e, open, keys, hasKey, onToggle, group, all }: { e: Entry; open: boolean; keys: KeyRec[]; hasKey: boolean; onToggle: () => void; group?: Platform; all: Entry[] }) {
   const { s, f } = e;
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -740,7 +769,7 @@ function ListRow({ e, open, keys, hasKey, onToggle, group }: { e: Entry; open: b
           </IconButton>
         </span>
       </div>
-      {open && <Expanded e={e} keys={keys} hasKey={hasKey} />}
+      {open && <Expanded e={e} keys={keys} hasKey={hasKey} all={all} />}
     </div>
   );
 }
@@ -827,7 +856,8 @@ export function Vault() {
     const p = e.f?.kind === "login" ? platformOf(e.f) : undefined;
     return p && (loginCount.get(p.id) ?? 0) >= 2 ? p : undefined;
   };
-  const pool = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && (!tag || e.f?.tags?.includes(tag)) && (!plat || platformOf(e.f)?.id === plat));
+  const mailCount = entries.filter((e) => isMailbox(e.f)).length;
+  const pool = entries.filter((e) => (filter === "all" || (filter === "mail" ? isMailbox(e.f) : kindOf(e) === filter)) && (!tag || e.f?.tags?.includes(tag)) && (!plat || platformOf(e.f)?.id === plat));
   const searching = !!q.trim();
   const shown = searchVault(pool, q);
   // 搜索时按相关程度排成一列；平时按类别分组：待整理、置顶，然后一类一组（银行分手机银行和信用卡）
@@ -909,6 +939,12 @@ export function Vault() {
             {k.name} <span className="text-faint">{entries.filter((e) => kindOf(e) === k.k).length}</span>
           </button>
         ))}
+        {mailCount > 0 && (
+          <button aria-pressed={filter === "mail"} onClick={() => setFilter(filter === "mail" ? "all" : "mail")} className={cx(chip(filter === "mail"), "flex items-center gap-1.5")}>
+            <Mail className="size-3.5" />
+            邮箱 <span className="text-faint">{mailCount}</span>
+          </button>
+        )}
         {platChips.map(([id, n]) => {
           const p = platformById(id)!;
           return (
@@ -936,7 +972,7 @@ export function Vault() {
                     {!searching && !name.endsWith("（续）") && <span className="font-normal text-faint">{counts.get(name)}</span>}
                   </h2>
                   {list.map((e) => (
-                    <ListRow key={e.s.id} e={e} open={sel === e.s.id} keys={data.keys} hasKey={!!vks[e.s.kid]} onToggle={() => setSel(sel === e.s.id ? null : e.s.id)} group={platGroup(name)} />
+                    <ListRow key={e.s.id} e={e} open={sel === e.s.id} keys={data.keys} hasKey={!!vks[e.s.kid]} onToggle={() => setSel(sel === e.s.id ? null : e.s.id)} group={platGroup(name)} all={entries} />
                   ))}
                 </section>
               ))}

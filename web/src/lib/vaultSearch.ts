@@ -4,7 +4,7 @@
    - 名称、域名最重要，其次用户名、标签，再次自定义栏的名字、备注和待整理的原文；不搜密码本身
    - 常用的、最近用过的、置顶的排前面 */
 import { ls } from "./store";
-import { platformOf } from "./platforms";
+import { isMailbox, platformOf } from "./platforms";
 import type { Fields, SecretRec } from "./vault";
 
 export interface Entry { s: SecretRec; f: Fields | null }
@@ -104,6 +104,7 @@ function fieldsOf(e: Entry): [string, number, boolean][] {
     // 卡号：一般是搜后四位
     [(f?.card || "").replace(/\D/g, ""), 5, false],
     [f?.kind === "bank" ? (f.sub === "credit" ? "银行 信用卡" : "银行 手机银行") : "", 2, false],
+    [isMailbox(f) ? "邮箱 email mail" : "", 2, false],
     [low(f?.notes), 2, false],
     [low(f?.raw), 2, false],
   ];

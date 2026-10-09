@@ -54,6 +54,23 @@ export function platformOf(f?: { kind: string; title: string; url?: string; plat
   return platformById(f.platform) ?? detectPlatform(f, f.kind === "bank");
 }
 
+/* ---- 邮箱 ---- */
+type MailLike = { kind: string; title: string; url?: string; platform?: string; username?: string; mail?: boolean };
+const domainOfMail = (v?: string) => (v || "").trim().toLowerCase().match(/^[^\s@]+@([^\s@]+\.[^\s@]+)$/)?.[1];
+/** 账号栏填的是邮箱地址的话，就是它（小写） */
+export const emailOf = (f?: { username?: string } | null) => (domainOfMail(f?.username) ? f!.username!.trim().toLowerCase() : undefined);
+/** 这一条是不是邮箱账号：用户勾过的以勾的为准；否则纯邮箱服务算，账号是平台自家邮箱地址的算
+    （@icloud.com 的 Apple ID、@gmail.com 的 Google 账号），名称里写了「邮箱」的也算 */
+export function isMailbox(f?: MailLike | null): boolean {
+  if (!f || f.kind !== "login") return false;
+  if (f.mail != null) return f.mail;
+  const p = platformOf(f);
+  if (p?.mailOnly) return true;
+  const d = domainOfMail(f.username);
+  if (p && d && p.mail?.includes(d)) return true;
+  return /邮箱|e-?mail/i.test(f.title);
+}
+
 /** 名称去掉前面的平台名，剩下的用来区分同一个平台的几个账号（「Apple · 美区」→「美区」） */
 export function shortTitle(title: string, p: Platform) {
   const low = title.toLowerCase();
