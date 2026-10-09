@@ -469,7 +469,7 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
     // 只留这种条目有的栏：换过种类的话，别的种类填的不带着
     const vals = Object.fromEntries(specs.map((x) => [x.key, (x.secret ? f[x.key] : f[x.key]?.trim()) || undefined]));
     // 主机上登记的名称带上用途（「Apple · 美区」），锁着时和给 AI 的列表里分得清是哪个号
-    const use = P ? label.trim() : "";
+    const use = label.trim();
     const base = init?.label && name.endsWith(` · ${init.label}`) ? name.slice(0, -` · ${init.label}`.length) : name;
     const clean = {
       ...vals,
@@ -498,6 +498,7 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
   return (
     <Dialog
       wide
+      tall
       title={raw != null ? "整理" : old ? "编辑" : "新建"}
       onClose={close}
       footer={
@@ -521,41 +522,41 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
           value={kind}
           onChange={(k) => {
             // 银行和别的种类各有各的平台：换过去时不带着
-            if ((k === "bank") !== bank) setPlat(undefined);
+            if ((k === "bank") !== bank) {
+              setPlat(undefined);
+              if (PLATFORMS.some((x) => x.name === title.trim() || x.name + "信用卡" === title.trim())) setTitle("");
+            }
             setKind(k);
           }}
           options={KINDS.map((k) => [k.k, k.name] as [SecretKind, string])} />
         {kind === "bank" && <Segmented label="银行的哪一种" value={bsub} onChange={setBsub} options={SUBS.map((k) => [k.k, k.name] as [BankSub, string])} />}
       </div>
-      {(kind === "login" || kind === "bank" || kind === "apikey") && (
-        <div role="group" aria-label={bank ? "哪家银行" : "平台"} className="flex flex-wrap items-center gap-1.5">
-          {(more || (P && choices.indexOf(P) >= 14) ? choices : choices.slice(0, 14)).map((p) => (
-            <button key={p.id} aria-pressed={P?.id === p.id} onClick={() => pick(p)} className={cx("flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] transition-colors", P?.id === p.id ? "bg-ink font-semibold text-on-ink" : "bg-surface-2 text-fg-2 hover:bg-surface-3")}>
-              <PlatformLogo p={p} size={15} className={P?.id === p.id ? "text-on-ink" : undefined} />
-              {p.name}
-            </button>
-          ))}
-          <button onClick={() => setMore(!more)} className="rounded-lg px-2 py-1 text-[12.5px] text-muted hover:bg-surface-2">
-            {more ? "收起" : `更多（共 ${choices.length} 个）`}
+      {/* 换种类时各部分的位置不动：平台固定占两行，各栏都排成两行，窗口高度也固定 */}
+      <div role="group" aria-label={bank ? "哪家银行" : "平台"} className="flex min-h-[62px] shrink-0 flex-wrap content-start items-center gap-1.5">
+        {(more || (P && choices.indexOf(P) >= 14) ? choices : choices.slice(0, 14)).map((p) => (
+          <button key={p.id} aria-pressed={P?.id === p.id} onClick={() => pick(p)} className={cx("flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] transition-colors", P?.id === p.id ? "bg-ink font-semibold text-on-ink" : "bg-surface-2 text-fg-2 hover:bg-surface-3")}>
+            <PlatformLogo p={p} size={15} className={P?.id === p.id ? "text-on-ink" : undefined} />
+            {p.name}
           </button>
-        </div>
-      )}
-      <div className={cx("grid gap-x-3 gap-y-4", P && "sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]")}>
+        ))}
+        <button onClick={() => setMore(!more)} className="rounded-lg px-2 py-1 text-[12.5px] text-muted hover:bg-surface-2">
+          {more ? "收起" : `更多（共 ${choices.length} 个）`}
+        </button>
+      </div>
+      <div className="grid shrink-0 gap-x-3 gap-y-4 sm:grid-cols-2">
         <Field label="名称" hint="名称不加密：锁着的时候和给 AI 的列表里都看得到，别把密码写在这里">
           <span className={cx(inputCls, "flex items-center gap-2")}>
             {P && <PlatformLogo p={P} size={17} />}
             <input className="min-w-0 grow bg-transparent outline-none" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder={NAME_HINT[kind]} aria-label="名称" />
           </span>
         </Field>
-        {P && (
-          <Field label="用途（可选）" hint={`${P.name}有好几个账号时用来区分`}>
-            <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="比如 美区、工作、小号" aria-label="用途" autoComplete="off" />
-          </Field>
-        )}
+        <Field label="用途（可选）" hint="同一个平台有好几个账号时用来区分">
+          <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="比如 美区、工作、小号" aria-label="用途" autoComplete="off" />
+        </Field>
       </div>
-      <div className="grid gap-x-3 gap-y-4 sm:grid-cols-2">
+      <div className="grid shrink-0 content-start gap-x-3 gap-y-4 sm:min-h-[140px] sm:grid-cols-12">
         {specs.map((x) => (
-          <Field key={x.key} label={x.label}>
+          <Field key={x.key} label={x.label} className={x.w === 12 ? "sm:col-span-12" : x.w === 4 ? "sm:col-span-4" : x.w === 3 ? "sm:col-span-3" : "sm:col-span-6"}>
             {x.secret ? (
               <SecretInput label={x.label} value={f[x.key] ?? ""} onChange={(v) => set({ [x.key]: v })} gen={x.gen} />
             ) : (

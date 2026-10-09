@@ -86,42 +86,46 @@ export interface Spec {
   /** 可以生成随机密码 */
   gen?: boolean;
   hint?: string;
+  /** 编辑窗口里占多宽：一行 12 份，默认 6 */
+  w?: 3 | 4 | 12;
 }
+/* 顺序就是编辑窗口里的顺序：账号和密码并排在第一行，其次才是网址这些。w 是一栏占多宽（一行 12 份，默认 6 = 半行）。
+   每种都排成两行，换种类时窗口里别的东西不用挪位置 */
 const SPECS: Record<string, Spec[]> = {
   login: [
-    { key: "url", label: "网址", hint: "https://…" },
     { key: "username", label: "用户名", id: true },
     { key: "password", label: "密码", secret: true, main: true, gen: true },
+    { key: "url", label: "网址", hint: "https://…", w: 12 },
   ],
   "bank:mobile": [
     { key: "username", label: "登录账号", id: true, hint: "手机号、身份证号或用户名" },
     { key: "password", label: "登录密码", secret: true, main: true },
-    { key: "card", label: "卡号", tail: true },
-    { key: "pin", label: "交易 / 取款密码", secret: true },
-    { key: "url", label: "网址（可选）" },
+    { key: "card", label: "卡号", tail: true, w: 4 },
+    { key: "pin", label: "交易 / 取款密码", secret: true, w: 4 },
+    { key: "url", label: "网址（可选）", w: 4 },
   ],
   "bank:credit": [
     { key: "card", label: "卡号", id: true, main: true, tail: true },
-    { key: "expiry", label: "有效期", hint: "月/年，如 08/29" },
-    { key: "cvv", label: "安全码（CVV）", secret: true },
-    { key: "pin", label: "交易 / 查询密码", secret: true },
-    { key: "username", label: "网银账号（可选）" },
-    { key: "password", label: "网银密码（可选）", secret: true },
+    { key: "expiry", label: "有效期", hint: "月/年，如 08/29", w: 3 },
+    { key: "cvv", label: "安全码（CVV）", secret: true, w: 3 },
+    { key: "pin", label: "交易 / 查询密码", secret: true, w: 4 },
+    { key: "username", label: "网银账号（可选）", w: 4 },
+    { key: "password", label: "网银密码（可选）", secret: true, w: 4 },
   ],
   apikey: [
-    { key: "url", label: "服务或网址（可选）" },
+    { key: "password", label: "Key / Token", secret: true, main: true, w: 12 },
     { key: "username", label: "账号（可选）", id: true },
-    { key: "password", label: "Key / Token", secret: true, main: true },
+    { key: "url", label: "服务或网址（可选）" },
   ],
   server: [
-    { key: "url", label: "地址", hint: "主机名或 IP，可以带端口" },
     { key: "username", label: "用户名", id: true },
     { key: "password", label: "密码", secret: true, main: true, gen: true },
+    { key: "url", label: "地址", hint: "主机名或 IP，可以带端口", w: 12 },
   ],
   other: [
-    { key: "url", label: "网址或地方（可选）" },
+    { key: "password", label: "要保密的内容", secret: true, main: true, w: 12 },
     { key: "username", label: "账号（可选）", id: true },
-    { key: "password", label: "要保密的内容", secret: true, main: true },
+    { key: "url", label: "网址或地方（可选）" },
   ],
 };
 export function specOf(kind: AnyKind, sub?: BankSub, idLabel?: string): Spec[] {

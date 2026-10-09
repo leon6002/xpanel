@@ -23,6 +23,7 @@ export function Dialog({
   children,
   footer,
   wide,
+  tall,
   onClose,
   dismissable = true,
 }: {
@@ -31,6 +32,8 @@ export function Dialog({
   children?: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  /** 高度固定（内容在里面滚动）：里面的内容会变多变少时用，窗口不跟着伸缩、跳动 */
+  tall?: boolean;
   onClose: () => void;
   dismissable?: boolean;
 }) {
@@ -52,6 +55,7 @@ export function Dialog({
           className={cx(
             "fixed top-1/2 left-1/2 z-40 flex max-h-[min(88vh,900px)] w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-[18px] bg-surface shadow-3 outline-none",
             wide ? "max-w-[860px]" : "max-w-[560px]",
+            tall && "h-[min(88vh,820px)]",
           )}
         >
           <div className="flex items-start gap-3 px-6 pt-5 pb-2">
@@ -65,7 +69,7 @@ export function Dialog({
               </D.Close>
             )}
           </div>
-          <div className="scroll-quiet flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-3">{children}</div>
+          <div className={cx("scroll-quiet flex min-h-0 flex-col gap-4 overflow-y-auto px-6 py-3", tall && "flex-1 [&>*]:shrink-0")}>{children}</div>
           {footer && <div className="flex flex-wrap items-center gap-2 px-6 pt-2 pb-5">{footer}</div>}
         </D.Content>
       </D.Portal>
