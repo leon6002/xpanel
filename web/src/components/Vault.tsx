@@ -2,8 +2,8 @@
    三种状态：还没设主密码 → 设置；锁着 → 输主密码；解开 → 列表。十分钟不碰自动锁上，刷新页面也会锁上。 */
 import { useQuery } from "@tanstack/react-query";
 import { Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Lock, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { copyText, errText } from "../lib/api";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { copyText, errText, newId } from "../lib/api";
 import { qc } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { ago } from "../lib/logic";
@@ -11,10 +11,11 @@ import { useUi } from "../lib/store";
 import {
   KINDS,
   VAULT_KEY,
-  answerRequest,
+  approveRequest,
   changePassword,
   createVault,
   deleteSecret,
+  denyRequest,
   fetchRequests,
   fetchVault,
   generatePassword,
@@ -23,10 +24,12 @@ import {
   saveSecret,
   strength,
   unlock,
+  unwrapAll,
   useVault,
   type Extra,
   type Fields,
   type KeyRec,
+  type OpenedKeys,
   type SecretKind,
   type SecretRec,
   type VaultRequest,
@@ -82,7 +85,11 @@ function Card({ icon, title, desc, children }: { icon: ReactNode; title: string;
 function Strength({ p }: { p: string }) {
   if (!p) return null;
   const s = strength(p);
-  return <span className={cx("text-xs", s === 0 ? "text-danger" : s === 1 ? "text-warn-fg" : "text-muted")}>{s === 0 ? "太短或太简单：至少 10 个字符，别用重复的字" : s === 1 ? "可以用。再长一些、混着大小写数字符号会更难猜" : "够强"}</span>;
+  return (
+    <span className={cx("text-xs", s === 0 ? "text-danger" : s === 1 ? "text-warn-fg" : "text-muted")}>
+      {s === 0 ? "太短或太好猜：至少 12 个字符，不要纯数字，不要 password、1234、qwer 这类常见写法" : s === 1 ? "可以用。再长一些（比如一句 20 个字符以上的话）会更难猜" : "够强"}
+    </span>
+  );
 }
 
 /** 第一次用：设主密码 */
@@ -239,17 +246,18 @@ function Row({ label, value, secret, mono = true }: { label: string; value?: str
 }
 
 function Detail({ s, f, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | null; keys: KeyRec[]; onEdit: () => void; onDeleted: () => void }) {
-  const L = LABELS[s.kind] ?? LABELS.login;
+  const kind = f?.kind ?? s.kind;
+  const L = LABELS[kind] ?? LABELS.login;
   const [sure, setSure] = useState(false);
   const [p, setP] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const Icon = KIND_ICON[s.kind] ?? Globe;
+  const Icon = KIND_ICON[kind] ?? Globe;
   const del = async () => {
     if (!sure) return setSure(true);
     try {
-      await deleteSecret(s.id);
-      say(`已删除「${s.title}」`);
+      await deleteSecret(s);
+      say(`已删除「${f?.title ?? s.title}」`);
       onDeleted();
     } catch (e) {
       say("删除失败：" + errText(e));
@@ -261,6 +269,7 @@ function Detail({ s, f, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | n
     setErr("");
     try {
       await unlock(keys, p);
+      setP("");
     } catch (e) {
       setErr(errText(e));
     }
@@ -274,22 +283,29 @@ function Detail({ s, f, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | n
             <Icon />
           </span>
           <div className="flex min-w-0 grow flex-col">
-            <h1 className="text-[20px] leading-tight font-bold break-words">{s.title}</h1>
+            <h1 className="text-[20px] leading-tight font-bold break-words">{f?.title ?? s.title}</h1>
             <span className="text-xs text-muted">
-              {kindName(s.kind)} · {ago(s.updatedAt)}改的
+              {kindName(kind)} · {ago(s.updatedAt)}改的
             </span>
           </div>
           {f && (
-            <Button onClick={onEdit}>
-              <Pencil className="size-4" />
-              编辑
-            </Button>
+            <>
+              <Button onClick={onEdit}>
+                <Pencil className="size-4" />
+                编辑
+              </Button>
+              <Button tone="danger" onClick={del} onBlur={() => setSure(false)}>
+                <Trash2 className="size-4" />
+                {sure ? "再点一次删除" : "删除"}
+              </Button>
+            </>
           )}
-          <Button tone="danger" onClick={del} onBlur={() => setSure(false)}>
-            <Trash2 className="size-4" />
-            {sure ? "再点一次删除" : "删除"}
-          </Button>
         </div>
+        {f && (f.title !== s.title || f.kind !== s.kind) && (
+          <p className="rounded-xl bg-warn-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-warn-fg">
+            主机上给这一条登记的名称是「{s.title}」，和加密保存的不一样；上面显示的是加密保存的。合并时另存的旧版本会这样。不是那种情况的话，说明有人改过主机上的数据，留意一下。
+          </p>
+        )}
         {f ? (
           <div className="flex flex-col gap-0.5">
             <Row label={L.url} value={f.url} />
@@ -303,7 +319,7 @@ function Detail({ s, f, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | n
           </div>
         ) : (
           <div className="flex flex-col gap-3 rounded-xl bg-surface-2 p-4">
-            <p className="text-[13px] leading-relaxed text-fg-2">这一条是用另一个主密码加密的（两台电脑各自设过主密码，后来合并到了一起）。输入当时那个主密码就能解开；之后可以用「改主密码」把它改成和现在一样的。</p>
+            <p className="text-[13px] leading-relaxed text-fg-2">这一条现在的主密码解不开：它是用另一个主密码加密的（两台电脑各自设过主密码，后来合并到了一起）。输入当时那个主密码就能解开。</p>
             <div className="flex gap-2">
               <MasterInput label="另一个主密码" value={p} onChange={setP} onEnter={other} placeholder="另一个主密码" />
               <Button tone="primary" className="h-10" disabled={!p || busy} onClick={other}>
@@ -354,31 +370,37 @@ function SecretInput({ value, onChange, label, placeholder, gen }: { value: stri
   );
 }
 
-function Editor({ old, init, onDone, onCancel }: { old: SecretRec | null; init: Fields; onDone: (s: SecretRec) => void; onCancel: () => void }) {
-  const [kind, setKind] = useState<SecretKind>(old?.kind ?? "login");
-  const [title, setTitle] = useState(old?.title ?? "");
-  const [f, setF] = useState<Fields>(init);
+function Editor({ old: latest, init, onDone, onCancel }: { old: SecretRec | null; init: Fields | null; onDone: (s: SecretRec) => void; onCancel: () => void }) {
+  // 开始编辑时的那一版。之后别处改了（列表会自己刷新），保存时主机拿它来比，对不上就拒绝，不会悄悄盖掉别处的修改
+  const [old] = useState(latest);
+  const [id] = useState(newId);
+  const moved = !!old && latest?.updatedAt !== old.updatedAt;
+  const [kind, setKind] = useState<SecretKind>(init?.kind ?? "login");
+  const [title, setTitle] = useState(init?.title ?? "");
+  const [f, setF] = useState<Partial<Fields>>(init ?? {});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const L = LABELS[kind];
   const set = (ch: Partial<Fields>) => setF((x) => ({ ...x, ...ch }));
+  const name = title.trim();
   const extra = f.extra ?? [];
   const setExtra = (i: number, ch: Partial<Extra>) => set({ extra: extra.map((x, j) => (j === i ? { ...x, ...ch } : x)) });
   const save = async () => {
     if (!title.trim()) return setErr("先填名称");
     setBusy(true);
     setErr("");
-    const clean: Fields = {
+    const clean = {
+      title: name,
+      kind,
       url: f.url?.trim() || undefined,
       username: f.username?.trim() || undefined,
       password: f.password || undefined,
       notes: f.notes?.trim() || undefined,
-      extra: extra.filter((x) => x.value).map((x) => ({ label: x.label.trim(), value: x.value, ...(x.hidden ? { hidden: true } : {}) })),
+      extra: extra.some((x) => x.value) ? extra.filter((x) => x.value).map((x) => ({ label: x.label.trim(), value: x.value, ...(x.hidden ? { hidden: true } : {}) })) : undefined,
     };
-    if (!clean.extra?.length) delete clean.extra;
     try {
-      onDone(await saveSecret(old, { title, kind, fields: clean }));
-      say(old ? "已保存" : `已存进密码库：「${title.trim()}」`);
+      onDone(await saveSecret(old, id, clean));
+      say(old ? "已保存" : `已存进密码库：「${name}」`);
     } catch (e) {
       setErr(errText(e));
       qc.invalidateQueries({ queryKey: VAULT_KEY });
@@ -429,9 +451,9 @@ function Editor({ old, init, onDone, onCancel }: { old: SecretRec | null; init: 
         <Field label="备注">
           <textarea className={textareaCls} rows={4} value={f.notes ?? ""} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
-        <ErrorText>{err}</ErrorText>
+        <ErrorText>{moved ? "这一条在别处刚改过（或者被删了）。这里的修改存不进去：先把要留的内容复制出来，点取消，再重新编辑。" : err}</ErrorText>
         <div className="flex gap-2">
-          <Button tone="primary" disabled={busy} onClick={save}>
+          <Button tone="primary" disabled={busy || moved} onClick={save}>
             {busy ? "保存中…" : "保存"}
           </Button>
           <Button onClick={onCancel}>取消</Button>
@@ -458,15 +480,14 @@ export function Vault() {
   const opened = useMemo(() => new Map(secrets.map((s) => [s.id, openSecret(s, vks)])), [secrets, vks]);
   const lq = q.trim().toLowerCase();
   const shown = secrets.filter((s) => {
-    if (kind !== "all" && s.kind !== kind) return false;
+    if (kind !== "all" && (opened.get(s.id)?.kind ?? s.kind) !== kind) return false;
     if (!lq) return true;
     const f = opened.get(s.id);
-    return [s.title, f?.url, f?.username, f?.notes, ...(f?.extra ?? []).map((x) => x.label)].some((t) => (t || "").toLowerCase().includes(lq));
+    return [s.title, f?.title, f?.url, f?.username, f?.notes, ...(f?.extra ?? []).map((x) => x.label)].some((t) => (t || "").toLowerCase().includes(lq));
   });
   const cur = secrets.find((s) => s.id === sel) ?? null;
-  useEffect(() => {
-    if (mode === "edit" && !cur) setMode("view");
-  }, [mode, cur]);
+  // 正在编辑的那一条：进编辑时记下来，之后列表刷新、甚至这一条在别处被删了，编辑器都不动（由它自己提示）
+  const [editing, setEditing] = useState<{ s: SecretRec; f: Fields } | null>(null);
 
   if (isLoading && !data) return <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface text-sm text-muted">加载中…</main>;
   if (error || !data)
@@ -526,8 +547,8 @@ export function Vault() {
         </div>
         <div className="scroll-quiet -mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
           {shown.map((s) => {
-            const Icon = KIND_ICON[s.kind] ?? Globe;
             const f = opened.get(s.id);
+            const Icon = KIND_ICON[f?.kind ?? s.kind] ?? Globe;
             return (
               <button
                 key={s.id}
@@ -540,8 +561,8 @@ export function Vault() {
               >
                 <Icon className="size-[18px] shrink-0 text-muted" strokeWidth={1.8} />
                 <span className="flex min-w-0 grow flex-col">
-                  <span className="truncate text-[14px] font-semibold">{s.title}</span>
-                  <span className="truncate font-mono text-xs text-muted">{f ? f.username || f.url || kindName(s.kind) : "用另一个主密码加密的"}</span>
+                  <span className="truncate text-[14px] font-semibold">{f?.title ?? s.title}</span>
+                  <span className="truncate font-mono text-xs text-muted">{f ? f.username || f.url || kindName(f.kind) : "用另一个主密码加密的"}</span>
                 </span>
               </button>
             );
@@ -554,17 +575,24 @@ export function Vault() {
           <Editor
             key="new"
             old={null}
-            init={{}}
+            init={null}
             onCancel={() => setMode("view")}
             onDone={(s) => {
               setSel(s.id);
               setMode("view");
             }}
           />
-        ) : cur && mode === "edit" && opened.get(cur.id) ? (
-          <Editor key={cur.id} old={cur} init={opened.get(cur.id) ?? {}} onCancel={() => setMode("view")} onDone={() => setMode("view")} />
+        ) : mode === "edit" && editing ? (
+          <Editor key={editing.s.id} old={cur} init={editing.f} onCancel={() => setMode("view")} onDone={() => setMode("view")} />
         ) : cur ? (
-          <Detail key={cur.id + cur.updatedAt} s={cur} f={opened.get(cur.id) ?? null} keys={data.keys} onEdit={() => setMode("edit")} onDeleted={() => setSel(null)} />
+          <Detail key={cur.id + cur.updatedAt} s={cur} f={opened.get(cur.id) ?? null} keys={data.keys} onEdit={() => {
+              const f = opened.get(cur.id);
+              if (!f) return;
+              setEditing({ s: cur, f });
+              setMode("edit");
+            }}
+            onDeleted={() => setSel(null)}
+          />
         ) : (
           <div className="grid flex-1 place-items-center p-6 text-center text-sm text-faint">
             <div className="flex flex-col items-center gap-3">
@@ -580,60 +608,140 @@ export function Vault() {
 
 /* ---------------------------------------------------------------- AI 要用某一条：让用户确认 */
 
-function RequestDialog({ r, secret, keys, onDone }: { r: VaultRequest; secret?: SecretRec; keys: KeyRec[]; onDone: () => void }) {
-  const vks = useVault((s) => s.vks);
+function Line({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-3 px-4 py-2.5 text-[13.5px]">
+      <span className="w-14 shrink-0 text-muted">{label}</span>
+      <span className="min-w-0 grow break-words text-fg">{children}</span>
+    </div>
+  );
+}
+
+function RequestDialog({ r, more, secret, keys, onDone }: { r: VaultRequest; more: number; secret?: SecretRec; keys: KeyRec[]; onDone: () => void }) {
+  const global = useVault((s) => s.vks);
+  // 密码库锁着时在这里输主密码：只为这一次解开，不顺手把整个密码库打开
+  const [local, setLocal] = useState<OpenedKeys>({});
+  const localRef = useRef(local);
+  localRef.current = local;
+  // 弹窗关掉就把这一次解开的钥匙抹掉
+  useEffect(
+    () => () => {
+      for (const k of Object.values(localRef.current)) {
+        k.vk.fill(0);
+        k.auth.fill(0);
+      }
+    },
+    [],
+  );
   const [p, setP] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
-  const [left, setLeft] = useState(Math.max(0, Math.round((r.expiresAt - Date.now()) / 1000)));
+  const [end] = useState(() => Date.now() + r.left);
+  const [left, setLeft] = useState(Math.round(r.left / 1000));
   useEffect(() => {
-    const t = window.setInterval(() => setLeft(Math.max(0, Math.round((r.expiresAt - Date.now()) / 1000))), 1000);
+    const t = window.setInterval(() => setLeft(Math.max(0, Math.round((end - Date.now()) / 1000))), 1000);
     return () => window.clearInterval(t);
-  }, [r.expiresAt]);
+  }, [end]);
   useEffect(() => {
     if (left === 0) onDone();
   }, [left, onDone]);
-  const usable = !!secret && !!openSecret(secret, vks);
-  const answer = async (approve: boolean) => {
-    setBusy(true);
+
+  const vks = useMemo(() => ({ ...local, ...(global ?? {}) }), [local, global]);
+  // 给用户看的、和真正交出去的，是同一份解开的内容
+  const f = useMemo(() => (secret ? openSecret(secret, vks) : null), [secret, vks]);
+  // 刚显示出来（或刚解开）的一小会儿不让点允许：免得正在别处敲回车、点鼠标时顺手就批准了
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    setArmed(false);
+    if (!f) return;
+    const t = window.setTimeout(() => setArmed(true), 1200);
+    return () => window.clearTimeout(t);
+  }, [f]);
+
+  const run = async (what: string, fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(what);
     setErr("");
     try {
-      if (approve && !usable) await unlock(keys, p);
-      await answerRequest(r, secret, approve);
-      say(approve ? `已把「${r.title}」交给 ${r.actor}` : `已拒绝 ${r.actor}`);
-      onDone();
+      await fn();
     } catch (e) {
       setErr(errText(e));
-      setBusy(false);
     }
+    setBusy("");
   };
+  const open = () =>
+    run("open", async () => {
+      const got = await unwrapAll(keys, p, vks);
+      if (!secret || !got[secret.kid]) throw new Error("这个主密码解不开这一条");
+      setLocal((l) => ({ ...l, ...got }));
+      setP("");
+    });
+  const allow = () =>
+    run("allow", async () => {
+      const k = secret && vks[secret.kid];
+      if (!f || !k) return;
+      await approveRequest(r, f, k);
+      useVault.getState().touch();
+      say(`已把「${f.title}」交给 ${r.actor}`);
+      onDone();
+    });
+  const deny = () =>
+    run("deny", async () => {
+      await denyRequest(r);
+      say(`已拒绝 ${r.actor}`);
+      onDone();
+    });
   return (
     <Dialog
-      title={`${r.actor} 想用密码库里的「${r.title}」`}
+      title="有 AI 想用密码库里的一条"
       desc="允许后，这一条的全部内容（网址、用户名、密码、备注和你加的其他栏）会交给它，只这一次。"
       onClose={onDone}
       footer={
         <>
-          <Button tone="primary" disabled={busy || !secret || (!usable && !p)} onClick={() => answer(true)}>
-            {busy ? "正在处理…" : "允许这一次"}
-          </Button>
-          <Button disabled={busy} onClick={() => answer(false)}>
+          {f && (
+            <Button tone="primary" disabled={!!busy || !armed} onClick={allow}>
+              {busy === "allow" ? "正在交给它…" : "允许这一次"}
+            </Button>
+          )}
+          <Button disabled={!!busy} onClick={deny}>
             拒绝
           </Button>
           <span className="grow" />
-          <span className="text-xs text-faint">{left} 秒后自动作废</span>
+          <span className="text-xs text-faint">
+            {more > 0 ? `后面还有 ${more} 个请求 · ` : ""}
+            {left} 秒后自动作废
+          </span>
         </>
       }
     >
-      <div className="flex flex-col gap-1 rounded-xl bg-surface-2 px-4 py-3 text-[13px]">
-        <span className="text-xs text-muted">它说的理由</span>
-        <span className="break-words whitespace-pre-wrap text-fg">{r.reason || "（没有说）"}</span>
+      <div className="flex flex-col rounded-xl bg-surface-2 py-1">
+        <Line label="谁">
+          <b className="font-semibold">{r.actor}</b>
+          <span className="text-muted">（它用的 API key 的名字）</span>
+        </Line>
+        <Line label="哪一条">
+          {f ? (
+            <>
+              <b className="font-semibold">{f.title}</b>
+              <span className="text-muted">（{kindName(f.kind)}）</span>
+            </>
+          ) : secret ? (
+            <span className="text-muted">解开后才能确认。主机上登记的名称是「{r.title}」</span>
+          ) : (
+            <span className="text-danger">这一条已经不在密码库里了</span>
+          )}
+        </Line>
+        <Line label="它说">{r.reason || <span className="text-muted">（没有说用来做什么）</span>}</Line>
       </div>
-      <p className="text-xs leading-relaxed text-faint">理由是对方自己写的，不一定可信。不是你刚让它做的事，就点拒绝。</p>
-      {!secret && <ErrorText>这一条已经不在密码库里了</ErrorText>}
-      {secret && !usable && (
-        <Field label="密码库锁着，先输主密码">
-          <MasterInput label="主密码" value={p} onChange={setP} onEnter={() => answer(true)} autoFocus />
+      <p className="text-xs leading-relaxed text-faint">「它说」是对方自己写的，不一定可信。不是你刚让它做的事，就点拒绝。</p>
+      {secret && !f && (
+        <Field label="输入主密码解开这一条（只用于这一次，不会顺便打开整个密码库）">
+          <span className="flex gap-2">
+            <MasterInput label="主密码" value={p} onChange={setP} onEnter={open} />
+            <Button className="h-10" disabled={!p || !!busy} onClick={open}>
+              {busy === "open" ? "正在解开…" : "解开"}
+            </Button>
+          </span>
         </Field>
       )}
       <ErrorText>{err}</ErrorText>
@@ -648,12 +756,14 @@ export function VaultRequests({ enabled }: { enabled: boolean }) {
   const reqs = useQuery({ queryKey: ["vault-requests"], queryFn: fetchRequests, enabled: enabled && has, refetchInterval: 4000 }).data ?? [];
   // 关掉弹窗只是先不看，不算拒绝；过期前不再弹这一个
   const [hidden, setHidden] = useState<string[]>([]);
-  const r = reqs.find((x) => !hidden.includes(x.id));
+  const waiting = reqs.filter((x) => !hidden.includes(x.id));
+  const r = waiting[0];
   if (!r || !vault) return null;
   return (
     <RequestDialog
       key={r.id}
       r={r}
+      more={waiting.length - 1}
       secret={vault.secrets.find((s) => s.id === r.secretId)}
       keys={vault.keys}
       onDone={() => {

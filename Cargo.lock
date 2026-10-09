@@ -5487,10 +5487,12 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures-util",
+ "hmac",
  "http-body-util",
  "rust-embed",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tokio-stream",
  "tower",
@@ -5504,8 +5506,10 @@ dependencies = [
 name = "xp-store"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "gethostname",
  "getrandom 0.2.17",
+ "hmac",
  "rusqlite",
  "serde",
  "serde_json",

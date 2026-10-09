@@ -1173,25 +1173,55 @@ fn drive_dir_is_separate_from_cold_backup() {
     }
 }
 
+const VAULT_AUTH: [u8; 32] = [5; 32];
+
+fn b64(b: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(b)
+}
+
+/// 界面解锁后才算得出来的校验值（见 vault.rs 的 check_mac）
+fn vmac(parts: &[&str]) -> String {
+    use hmac::{Hmac, Mac};
+    let mut m = Hmac::<sha2::Sha256>::new_from_slice(&VAULT_AUTH).unwrap();
+    m.update(parts.join("\n").as_bytes());
+    b64(&m.finalize().into_bytes())
+}
+
+fn stamp(t: Option<f64>) -> String {
+    t.map(|x| (x as i64).to_string()).unwrap_or_default()
+}
+
 fn vault_key(st: &Store, kid: &str) {
     st.vault_put_key(
         kid,
-        &json!({"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "c2FsdA", "n": "bm9uY2U", "c": "d3JhcHBlZA"}),
+        &json!({"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "c2FsdA", "n": "bm9uY2U", "c": "d3JhcHBlZA", "auth": b64(&VAULT_AUTH)}),
         None,
+        "",
         ACTOR_UI,
     )
     .unwrap();
 }
 
-fn secret(kid: &str, title: &str, c: &str, expect: Option<f64>) -> Value {
-    let mut v = json!({"kid": kid, "title": title, "kind": "login", "n": "bm9uY2U", "c": c});
+fn secret(id: &str, kid: &str, title: &str, c: &str, expect: Option<f64>) -> Value {
+    let mut v = json!({"kid": kid, "title": title, "kind": "login", "n": "bm9uY2U", "c": c,
+        "mac": vmac(&["put-secret", id, kid, title, "login", "bm9uY2U", c, &stamp(expect)])});
     if let Some(e) = expect {
         v["expect"] = json!(e);
     }
     v
 }
 
-/// 密码库只存密文：设主密码、增删改（别处刚改过就拒绝）、AI 的取用请求要等用户确认
+fn vdelete(st: &Store, id: &str, at: f64) -> crate::Result<()> {
+    st.vault_delete_secret(
+        id,
+        at,
+        &vmac(&["delete-secret", id, &stamp(Some(at))]),
+        ACTOR_UI,
+    )
+}
+
+/// 密码库只存密文：设主密码、增删改（别处刚改过就拒绝，没解锁的人改不了）、AI 的取用请求要等用户确认
 #[test]
 fn vault_stores_ciphertext_and_gates_requests() {
     let d = tmp("vault");
@@ -1199,56 +1229,97 @@ fn vault_stores_ciphertext_and_gates_requests() {
     assert_eq!(st.vault_state().unwrap()["keys"], json!([]));
     // 还没设主密码不能存条目
     assert!(matches!(
-        st.vault_put_secret("sec1", &secret("k1abcd", "GitHub", "AAAA", None), ACTOR_UI),
+        st.vault_put_secret(
+            "sec1",
+            &secret("sec1", "k1abcd", "GitHub", "AAAA", None),
+            ACTOR_UI
+        ),
         Err(StoreError::Invalid(_))
     ));
     vault_key(&st, "k1abcd");
-    // 已经设过主密码，不能再新建一把；改主密码要带对 expect
+    // 校验密钥不往外给
+    let key = st.vault_state().unwrap()["keys"][0].clone();
+    assert!(key.get("auth").is_none() && key["salt"] == "c2FsdA");
+    // 已经设过主密码，不能再新建一把
+    let fresh = json!({"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "YQ", "n": "Yg", "c": "bmV3", "auth": b64(&[9; 32])});
     assert!(matches!(
-        st.vault_put_key(
-            "k2abcd",
-            &json!({"kdf": {}, "salt": "a", "n": "b", "c": "c"}),
-            None,
-            ACTOR_UI
-        ),
+        st.vault_put_key("k2abcd", &fresh, None, "", ACTOR_UI),
         Err(StoreError::Conflict(_))
     ));
-    let at = st.vault_state().unwrap()["keys"][0]["updatedAt"]
-        .as_f64()
-        .unwrap();
-    assert!(matches!(
-        st.vault_put_key(
+    // 改主密码：没解锁的人（算不出校验值）换不掉钥匙；带对了才行，校验密钥沿用原来的
+    let at = key["updatedAt"].as_f64().unwrap();
+    let kmac = |e: f64| {
+        vmac(&[
+            "put-key",
             "k1abcd",
-            &json!({"kdf": {}, "salt": "a", "n": "b", "c": "c"}),
-            Some(at - 1.0),
-            ACTOR_UI
-        ),
+            "YQ",
+            "Yg",
+            "bmV3",
+            "16",
+            "8",
+            "1",
+            &stamp(Some(e)),
+        ])
+    };
+    assert!(matches!(
+        st.vault_put_key("k1abcd", &fresh, Some(at), "AAAA", ACTOR_UI),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(matches!(
+        st.vault_put_key("k1abcd", &fresh, Some(at - 1.0), &kmac(at - 1.0), ACTOR_UI),
         Err(StoreError::Conflict(_))
     ));
     let s = st
-        .vault_put_key(
-            "k1abcd",
-            &json!({"kdf": {}, "salt": "a", "n": "b", "c": "新的"}),
-            Some(at),
+        .vault_put_key("k1abcd", &fresh, Some(at), &kmac(at), ACTOR_UI)
+        .unwrap();
+    assert_eq!(s["keys"][0]["c"], "bmV3");
+
+    let a = st
+        .vault_put_secret(
+            "sec1",
+            &secret("sec1", "k1abcd", "GitHub", "AAAA", None),
             ACTOR_UI,
         )
         .unwrap();
-    assert_eq!(s["keys"][0]["c"], "新的");
-
-    let a = st
-        .vault_put_secret("sec1", &secret("k1abcd", "GitHub", "AAAA", None), ACTOR_UI)
-        .unwrap();
     assert_eq!(a["c"], "AAAA");
     let t = a["updatedAt"].as_f64().unwrap();
+    // 没有校验值、或者把别的条目的校验值拿来用：拒绝
+    let mut forged = secret("sec1", "k1abcd", "GitHub", "BBBB", Some(t));
+    forged["mac"] = json!("");
+    assert!(matches!(
+        st.vault_put_secret("sec1", &forged, ACTOR_UI),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(matches!(
+        st.vault_put_secret(
+            "sec9",
+            &secret("sec1", "k1abcd", "GitHub", "AAAA", None),
+            ACTOR_UI
+        ),
+        Err(StoreError::Invalid(_))
+    ));
+    // 名称里不许换行
+    assert!(matches!(
+        st.vault_put_secret(
+            "sec2",
+            &secret("sec2", "k1abcd", "a\nb", "AAAA", None),
+            ACTOR_UI
+        ),
+        Err(StoreError::Invalid(_))
+    ));
     // 同一个 id 再新建、或者基于旧内容改：冲突
     assert!(matches!(
-        st.vault_put_secret("sec1", &secret("k1abcd", "GitHub", "BBBB", None), ACTOR_UI),
+        st.vault_put_secret(
+            "sec1",
+            &secret("sec1", "k1abcd", "GitHub", "BBBB", None),
+            ACTOR_UI
+        ),
         Err(StoreError::Conflict(_))
     ));
     assert!(matches!(
         st.vault_put_secret(
             "sec1",
-            &secret("k1abcd", "GitHub", "BBBB", Some(t - 1.0)),
+            &secret("sec1", "k1abcd", "GitHub", "BBBB", Some(t - 1.0)),
             ACTOR_UI
         ),
         Err(StoreError::Conflict(_))
@@ -1256,11 +1327,12 @@ fn vault_stores_ciphertext_and_gates_requests() {
     let b = st
         .vault_put_secret(
             "sec1",
-            &secret("k1abcd", "GitHub 改名", "BBBB", Some(t)),
+            &secret("sec1", "k1abcd", "GitHub 改名", "BBBB", Some(t)),
             ACTOR_UI,
         )
         .unwrap();
-    assert!(b["updatedAt"].as_f64().unwrap() > t);
+    let t2 = b["updatedAt"].as_f64().unwrap();
+    assert!(t2 > t && t2.fract() == 0.0);
     // 给 AI 看的列表只有名称和种类
     let idx = st.vault_index().unwrap();
     assert_eq!(idx[0]["title"], "GitHub 改名");
@@ -1268,50 +1340,88 @@ fn vault_stores_ciphertext_and_gates_requests() {
     // 不是条目：不会出现在条目列表和搜索里
     assert!(st.all_items().unwrap().is_empty());
 
-    // 取用请求：没有这条 → 找不到；用户没点之前拿不到内容
+    // 取用请求：没有这条 → 找不到；公钥不对 → 拒绝；用户没点之前拿不到内容
+    let pk = b64(&[1; 32]);
     assert!(matches!(
-        st.vault_request_create("nope", "", &"p".repeat(44), "claude"),
+        st.vault_request_create("nope", "", &pk, "claude"),
         Err(StoreError::NotFound(_))
     ));
+    assert!(matches!(
+        st.vault_request_create("sec1", "", "不是公钥", "claude"),
+        Err(StoreError::Invalid(_))
+    ));
     let r = st
-        .vault_request_create("sec1", "部署要用", &"p".repeat(44), "claude")
+        .vault_request_create("sec1", "部署要用\n（第二行）", &pk, "claude")
         .unwrap();
     let rid = r["id"].as_str().unwrap().to_string();
+    // 同一个 AI 对同一条不能同时挂两个请求
+    assert!(matches!(
+        st.vault_request_create("sec1", "再来", &pk, "claude"),
+        Err(StoreError::Conflict(_))
+    ));
     assert_eq!(st.vault_request_get(&rid).unwrap()["status"], "pending");
     let p = st.vault_requests_pending();
     assert_eq!(p.len(), 1);
     assert_eq!(p[0]["title"], "GitHub 改名");
     assert_eq!(p[0]["actor"], "claude");
-    // 允许但没带加密后的内容：不算
+    assert_eq!(p[0]["reason"], "部署要用 （第二行）");
+    assert!(p[0]["left"].as_f64().unwrap() > 100_000.0);
+    // 允许：要带加密后的内容，还要带解锁了才算得出的校验值（别人冒充用户「允许」不算）
+    let sealed = json!({"epk": "ZQ", "n": "bg", "c": "Yw"});
+    let rmac = |rid: &str| vmac(&["resolve", rid, "ZQ", "bg", "Yw"]);
     assert!(matches!(
-        st.vault_request_resolve(&rid, true, None, ACTOR_UI),
+        st.vault_request_resolve(&rid, true, None, &rmac(&rid), ACTOR_UI),
         Err(StoreError::Invalid(_))
     ));
-    st.vault_request_resolve(
-        &rid,
-        true,
-        Some(json!({"epk": "e", "n": "n", "c": "c"})),
-        ACTOR_UI,
-    )
-    .unwrap();
+    assert!(matches!(
+        st.vault_request_resolve(&rid, true, Some(sealed.clone()), "", "路人"),
+        Err(StoreError::Invalid(_))
+    ));
+    assert_eq!(st.vault_request_get(&rid).unwrap()["status"], "pending");
+    st.vault_request_resolve(&rid, true, Some(sealed.clone()), &rmac(&rid), ACTOR_UI)
+        .unwrap();
     assert!(st.vault_requests_pending().is_empty());
     let got = st.vault_request_get(&rid).unwrap();
     assert_eq!(got["status"], "approved");
-    assert_eq!(got["sealed"]["c"], "c");
+    assert_eq!(got["sealed"]["c"], "Yw");
     // 取走一次就没了
     assert!(st.vault_request_get(&rid).is_err());
-    // 拒绝
-    let r = st
-        .vault_request_create("sec1", "", &"p".repeat(44), "codex")
-        .unwrap();
+    // 拒绝（不用解锁）
+    let r = st.vault_request_create("sec1", "", &pk, "codex").unwrap();
     let rid = r["id"].as_str().unwrap().to_string();
-    st.vault_request_resolve(&rid, false, None, ACTOR_UI)
+    st.vault_request_resolve(&rid, false, None, "", ACTOR_UI)
         .unwrap();
     assert_eq!(st.vault_request_get(&rid).unwrap()["status"], "denied");
+    // 等确认的请求有上限
+    for i in 0..5 {
+        st.vault_request_create("sec1", "", &pk, &format!("bot{i}"))
+            .unwrap();
+    }
+    assert!(matches!(
+        st.vault_request_create("sec1", "", &pk, "bot9"),
+        Err(StoreError::Unavailable(_))
+    ));
 
-    st.vault_delete_secret("sec1", ACTOR_UI).unwrap();
+    // 删除：没解锁的人删不了；基于旧内容删 → 冲突；删掉的标识不能再用
+    assert!(matches!(
+        st.vault_delete_secret("sec1", t2, "", ACTOR_UI),
+        Err(StoreError::Invalid(_))
+    ));
+    assert!(matches!(
+        vdelete(&st, "sec1", t),
+        Err(StoreError::Conflict(_))
+    ));
+    vdelete(&st, "sec1", t2).unwrap();
     assert_eq!(st.vault_state().unwrap()["secrets"], json!([]));
-    assert!(st.vault_delete_secret("sec1", ACTOR_UI).is_err());
+    assert!(vdelete(&st, "sec1", t2).is_err());
+    assert!(matches!(
+        st.vault_put_secret(
+            "sec1",
+            &secret("sec1", "k1abcd", "GitHub", "AAAA", None),
+            ACTOR_UI
+        ),
+        Err(StoreError::Conflict(_))
+    ));
     let _ = fs::remove_dir_all(d);
 }
 
@@ -1354,7 +1464,7 @@ fn vault_merges_between_computers() {
     };
     vault_key(&a, "k1abcd");
     for (id, t) in [("sec1", "网站"), ("sec2", "服务器"), ("sec3", "令牌")] {
-        a.vault_put_secret(id, &secret("k1abcd", t, "v1", None), ACTOR_UI)
+        a.vault_put_secret(id, &secret(id, "k1abcd", t, "v1", None), ACTOR_UI)
             .unwrap();
     }
     a.backup_to_drive(false).unwrap();
@@ -1369,22 +1479,22 @@ fn vault_merges_between_computers() {
     // a 改 s1、删 s2；b 改 s1（更晚）、改 s3
     a.vault_put_secret(
         "sec1",
-        &secret("k1abcd", "网站", "a2", Some(at(&a, "sec1"))),
+        &secret("sec1", "k1abcd", "网站", "a2", Some(at(&a, "sec1"))),
         ACTOR_UI,
     )
     .unwrap();
-    a.vault_delete_secret("sec2", ACTOR_UI).unwrap();
+    vdelete(&a, "sec2", at(&a, "sec2")).unwrap();
     a.backup_to_drive(false).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(5));
     b.vault_put_secret(
         "sec1",
-        &secret("k1abcd", "网站", "b2", Some(at(&b, "sec1"))),
+        &secret("sec1", "k1abcd", "网站", "b2", Some(at(&b, "sec1"))),
         ACTOR_UI,
     )
     .unwrap();
     b.vault_put_secret(
         "sec3",
-        &secret("k1abcd", "令牌", "b2", Some(at(&b, "sec3"))),
+        &secret("sec3", "k1abcd", "令牌", "b2", Some(at(&b, "sec3"))),
         ACTOR_UI,
     )
     .unwrap();

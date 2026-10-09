@@ -23,7 +23,7 @@ export function DebugPanel() {
     const t0 = performance.now();
     const rec = (e: Event) => {
       const extra =
-        e instanceof KeyboardEvent ? " " + e.key : e instanceof MouseEvent ? ` (${e.clientX},${e.clientY}) btn${e.button}${e.defaultPrevented ? " prevented" : ""}` : "";
+        e instanceof KeyboardEvent ? (e.target instanceof HTMLInputElement && e.target.type === "password" ? " （密码框，不记按键）" : " " + e.key) : e instanceof MouseEvent ? ` (${e.clientX},${e.clientY}) btn${e.button}${e.defaultPrevented ? " prevented" : ""}` : "";
       const line = `${((performance.now() - t0) / 1000).toFixed(2)} ${e.type}${extra} → ${desc(e.target)} | active=${desc(document.activeElement)} | body.pe=${document.body.style.pointerEvents || "-"}`;
       setLog((l) => [...l.slice(-15), line]);
     };

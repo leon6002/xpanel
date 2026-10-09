@@ -1,11 +1,16 @@
 /* 密码库：加密、解密都在这里（界面里）做，主机只存密文，主密码不离开这台电脑。
    - 主密码 --scrypt--> 包装密钥，用它把随机生成的「密码库密钥」包起来存到主机（一把「钥匙」）；改主密码只是重新包一次
-   - 每一条的内容（网址、用户名、密码、备注…）用密码库密钥加密（XChaCha20-Poly1305）；名称和种类是明文
+   - 每一条的内容（名称、种类、网址、用户名、密码、备注…）用密码库密钥加密（XChaCha20-Poly1305）。
+     主机上另外存一份明文的名称和种类，只是给锁着时和 AI 的列表用的标签；解开后一律以密文里的为准，
+     不然别人可以把一条的密文挂到另一个名称下面，骗用户批准
+   - 改动（存、删、改主密码、批准取用）要带一个校验值：用从密码库密钥派生的校验密钥算的 HMAC。
+     接口在局域网里不用登录，没有它谁都能改掉、删掉密文或者冒充用户批准
    - AI 取用：用户点了允许，才把那一条用请求方的临时公钥加密（X25519 + HKDF-SHA256）后交给主机转交，主机看不到内容
    用的是纯 JS 的 @noble 库而不是浏览器自带的 crypto.subtle：局域网里用 http://主机:8765 打开时浏览器不提供后者。 */
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
+import { hmac } from "@noble/hashes/hmac.js";
 import { scryptAsync } from "@noble/hashes/scrypt.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { randomBytes } from "@noble/hashes/utils.js";
@@ -28,10 +33,13 @@ export interface KeyRec { kid: string; createdAt: number; updatedAt: number; kdf
 export interface SecretRec { id: string; kid: string; title: string; kind: SecretKind; createdAt: number; updatedAt: number; n: string; c: string }
 export interface VaultState { keys: KeyRec[]; secrets: SecretRec[] }
 export interface Extra { label: string; value: string; hidden?: boolean }
-/** 一条里加密的内容 */
-export interface Fields { url?: string; username?: string; password?: string; notes?: string; extra?: Extra[] }
-/** AI 发来、等用户确认的取用请求 */
-export interface VaultRequest { id: string; secretId: string; title: string; actor: string; reason: string; pub: string; at: number; expiresAt: number }
+/** 一条里加密的内容。title、kind 在这里才是真的，主机上那份明文只是标签 */
+export interface Fields { title: string; kind: SecretKind; url?: string; username?: string; password?: string; notes?: string; extra?: Extra[] }
+/** AI 发来、等用户确认的取用请求。title 是主机上的标签（不可信），left 是还剩多少毫秒 */
+export interface VaultRequest { id: string; secretId: string; title: string; actor: string; reason: string; pub: string; left: number }
+/** 解开的一把钥匙：密码库密钥，和从它派生的校验密钥 */
+export interface Opened { vk: Uint8Array; auth: Uint8Array }
+export type OpenedKeys = Record<string, Opened>;
 
 const KDF: Kdf = { alg: "scrypt", N: 2 ** 17, r: 8, p: 1 };
 const enc = new TextEncoder();
@@ -39,6 +47,14 @@ const dec = new TextDecoder();
 const AAD_KEY = enc.encode("xpanel-vault-key-v1");
 const AAD_SECRET = enc.encode("xpanel-vault-secret-v1");
 const INFO_REQUEST = enc.encode("xpanel-vault-request-v1");
+const INFO_AUTH = enc.encode("xpanel-vault-auth-v1");
+
+const authOf = (vk: Uint8Array) => hkdf(sha256, vk, undefined, INFO_AUTH, 32);
+const opened = (vk: Uint8Array): Opened => ({ vk, auth: authOf(vk) });
+/** 这次改动的校验值：各部分用换行连起来算 HMAC（主机那边 vault.rs 的 check_mac 按同样的顺序验） */
+const mac = (k: Opened, parts: (string | number)[]) => b64(hmac(sha256, k.auth, enc.encode(parts.join("\n"))));
+/** updatedAt 放进校验串里的写法：主机上的时间都是整数毫秒 */
+const stamp = (t?: number) => (t == null ? "" : String(Math.trunc(t)));
 
 export function b64(u: Uint8Array) {
   let s = "";
@@ -54,7 +70,8 @@ export function unb64(s: string) {
 
 /** 主密码 → 包装密钥。要算一会儿（故意的，让猜密码变慢） */
 function kek(password: string, salt: Uint8Array, kdf: Kdf) {
-  if (kdf.alg !== "scrypt" || !(kdf.N >= 2 ** 14 && kdf.N <= 2 ** 20) || !(kdf.r >= 1 && kdf.r <= 16) || !(kdf.p >= 1 && kdf.p <= 4)) throw new Error("这把钥匙的参数不认识，请升级 xpanel");
+  // 参数是主机给的，不能照单全收：太小等于没保护，太大会把这台电脑卡死
+  if (kdf.alg !== "scrypt" || !(kdf.N >= 2 ** 15 && kdf.N <= 2 ** 18 && Number.isInteger(Math.log2(kdf.N))) || kdf.r !== 8 || !(kdf.p >= 1 && kdf.p <= 2)) throw new Error("这把钥匙的参数不认识，请升级 xpanel");
   return scryptAsync(enc.encode(password.normalize("NFKC")), salt, { N: kdf.N, r: kdf.r, p: kdf.p, dkLen: 32, maxmem: 2 ** 31 });
 }
 
@@ -67,13 +84,24 @@ async function wrap(password: string, vk: Uint8Array) {
 }
 
 async function unwrap(password: string, key: KeyRec): Promise<Uint8Array | null> {
-  const k = await kek(password, unb64(key.salt), key.kdf);
   try {
+    const k = await kek(password, unb64(key.salt), key.kdf);
     const vk = xchacha20poly1305(k, unb64(key.n), AAD_KEY).decrypt(unb64(key.c));
     return vk.length === 32 ? vk : null;
   } catch {
-    return null; // 主密码不对
+    return null; // 主密码不对，或者这把钥匙的内容坏了
   }
+}
+
+/** 主密码能解开哪几把钥匙（一般只有一把）。skip 里已经解开的不再算 */
+export async function unwrapAll(keys: KeyRec[], password: string, skip: OpenedKeys = {}) {
+  const got: OpenedKeys = {};
+  for (const k of keys) {
+    if (skip[k.kid]) continue;
+    const vk = await unwrap(password, k);
+    if (vk) got[k.kid] = opened(vk);
+  }
+  return got;
 }
 
 export function encryptFields(vk: Uint8Array, f: Fields) {
@@ -117,12 +145,15 @@ export function generatePassword(len = 20, symbols = true) {
   }
 }
 
-/** 主密码大概有多强：0 太弱（不让用）、1 一般、2 好 */
+/** 主密码大概有多强：0 太弱（不让用）、1 一般、2 好。
+    包着的密钥在局域网里谁都读得到，主密码是唯一的防线，所以常见的写法直接不让用 */
+const COMMON = /pass(word)?|qwer|asdf|zxcv|1234|4321|abcd|(.)\2{3}|iloveyou|admin|letmein|welcome|xpanel|woaini|mima/i;
 export function strength(p: string) {
   const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^\da-zA-Z]/].filter((r) => r.test(p)).length;
   const n = [...p].length;
-  if (n < 10 || new Set(p).size < 5) return 0;
-  return n >= 16 || (n >= 12 && kinds >= 3) ? 2 : 1;
+  if (n < 12 || new Set(p).size < 6 || /^\d+$/.test(p)) return 0;
+  if (COMMON.test(p) && n < 20) return 0;
+  return n >= 20 || (n >= 14 && kinds >= 3) ? 2 : 1;
 }
 
 /* ---------------------------------------------------------------- 解锁状态（只在内存里，刷新页面就锁上） */
@@ -130,98 +161,113 @@ export function strength(p: string) {
 /** 多久不碰密码库就自动锁上 */
 export const AUTO_LOCK_MS = 10 * 60 * 1000;
 interface Unlocked {
-  /** 解开的密码库密钥，按钥匙的标识；null = 锁着 */
-  vks: Record<string, Uint8Array> | null;
+  /** 解开的钥匙，按钥匙的标识；null = 锁着 */
+  vks: OpenedKeys | null;
   touched: number;
   touch: () => void;
   lock: () => void;
 }
-let lockTimer: number | undefined;
 export const useVault = create<Unlocked>((set, get) => ({
   vks: null,
   touched: 0,
-  touch: () => {
-    if (!get().vks) return;
-    window.clearTimeout(lockTimer);
-    lockTimer = window.setTimeout(() => get().lock(), AUTO_LOCK_MS);
-    set({ touched: Date.now() });
-  },
+  touch: () => get().vks && set({ touched: Date.now() }),
   lock: () => {
-    window.clearTimeout(lockTimer);
     const vks = get().vks;
-    if (vks) for (const k of Object.values(vks)) k.fill(0);
+    if (vks)
+      for (const k of Object.values(vks)) {
+        k.vk.fill(0);
+        k.auth.fill(0);
+      }
     set({ vks: null });
   },
 }));
+/* 到点就锁。用「现在离上次用过了多久」来判断而不是定一个闹钟：电脑睡着的时候闹钟不走 */
+const lockIfIdle = () => {
+  const { vks, touched, lock } = useVault.getState();
+  if (vks && Date.now() - touched > AUTO_LOCK_MS) lock();
+};
+window.setInterval(lockIfIdle, 15000);
+document.addEventListener("visibilitychange", lockIfIdle);
+window.addEventListener("focus", lockIfIdle);
 
 export const VAULT_KEY = ["vault"] as const;
 export const fetchVault = () => v1<VaultState>("GET", "/vault");
 const setVault = (f: (s: VaultState) => VaultState) => qc.setQueryData<VaultState>(VAULT_KEY, (s) => (s ? f(s) : s));
+const setOpened = (vks: OpenedKeys) => useVault.setState({ vks, touched: Date.now() });
 
 /** 第一次用：设主密码，建一把钥匙 */
 export async function createVault(password: string) {
-  const vk = randomBytes(32);
+  const k = opened(randomBytes(32));
   const kid = newId();
-  const st = await v1<VaultState>("PUT", `/vault/keys/${kid}`, { data: await wrap(password, vk) });
+  const st = await v1<VaultState>("PUT", `/vault/keys/${kid}`, { data: { ...(await wrap(password, k.vk)), auth: b64(k.auth) } });
   qc.setQueryData(VAULT_KEY, st);
-  useVault.setState({ vks: { [kid]: vk } });
-  useVault.getState().touch();
+  setOpened({ [kid]: k });
 }
 
-/** 解锁：主密码能解开哪几把钥匙就解开哪几把（一般只有一把）。一把都解不开 = 主密码不对 */
+/** 解锁：主密码能解开哪几把钥匙就解开哪几把。一把都解不开 = 主密码不对 */
 export async function unlock(keys: KeyRec[], password: string) {
-  const vks: Record<string, Uint8Array> = { ...(useVault.getState().vks ?? {}) };
-  let got = 0;
-  for (const k of keys) {
-    if (vks[k.kid]) continue;
-    const vk = await unwrap(password, k);
-    if (vk) {
-      vks[k.kid] = vk;
-      got++;
-    }
-  }
-  if (!got) throw new Error("主密码不对");
-  useVault.setState({ vks });
-  useVault.getState().touch();
+  const have = useVault.getState().vks ?? {};
+  const got = await unwrapAll(keys, password, have);
+  if (!Object.keys(got).length) throw new Error("主密码不对");
+  setOpened({ ...have, ...got });
 }
 
-/** 改主密码：先用旧的验证，再用新的把每把解开的钥匙重新包一次（条目不用动） */
+/** 改主密码：先用旧的验证，再用新的把每把解开的钥匙重新包一次（条目不用动，密码库密钥也不变） */
 export async function changePassword(keys: KeyRec[], oldPassword: string, newPassword: string) {
-  const mine: [KeyRec, Uint8Array][] = [];
-  for (const k of keys) {
-    const vk = await unwrap(oldPassword, k);
-    if (vk) mine.push([k, vk]);
-  }
-  if (!mine.length) throw new Error("原来的主密码不对");
+  const mine = await unwrapAll(keys, oldPassword);
+  if (!Object.keys(mine).length) throw new Error("原来的主密码不对");
   let st: VaultState | undefined;
-  for (const [k, vk] of mine) st = await v1<VaultState>("PUT", `/vault/keys/${k.kid}`, { data: await wrap(newPassword, vk), expect: k.updatedAt });
+  for (const k of keys) {
+    const o = mine[k.kid];
+    if (!o) continue;
+    const data = await wrap(newPassword, o.vk);
+    st = await v1<VaultState>("PUT", `/vault/keys/${k.kid}`, {
+      data,
+      expect: k.updatedAt,
+      mac: mac(o, ["put-key", k.kid, data.salt, data.n, data.c, data.kdf.N, data.kdf.r, data.kdf.p, stamp(k.updatedAt)]),
+    });
+  }
   if (st) qc.setQueryData(VAULT_KEY, st);
 }
 
-/** 新建或保存一条。old 是修改前的那条（没有 = 新建） */
-export async function saveSecret(old: SecretRec | null, p: { title: string; kind: SecretKind; fields: Fields }) {
+/** 新建或保存一条。old 是开始编辑时的那条（没有 = 新建，这时用 id）。
+    别处在这期间改过的话主机会拒绝（409），不会悄悄盖掉 */
+export async function saveSecret(old: SecretRec | null, id: string, p: Omit<Fields, "title" | "kind"> & { title: string; kind: SecretKind }) {
   const { vks } = useVault.getState();
   const kid = old?.kid ?? Object.keys(vks ?? {})[0];
-  const vk = vks?.[kid];
-  if (!vk) throw new Error("密码库锁着，先解锁");
-  const id = old?.id ?? newId();
-  const rec = await v1<SecretRec>("PUT", `/vault/secrets/${id}`, { kid, title: p.title.trim(), kind: p.kind, ...encryptFields(vk, p.fields), ...(old ? { expect: old.updatedAt } : {}) });
+  const k = vks?.[kid];
+  if (!k) throw new Error("密码库锁着，先解锁");
+  const title = p.title.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
+  if (old) id = old.id;
+  const { n, c } = encryptFields(k.vk, { ...p, title });
+  const rec = await v1<SecretRec>("PUT", `/vault/secrets/${id}`, {
+    kid,
+    title,
+    kind: p.kind,
+    n,
+    c,
+    ...(old ? { expect: old.updatedAt } : {}),
+    mac: mac(k, ["put-secret", id, kid, title, p.kind, n, c, stamp(old?.updatedAt)]),
+  });
   setVault((s) => ({ ...s, secrets: [...s.secrets.filter((x) => x.id !== id), rec].sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase())) }));
   useVault.getState().touch();
   return rec;
 }
 
-export async function deleteSecret(id: string) {
-  await v1("DELETE", `/vault/secrets/${id}`);
-  setVault((s) => ({ ...s, secrets: s.secrets.filter((x) => x.id !== id) }));
+export async function deleteSecret(s: SecretRec) {
+  const k = useVault.getState().vks?.[s.kid];
+  if (!k) throw new Error("这一条的钥匙没解开，删不了");
+  await v1("DELETE", `/vault/secrets/${s.id}`, { expect: s.updatedAt, mac: mac(k, ["delete-secret", s.id, stamp(s.updatedAt)]) });
+  setVault((st) => ({ ...st, secrets: st.secrets.filter((x) => x.id !== s.id) }));
 }
 
 /** 解开一条；钥匙没解开（用另一个主密码加密的）或内容坏了返回 null */
-export function openSecret(s: SecretRec, vks: Record<string, Uint8Array> | null): Fields | null {
-  const vk = vks?.[s.kid];
-  if (!vk) return null;
+export function openSecret(s: SecretRec, vks: OpenedKeys | null): Fields | null {
+  const k = vks?.[s.kid];
+  if (!k) return null;
   try {
-    return decryptFields(vk, s);
+    const f = decryptFields(k.vk, s);
+    return typeof f?.title === "string" ? f : null;
   } catch {
     return null;
   }
@@ -229,11 +275,10 @@ export function openSecret(s: SecretRec, vks: Record<string, Uint8Array> | null)
 
 export const fetchRequests = () => v1<{ requests: VaultRequest[] }>("GET", "/vault/requests").then((r) => r.requests || []);
 
-/** 用户的决定：允许就把那一条解密、加密给请求方后交给主机；拒绝只说一声 */
-export async function answerRequest(r: VaultRequest, secret: SecretRec | undefined, approve: boolean) {
-  if (!approve) return v1("POST", `/vault/requests/${r.id}`, { approve: false });
-  const f = secret && openSecret(secret, useVault.getState().vks);
-  if (!secret || !f) throw new Error("这一条解不开，先解锁密码库");
-  await v1("POST", `/vault/requests/${r.id}`, { approve: true, sealed: seal(r.pub, { title: secret.title, kind: secret.kind, ...f }) });
-  useVault.getState().touch();
+export const denyRequest = (r: VaultRequest) => v1("POST", `/vault/requests/${r.id}`, { approve: false });
+
+/** 允许：把解开的那一条（f，就是弹窗里给用户看的那份）加密给请求方后交给主机 */
+export async function approveRequest(r: VaultRequest, f: Fields, k: Opened) {
+  const sealed = seal(r.pub, f);
+  await v1("POST", `/vault/requests/${r.id}`, { approve: true, sealed, mac: mac(k, ["resolve", r.id, sealed.epk, sealed.n, sealed.c]) });
 }

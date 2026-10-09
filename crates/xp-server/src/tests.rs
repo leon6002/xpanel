@@ -807,28 +807,56 @@ async fn ui_is_served() {
     assert!(old.contains("wb-ui-version"));
 }
 
+fn vmac(parts: &[&str]) -> String {
+    use base64::Engine;
+    use hmac::{Hmac, Mac};
+    let mut m = Hmac::<sha2::Sha256>::new_from_slice(&[5u8; 32]).unwrap();
+    m.update(parts.join("\n").as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(m.finalize().into_bytes())
+}
+
 #[tokio::test]
 async fn vault_api_round_trip() {
+    use base64::Engine;
+    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
     let (st, d) = setup("vault");
     let ui = [("x-actor", "ui")];
-    let (c, _) = call(
-        &st,
-        Method::PUT,
-        "/api/v1/vault/keys/k1abcd",
-        Some(json!({"data": {"kdf": {"alg": "scrypt"}, "salt": "c2FsdA", "n": "bm9uY2U", "c": "d3JhcA"}})),
-        &ui,
-    )
-    .await;
-    assert_eq!(c, StatusCode::OK);
     let (c, b) = call(
         &st,
         Method::PUT,
-        "/api/v1/vault/secrets/sec1",
-        Some(json!({"kid": "k1abcd", "title": "GitHub", "kind": "apikey", "n": "bm9uY2U", "c": "Y2lwaGVy"})),
+        "/api/v1/vault/keys/k1abcd",
+        Some(json!({"data": {"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "c2FsdA", "n": "bm9uY2U", "c": "d3JhcA", "auth": b64(&[5u8; 32])}})),
         &ui,
     )
     .await;
     assert_eq!(c, StatusCode::OK, "{b}");
+    assert!(!b.contains("auth"));
+    let put = |c: &str| {
+        json!({"kid": "k1abcd", "title": "GitHub", "kind": "apikey", "n": "bm9uY2U", "c": c,
+            "mac": vmac(&["put-secret", "sec1", "k1abcd", "GitHub", "apikey", "bm9uY2U", c, ""])})
+    };
+    // 局域网里没解锁的人：读得到密文，改不了
+    let mut forged = put("Y2lwaGVy");
+    forged["mac"] = json!("AAAA");
+    let (c, _) = call(
+        &st,
+        Method::PUT,
+        "/api/v1/vault/secrets/sec1",
+        Some(forged),
+        &ui,
+    )
+    .await;
+    assert_eq!(c, StatusCode::BAD_REQUEST);
+    let (c, b) = call(
+        &st,
+        Method::PUT,
+        "/api/v1/vault/secrets/sec1",
+        Some(put("Y2lwaGVy")),
+        &ui,
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK, "{b}");
+    let at = j(&b)["updatedAt"].as_f64().unwrap();
     let (_, b) = call(&st, Method::GET, "/api/v1/vault", None, &ui).await;
     assert_eq!(j(&b)["secrets"][0]["c"], "Y2lwaGVy");
     // 给 AI 的列表没有密文；条目接口里也看不到密码库
@@ -839,16 +867,59 @@ async fn vault_api_round_trip() {
         let (_, b) = call(&st, Method::GET, path, None, &[]).await;
         assert!(!b.contains("GitHub") && !b.contains("Y2lwaGVy"), "{path}");
     }
-    // AI 请求取用 → 用户允许 → 取到加密后的内容
-    let pk = "p".repeat(44);
-    let (c, b) = call(
+    // 别的网站上的网页不能调密码库的接口（其他接口可以）
+    for h in [
+        vec![
+            ("host", "192.168.1.9:8765"),
+            ("origin", "https://evil.example"),
+        ],
+        vec![("host", "evil.example:8765")],
+        vec![
+            ("host", "evil.example:8765"),
+            ("origin", "http://evil.example:8765"),
+        ],
+    ] {
+        let (c, _) = call(&st, Method::GET, "/api/v1/vault", None, &h).await;
+        assert_eq!(c, StatusCode::FORBIDDEN, "{h:?}");
+    }
+    for h in [
+        vec![
+            ("host", "192.168.1.9:8765"),
+            ("origin", "http://192.168.1.9:8765"),
+        ],
+        vec![("host", "base:8765")],
+        vec![("host", "[::1]:8765")],
+        vec![("host", "nas.local")],
+    ] {
+        let (c, _) = call(&st, Method::GET, "/api/v1/vault", None, &h).await;
+        assert_eq!(c, StatusCode::OK, "{h:?}");
+    }
+    let (c, _) = call(
+        &st,
+        Method::GET,
+        "/api/v1/meta",
+        None,
+        &[("host", "x.example"), ("origin", "https://evil.example")],
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK);
+
+    // AI 请求取用：要用 API key（自己报名字不算）→ 用户允许 → 取到加密后的内容
+    let pk = b64(&[1u8; 32]);
+    let ask = json!({"secretId": "sec1", "reason": "推代码", "pub": pk});
+    let (c, _) = call(
         &st,
         Method::POST,
         "/api/v1/vault/requests",
-        Some(json!({"secretId": "sec1", "reason": "推代码", "pub": pk})),
-        &[("x-actor", "claude")],
+        Some(ask.clone()),
+        &[("x-actor", "Claude Code")],
     )
     .await;
+    assert_eq!(c, StatusCode::UNAUTHORIZED);
+    let key = st.create_key("claude-code").unwrap();
+    let bearer = format!("Bearer {key}");
+    let ai = [("authorization", bearer.as_str())];
+    let (c, b) = call(&st, Method::POST, "/api/v1/vault/requests", Some(ask), &ai).await;
     assert_eq!(c, StatusCode::CREATED, "{b}");
     let rid = j(&b)["id"].as_str().unwrap().to_string();
     let (_, b) = call(
@@ -856,18 +927,29 @@ async fn vault_api_round_trip() {
         Method::GET,
         &format!("/api/v1/vault/requests/{rid}"),
         None,
-        &[],
+        &ai,
     )
     .await;
     assert_eq!(j(&b)["status"], "pending");
     let (_, b) = call(&st, Method::GET, "/api/v1/vault/requests", None, &ui).await;
-    assert_eq!(j(&b)["requests"][0]["actor"], "claude");
+    assert_eq!(j(&b)["requests"][0]["actor"], "claude-code");
     assert_eq!(j(&b)["requests"][0]["reason"], "推代码");
+    // 冒充用户「允许」（没有校验值）：不算
+    let sealed = json!({"epk": "ZQ", "n": "bg", "c": "c2VhbGVk"});
     let (c, _) = call(
         &st,
         Method::POST,
         &format!("/api/v1/vault/requests/{rid}"),
-        Some(json!({"approve": true, "sealed": {"epk": "e", "n": "n", "c": "sealed"}})),
+        Some(json!({"approve": true, "sealed": sealed})),
+        &ai,
+    )
+    .await;
+    assert_eq!(c, StatusCode::BAD_REQUEST);
+    let (c, _) = call(
+        &st,
+        Method::POST,
+        &format!("/api/v1/vault/requests/{rid}"),
+        Some(json!({"approve": true, "sealed": sealed, "mac": vmac(&["resolve", &rid, "ZQ", "bg", "c2VhbGVk"])})),
         &ui,
     )
     .await;
@@ -877,11 +959,29 @@ async fn vault_api_round_trip() {
         Method::GET,
         &format!("/api/v1/vault/requests/{rid}"),
         None,
-        &[],
+        &ai,
     )
     .await;
-    assert_eq!(j(&b)["sealed"]["c"], "sealed");
-    let (c, _) = call(&st, Method::DELETE, "/api/v1/vault/secrets/sec1", None, &ui).await;
+    assert_eq!(j(&b)["sealed"]["c"], "c2VhbGVk");
+    // 删除也要校验值和 expect
+    let stamp = (at as i64).to_string();
+    let (c, _) = call(
+        &st,
+        Method::DELETE,
+        "/api/v1/vault/secrets/sec1",
+        Some(json!({"expect": at, "mac": ""})),
+        &ui,
+    )
+    .await;
+    assert_eq!(c, StatusCode::BAD_REQUEST);
+    let (c, _) = call(
+        &st,
+        Method::DELETE,
+        "/api/v1/vault/secrets/sec1",
+        Some(json!({"expect": at, "mac": vmac(&["delete-secret", "sec1", &stamp])})),
+        &ui,
+    )
+    .await;
     assert_eq!(c, StatusCode::NO_CONTENT);
     let _ = std::fs::remove_dir_all(d);
 }

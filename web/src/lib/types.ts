@@ -113,7 +113,7 @@ export interface MergeChange {
 }
 export interface MergePreview { latest: DriveBackup; base: DriveBackup | null; first: boolean; changes: MergeChange[]; counts: Record<string, number>; assets: { missing: number; bytes: number } }
 export interface BackupResult { needsMerge?: boolean; latest?: DriveBackup; manifest?: DriveBackup; copiedFiles?: number; copiedBytes?: number }
-export interface MergeResult { applied: Record<string, number>; kept: number; copiedFiles: number; copiedBytes: number }
+export interface MergeResult { applied: Record<string, number>; kept: number; copiedFiles: number; copiedBytes: number; other?: { vault?: { keys: number; secrets: number; keptOld: number } } }
 
 /* ---- 桌面版配置（get_config） ---- */
 export interface Agent { name: string; cmd: string; ask?: string }

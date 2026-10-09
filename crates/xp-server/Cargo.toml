@@ -23,3 +23,5 @@ rust-embed = { version = "8.12", features = ["mime-guess"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 zip.workspace = true
+hmac = "0.12"
+sha2.workspace = true

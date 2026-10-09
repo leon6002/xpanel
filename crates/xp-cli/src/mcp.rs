@@ -155,7 +155,7 @@ pub fn tools() -> Value {
          "annotations":{"readOnlyHint":true}},
         {"name":"xpanel_vault_list","description":"密码库里有哪些条目：只有 id、名称和种类（login 网站账号 / apikey / server 服务器和设备），没有内容。",
          "inputSchema":{"type":"object","properties":{}},"annotations":{"readOnlyHint":true}},
-        {"name":"xpanel_vault_get","description":"取用密码库里一条的内容（网址、用户名、密码或 key、备注）。每次都要用户在 xpanel 界面上点「允许」才拿得到，所以调用前先告诉用户你要用哪一条、用来做什么，reason 里也写清楚（会显示给用户）。最多等 45 秒；用户还没确认时返回 requestId，带着它再调一次接着等（两分钟后作废）。用户拒绝后不要重复请求。取到的内容只用于当前这件事，不要写进笔记、文件、提交、日志，也不要回写到 xpanel。",
+        {"name":"xpanel_vault_get","description":"取用密码库里一条的内容（网址、用户名、密码或 key、备注）。每次都要用户在 xpanel 界面上点「允许」才拿得到，所以调用前先告诉用户你要用哪一条、用来做什么，reason 里也写清楚（会显示给用户）。要配了 XPANEL_KEY 才能用（弹窗里显示的是 key 的名字）。最多等 45 秒；用户还没确认时返回 requestId，带着它再调一次接着等（两分钟后作废）。用户拒绝后不要重复请求。取到的内容只用于当前这件事，不要写进笔记、文件、提交、日志，也不要回写到 xpanel。",
          "inputSchema":{"type":"object","properties":{
             "id":{"type":"string","description":"条目 id（xpanel_vault_list 返回的）"},
             "reason":{"type":"string","description":"用来做什么，一句话，显示给用户"},

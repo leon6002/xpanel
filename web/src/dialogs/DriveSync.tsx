@@ -172,7 +172,13 @@ export function DriveSync() {
       if (!preview) return;
       const r = await drive.merge(preview.latest.file, choices);
       const n = Object.values(r.applied || {}).reduce((a, b) => a + b, 0);
-      say(`已合并 ${n} 条` + (r.kept ? `，保留本机的 ${r.kept} 条` : "") + (r.copiedFiles ? `，补了 ${r.copiedFiles} 个附件` : ""));
+      const v = r.other?.vault;
+      say(
+        `已合并 ${n} 条` +
+          (r.kept ? `，保留本机的 ${r.kept} 条` : "") +
+          (r.copiedFiles ? `，补了 ${r.copiedFiles} 个附件` : "") +
+          (v && v.secrets + v.keptOld > 0 ? `；密码库合并了 ${v.secrets} 条` + (v.keptOld ? `，两边都改过的 ${v.keptOld} 条另存了旧版本` : "") : ""),
+      );
       await qc.invalidateQueries();
       await load();
     });

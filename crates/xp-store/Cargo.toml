@@ -15,3 +15,5 @@ getrandom.workspace = true
 zip.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 gethostname = "0.5"
+base64.workspace = true
+hmac = "0.12"
