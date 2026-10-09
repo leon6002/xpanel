@@ -4,6 +4,7 @@
    - 名称、域名最重要，其次用户名、标签，再次自定义栏的名字、备注和待整理的原文；不搜密码本身
    - 常用的、最近用过的、置顶的排前面 */
 import { ls } from "./store";
+import { platformOf } from "./platforms";
 import type { Fields, SecretRec } from "./vault";
 
 export interface Entry { s: SecretRec; f: Fields | null }
@@ -89,7 +90,11 @@ function hit(tok: string, field: string, fuzzy: boolean) {
 function fieldsOf(e: Entry): [string, number, boolean][] {
   const f = e.f;
   const low = (s?: string) => (s || "").toLowerCase();
+  const p = platformOf(f);
   return [
+    [low(f?.label), 6, true],
+    // 平台的名字和别名：搜「苹果」「谷歌」「招行」也能找到
+    [p ? low([p.name, ...p.aliases].join(" ")) : "", 5, false],
     [low(titleOf(e)), 10, true],
     [domainOf(f?.url), 8, true],
     [low(f?.username), 6, true],
@@ -132,9 +137,9 @@ export function searchVault(entries: Entry[], q: string): Entry[] {
   return scored.sort((a, b) => b[0] - a[0] || titleOf(a[1]).localeCompare(titleOf(b[1]))).map((x) => x[1]);
 }
 
-/** 不搜索时的顺序：同一个网站（域名）的排在一起，然后按名称 */
+/** 不搜索时的顺序：同一个平台、同一个网站（域名）的排在一起，然后按名称 */
 export function sortEntries(entries: Entry[]): Entry[] {
-  const key = (e: Entry) => (domainOf(e.f?.url).split(".").slice(-2).join(".") || titleOf(e)).toLowerCase();
+  const key = (e: Entry) => (platformOf(e.f)?.id || domainOf(e.f?.url).split(".").slice(-2).join(".") || titleOf(e)).toLowerCase();
   return entries.slice().sort((a, b) => key(a).localeCompare(key(b)) || titleOf(a).localeCompare(titleOf(b)));
 }
 

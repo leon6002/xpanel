@@ -3,11 +3,12 @@
 import { Lock, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText, errText } from "../lib/api";
+import { platformOf } from "../lib/platforms";
 import { useUi } from "../lib/store";
 import { groupOf, identityOf, mainOf, openSecret, tailOf, unlock, useVault, useVaultUi } from "../lib/vault";
 import { bumpUsage, domainOf, recentEntries, searchVault, titleOf, type Entry } from "../lib/vaultSearch";
 import { cx } from "../lib/cx";
-import { KIND_ICON, MasterInput, useVaultState } from "./Vault";
+import { EntryIcon, MasterInput, useVaultState } from "./Vault";
 import { ErrorText } from "./ui";
 
 const say = (t: string) => useUi.getState().say(t);
@@ -138,7 +139,6 @@ function Palette({ close }: { close: () => void }) {
             <div ref={list} role="listbox" aria-label="结果" className="scroll-quiet flex max-h-[46vh] flex-col gap-0.5 overflow-y-auto px-2 pb-2">
               {results.map((e, i) => {
                 const f = e.f!;
-                const Icon = KIND_ICON[f.kind];
                 return (
                   <div
                     key={e.s.id}
@@ -148,10 +148,10 @@ function Palette({ close }: { close: () => void }) {
                     onClick={() => copy(e, "password")}
                     className={cx("flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2", i === at ? "bg-surface-3" : "")}
                   >
-                    <Icon className={cx("size-[18px] shrink-0", f.kind === "raw" ? "text-accent" : "text-muted")} strokeWidth={1.8} />
+                    <EntryIcon e={e} size={20} />
                     <span className="flex min-w-0 grow flex-col">
                       <span className="truncate text-[14px] font-semibold">{titleOf(e)}</span>
-                      <span className="truncate font-mono text-xs text-muted">{f.kind === "raw" ? (f.raw ?? "").replace(/\s+/g, " ").slice(0, 70) : [f.username || (f.card ? tailOf(f.card) : ""), domainOf(f.url), groupOf(f)].filter(Boolean).join(" · ")}</span>
+                      <span className="truncate font-mono text-xs text-muted">{f.kind === "raw" ? (f.raw ?? "").replace(/\s+/g, " ").slice(0, 70) : [f.username || (f.card ? tailOf(f.card) : ""), platformOf(f) ? "" : domainOf(f.url), groupOf(f)].filter(Boolean).join(" · ")}</span>
                     </span>
                     {(f.tags ?? []).slice(0, 2).map((t) => (
                       <span key={t} className="shrink-0 text-xs text-faint">

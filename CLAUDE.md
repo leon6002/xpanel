@@ -39,7 +39,7 @@
   + MCP `xp-cli/src/vault.rs`（`xpanel_vault_list` 只有名称；`xpanel_vault_get` 要用户点允许，内容用临时 X25519 公钥加密后经主机转交）。
   随手记：快速记录选「密码」/ 收件箱里的提醒 / 消息工具栏的「密码库」→ `dropSecret`（用钥匙的公钥加密，锁着也能存，`kind = raw` 待整理）→ 之后在密码库里「整理」
   （`lib/vaultParse.ts` 拆各栏）；转入的收件箱消息用 `scrub_item` 真的抹掉。搜索在本机做：`lib/vaultSearch.ts` + `components/VaultPalette.tsx`（Ctrl+K）。
-  种类和各栏定义在 `lib/vault.ts` 的 `SPECS`（银行分手机银行 / 信用卡，`sub` 在密文里）；页面是一整屏的密集列表，点格子复制、点名称展开，编辑是弹窗不常驻。
+  种类和各栏定义在 `lib/vault.ts` 的 `SPECS`（银行分手机银行 / 信用卡，`sub` 在密文里）；平台预设和 logo 在 `lib/platformData.ts` / `lib/platforms.ts`（`platform`、`label` 在密文里，同平台两个以上账号排成一组）；页面是一整屏的密集列表，点格子复制、点名称展开，编辑是弹窗不常驻。
   规矩：主密码和明文不发给主机、不进日志和操作记录；密码库的内容不要接进条目、搜索、导出、@AI 上下文、项目目录；
   写操作都要过 `check_mac`（只有解锁了的界面算得出校验值）；界面解开后只认密文里的名称，不认主机上的 `title` 列。说明和安全边界见 `docs/vault.md`，改之前先看。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。

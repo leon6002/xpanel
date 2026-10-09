@@ -8,6 +8,7 @@ import { copyText, errText, newId } from "../lib/api";
 import { qc } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { ago } from "../lib/logic";
+import { PLATFORMS, composeTitle, detectPlatform, platformById, platformOf, shortTitle, type Platform } from "../lib/platforms";
 import { useUi } from "../lib/store";
 import {
   KINDS,
@@ -26,6 +27,7 @@ import {
   kindName,
   mainOf,
   specOf,
+  specsFor,
   tailOf,
   openSecret,
   saveSecret,
@@ -47,10 +49,21 @@ import {
 import { parseSecret } from "../lib/vaultParse";
 import { bumpUsage, domainOf, searchVault, titleOf, type Entry } from "../lib/vaultSearch";
 import { cx } from "../lib/cx";
+import { LetterMark, PlatformLogo } from "./PlatformLogo";
 import { Button, Chip, ErrorText, Field, IconButton, Segmented, Toggle, inputCls, textareaCls } from "./ui";
 
 const say = (t: string) => useUi.getState().say(t);
 export const KIND_ICON: Record<AnyKind, typeof Globe> = { login: Globe, bank: Landmark, apikey: KeySquare, server: Server, other: StickyNote, raw: NotebookPen };
+
+/** 一条前面的图标：认得出平台的用平台 logo，认不出的网站账号用名称的第一个字，其余按种类 */
+export function EntryIcon({ e, size = 18 }: { e: Entry; size?: number }) {
+  const f = e.f;
+  const p = platformOf(f);
+  if (p) return <PlatformLogo p={p} size={size} />;
+  if (f?.kind === "login") return <LetterMark title={f.title} size={size} />;
+  const Icon = KIND_ICON[f?.kind ?? e.s.kind] ?? Globe;
+  return <Icon className={cx("shrink-0", f?.kind === "raw" ? "text-accent" : "text-muted")} style={{ width: size - 1, height: size - 1 }} strokeWidth={1.8} />;
+}
 export const useVaultState = (enabled = true) => useQuery({ queryKey: VAULT_KEY, queryFn: fetchVault, enabled });
 
 /** 主密码输入框：不让浏览器记住它 */
@@ -316,7 +329,7 @@ function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boole
       </div>
     );
   const raw = f.kind === "raw";
-  const specs = raw ? [] : specOf(f.kind, f.sub);
+  const specs = raw ? [] : specsFor(f);
   return (
     <div className="mx-3 mb-2 flex flex-col gap-2 rounded-xl bg-surface-2 p-2">
       {!raw && (f.title !== s.title || f.kind !== s.kind) && (
@@ -326,6 +339,7 @@ function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boole
       )}
       <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-2">
         {raw && <Row id={s.id} label="记下来的原文" value={f.raw} />}
+        <Row id={s.id} label="用途" value={f.label} mono={false} />
         {specs.map((x) => (
           <Row key={x.key} id={s.id} label={x.label} value={f[x.key]} secret={x.secret} tail={x.tail} />
         ))}
@@ -351,7 +365,7 @@ function Expanded({ e, keys, hasKey }: { e: Entry; keys: KeyRec[]; hasKey: boole
         </Button>
         <span className="grow" />
         <span className="text-xs text-faint">
-          {raw ? "随手记下的，还没分成各栏。点「整理」会先帮你拆好。" : `${[groupOf(f), ...(f.tags ?? []).map((t) => "#" + t)].join(" · ")} · ${ago(s.updatedAt)}改的`}
+          {raw ? "随手记下的，还没分成各栏。点「整理」会先帮你拆好。" : `${[platformOf(f)?.name, groupOf(f), ...(f.tags ?? []).map((t) => "#" + t)].filter(Boolean).join(" · ")} · ${ago(s.updatedAt)}改的`}
         </span>
       </div>
     </div>
@@ -415,6 +429,10 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
   const moved = !!old && latest?.updatedAt !== old.updatedAt;
   const [kind, setKind] = useState<SecretKind>(init && init.kind !== "raw" ? init.kind : "login");
   const [bsub, setBsub] = useState<BankSub>(init?.sub ?? "mobile");
+  // 平台：undefined = 没选，按名称和网址认；null = 明说不是任何平台
+  const [plat, setPlat] = useState<string | null | undefined>(init?.platform === "none" ? null : init?.platform);
+  const [label, setLabel] = useState(init?.label ?? "");
+  const [more, setMore] = useState(false);
   const [title, setTitle] = useState(init?.title ?? "");
   const [f, setF] = useState<Partial<Fields>>(init ?? {});
   const [tags, setTags] = useState((init?.tags ?? []).join(" "));
@@ -425,8 +443,21 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
     if (!vks) close();
   }, [vks, close]);
   const allTags = useMemo(() => [...new Set((vault?.secrets ?? []).flatMap((s) => openSecret(s, vks)?.tags ?? []))].sort((a, b) => a.localeCompare(b)), [vault, vks]);
-  const specs = specOf(kind, bsub);
   const set = (ch: Partial<Fields>) => setF((x) => ({ ...x, ...ch }));
+  const bank = kind === "bank";
+  const picked = platformById(plat);
+  const guessed = plat === undefined ? detectPlatform({ title, url: f.url }, bank) : undefined;
+  const P = picked && !!picked.bank === bank ? picked : guessed;
+  const specs = specOf(kind, bsub, P?.idLabel);
+  const choices = PLATFORMS.filter((p) => !!p.bank === bank);
+  const pick = (p: Platform) => {
+    if (P?.id === p.id) return setPlat(null);
+    setPlat(p.id);
+    // 名称、网址还空着（或者是上一个平台带出来的）就带出这个平台的
+    const auto = PLATFORMS.flatMap((x) => [x.name, x.name + "信用卡"]);
+    if (!title.trim() || auto.includes(title.trim())) setTitle(p.name + (bank && bsub === "credit" ? "信用卡" : ""));
+    if (kind === "login" && p.url && (!f.url?.trim() || PLATFORMS.some((x) => x.url === f.url))) set({ url: p.url });
+  };
   const name = title.trim();
   const extra = f.extra ?? [];
   const setExtra = (i: number, ch: Partial<Extra>) => set({ extra: extra.map((x, j) => (j === i ? { ...x, ...ch } : x)) });
@@ -437,11 +468,16 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
     setErr("");
     // 只留这种条目有的栏：换过种类的话，别的种类填的不带着
     const vals = Object.fromEntries(specs.map((x) => [x.key, (x.secret ? f[x.key] : f[x.key]?.trim()) || undefined]));
+    // 主机上登记的名称带上用途（「Apple · 美区」），锁着时和给 AI 的列表里分得清是哪个号
+    const use = P ? label.trim() : "";
+    const base = init?.label && name.endsWith(` · ${init.label}`) ? name.slice(0, -` · ${init.label}`.length) : name;
     const clean = {
       ...vals,
-      title: name,
+      title: composeTitle(base, use),
       kind,
       sub: kind === "bank" ? bsub : undefined,
+      platform: plat === null ? (detectPlatform({ title: base, url: f.url }, bank) ? "none" : undefined) : P?.id,
+      label: use || undefined,
       notes: f.notes?.trim() || undefined,
       extra: extra.some((x) => x.value) ? extra.filter((x) => x.value).map((x) => ({ label: x.label.trim(), value: x.value, ...(x.hidden ? { hidden: true } : {}) })) : undefined,
       tags: tagList.length ? tagList : undefined,
@@ -480,12 +516,43 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
         </div>
       )}
       <div className="flex flex-wrap gap-2">
-        <Segmented label="种类" value={kind} onChange={setKind} options={KINDS.map((k) => [k.k, k.name] as [SecretKind, string])} />
+        <Segmented
+          label="种类"
+          value={kind}
+          onChange={(k) => {
+            // 银行和别的种类各有各的平台：换过去时不带着
+            if ((k === "bank") !== bank) setPlat(undefined);
+            setKind(k);
+          }}
+          options={KINDS.map((k) => [k.k, k.name] as [SecretKind, string])} />
         {kind === "bank" && <Segmented label="银行的哪一种" value={bsub} onChange={setBsub} options={SUBS.map((k) => [k.k, k.name] as [BankSub, string])} />}
       </div>
-      <Field label="名称" hint="名称不加密：锁着的时候和给 AI 的列表里都看得到，别把密码写在这里">
-        <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder={NAME_HINT[kind]} />
-      </Field>
+      {(kind === "login" || kind === "bank" || kind === "apikey") && (
+        <div role="group" aria-label={bank ? "哪家银行" : "平台"} className="flex flex-wrap items-center gap-1.5">
+          {(more || (P && choices.indexOf(P) >= 14) ? choices : choices.slice(0, 14)).map((p) => (
+            <button key={p.id} aria-pressed={P?.id === p.id} onClick={() => pick(p)} className={cx("flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] transition-colors", P?.id === p.id ? "bg-ink font-semibold text-on-ink" : "bg-surface-2 text-fg-2 hover:bg-surface-3")}>
+              <PlatformLogo p={p} size={15} className={P?.id === p.id ? "text-on-ink" : undefined} />
+              {p.name}
+            </button>
+          ))}
+          <button onClick={() => setMore(!more)} className="rounded-lg px-2 py-1 text-[12.5px] text-muted hover:bg-surface-2">
+            {more ? "收起" : `更多（共 ${choices.length} 个）`}
+          </button>
+        </div>
+      )}
+      <div className={cx("grid gap-x-3 gap-y-4", P && "sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]")}>
+        <Field label="名称" hint="名称不加密：锁着的时候和给 AI 的列表里都看得到，别把密码写在这里">
+          <span className={cx(inputCls, "flex items-center gap-2")}>
+            {P && <PlatformLogo p={P} size={17} />}
+            <input className="min-w-0 grow bg-transparent outline-none" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder={NAME_HINT[kind]} aria-label="名称" />
+          </span>
+        </Field>
+        {P && (
+          <Field label="用途（可选）" hint={`${P.name}有好几个账号时用来区分`}>
+            <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="比如 美区、工作、小号" aria-label="用途" autoComplete="off" />
+          </Field>
+        )}
+      </div>
       <div className="grid gap-x-3 gap-y-4 sm:grid-cols-2">
         {specs.map((x) => (
           <Field key={x.key} label={x.label}>
@@ -582,17 +649,18 @@ function Mini({ id, label, value, hide, tail }: { id: string; label: string; val
   );
 }
 
-function ListRow({ e, open, keys, hasKey, onToggle }: { e: Entry; open: boolean; keys: KeyRec[]; hasKey: boolean; onToggle: () => void }) {
+/** group：这一行排在某个平台的小组里。组里几行都是同一个平台，名称那一格改放用途（美区、工作），用来分清是哪个号 */
+function ListRow({ e, open, keys, hasKey, onToggle, group }: { e: Entry; open: boolean; keys: KeyRec[]; hasKey: boolean; onToggle: () => void; group?: Platform }) {
   const { s, f } = e;
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (open) ref.current?.scrollIntoView({ block: "nearest" });
   }, [open]);
-  const Icon = KIND_ICON[f?.kind ?? s.kind] ?? Globe;
   const raw = f?.kind === "raw";
+  const name = (group && f && (f.label || shortTitle(f.title, group))) || titleOf(e);
   const idf = f && !raw ? identityOf(f) : null;
   const main = f && !raw ? mainOf(f) : null;
-  const specs = f && !raw ? specOf(f.kind, f.sub) : [];
+  const specs = f && !raw ? specsFor(f) : [];
   // 信用卡的「账号」和「最常复制的」是同一栏（卡号）：第二格改放下一栏（有效期）
   const same = !!main && main.spec.key === idf?.spec.key;
   const next = same ? specs.find((x) => x.key !== main!.spec.key && x.key !== "url" && f![x.key]) : undefined;
@@ -603,12 +671,12 @@ function ListRow({ e, open, keys, hasKey, onToggle }: { e: Entry; open: boolean;
     <div ref={ref} className={cx("@container flex break-inside-avoid flex-col rounded-xl", open && "bg-surface-2/50")}>
       <div className={cx(GRID, "group/line min-h-[38px] rounded-xl pr-1 pl-3", !open && "hover:bg-surface-2")}>
         <button onClick={onToggle} aria-expanded={open} className="flex min-w-0 items-center gap-2.5 py-1.5 text-left" title="点开看全部内容">
-          <Icon className={cx("size-[17px] shrink-0", raw ? "text-accent" : "text-muted")} strokeWidth={1.8} />
+          <EntryIcon e={e} />
           {f?.pinned && <Pin className="size-3.5 shrink-0 text-accent" />}
           <span className="flex min-w-0 flex-col">
             <span className="flex min-w-0 items-baseline gap-2">
-              <span className="max-w-full shrink-0 truncate text-[14px] font-semibold text-fg">{titleOf(e)}</span>
-              {domain && domain !== titleOf(e).toLowerCase() && <span className="hidden min-w-0 shrink-[99] truncate text-xs text-faint @[430px]:inline">{domain}</span>}
+              <span className="max-w-full shrink-0 truncate text-[14px] font-semibold text-fg">{name}</span>
+              {domain && !group && !platformOf(f) && domain !== titleOf(e).toLowerCase() && <span className="hidden min-w-0 shrink-[99] truncate text-xs text-faint @[430px]:inline">{domain}</span>}
             </span>
             {idf && !same && <span className="truncate font-mono text-[11.5px] text-muted @[430px]:hidden">{idf.value}</span>}
           </span>
@@ -733,6 +801,7 @@ export function Vault() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [tag, setTag] = useState<string | null>(null);
+  const [plat, setPlat] = useState<string | null>(null);
 
   const secrets = data?.secrets ?? [];
   // 解开的内容只留在内存里，锁上就没了
@@ -740,16 +809,33 @@ export function Vault() {
   const kindOf = (e: Entry) => e.f?.kind ?? e.s.kind;
   const rawCount = entries.filter((e) => kindOf(e) === "raw").length;
   const allTags = useMemo(() => [...new Set(entries.flatMap((e) => e.f?.tags ?? []))].sort((a, b) => a.localeCompare(b)), [entries]);
-  const pool = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && (!tag || e.f?.tags?.includes(tag)));
+  // 同一个平台有两个以上账号的：筛选里多一个它；其中网站账号单独排成一组（Google 5、Apple 4）
+  const [platCount, loginCount] = useMemo(() => {
+    const all = new Map<string, number>();
+    const login = new Map<string, number>();
+    for (const e of entries) {
+      const p = platformOf(e.f);
+      if (!p) continue;
+      all.set(p.id, (all.get(p.id) ?? 0) + 1);
+      if (e.f?.kind === "login") login.set(p.id, (login.get(p.id) ?? 0) + 1);
+    }
+    return [all, login];
+  }, [entries]);
+  const platChips = [...platCount].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]);
+  const groupPlat = (e: Entry) => {
+    const p = e.f?.kind === "login" ? platformOf(e.f) : undefined;
+    return p && (loginCount.get(p.id) ?? 0) >= 2 ? p : undefined;
+  };
+  const pool = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && (!tag || e.f?.tags?.includes(tag)) && (!plat || platformOf(e.f)?.id === plat));
   const searching = !!q.trim();
   const shown = searchVault(pool, q);
   // 搜索时按相关程度排成一列；平时按类别分组：待整理、置顶，然后一类一组（银行分手机银行和信用卡）
   const groups = ((): [string, Entry[]][] => {
     if (searching) return [[`找到 ${shown.length} 条`, shown]];
-    const order = ["待整理", "置顶", "网站账号", "银行 · 手机银行", "银行 · 信用卡", "API key", "服务器和设备", "其他"];
+    const order = ["待整理", "置顶", ...[...loginCount].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).map(([id]) => platformById(id)!.name), "网站账号", "银行 · 手机银行", "银行 · 信用卡", "API key", "服务器和设备", "其他"];
     const by = new Map<string, Entry[]>();
     for (const e of shown) {
-      const g = kindOf(e) === "raw" ? "待整理" : e.f?.pinned ? "置顶" : e.f ? groupOf(e.f) : kindName(e.s.kind);
+      const g = kindOf(e) === "raw" ? "待整理" : e.f?.pinned ? "置顶" : (groupPlat(e)?.name ?? (e.f ? groupOf(e.f) : kindName(e.s.kind)));
       by.set(g, [...(by.get(g) ?? []), e]);
     }
     return [...by.entries()].sort((a, b) => (order.indexOf(a[0]) + 99) % 99 - ((order.indexOf(b[0]) + 99) % 99));
@@ -759,6 +845,8 @@ export function Vault() {
   const units = groups.reduce((a, g) => a + g[1].length + 1, 0);
   const cols = intoColumns(groups, searching ? 1 : Math.min(fit, Math.ceil(units / 12)));
   const counts = new Map(groups.map(([name, list]) => [name, list.length]));
+  /** 这一组是不是某个平台的小组 */
+  const platGroup = (name: string) => PLATFORMS.find((p) => !p.bank && p.name === name.replace("（续）", "") && (loginCount.get(p.id) ?? 0) >= 2);
 
   if (isLoading && !data) return <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface text-sm text-muted">加载中…</main>;
   if (error || !data)
@@ -807,7 +895,7 @@ export function Vault() {
         </Button>
       </div>
       <div className="flex flex-wrap gap-1.5 px-1">
-        <button aria-pressed={filter === "all" && !tag} onClick={() => (setFilter("all"), setTag(null))} className={chip(filter === "all" && !tag)}>
+        <button aria-pressed={filter === "all" && !tag && !plat} onClick={() => (setFilter("all"), setTag(null), setPlat(null))} className={chip(filter === "all" && !tag && !plat)}>
           全部
         </button>
         {rawCount > 0 && (
@@ -820,6 +908,15 @@ export function Vault() {
             {k.name} <span className="text-faint">{entries.filter((e) => kindOf(e) === k.k).length}</span>
           </button>
         ))}
+        {platChips.map(([id, n]) => {
+          const p = platformById(id)!;
+          return (
+            <button key={"p:" + id} aria-pressed={plat === id} onClick={() => setPlat(plat === id ? null : id)} className={cx(chip(plat === id), "flex items-center gap-1.5")}>
+              <PlatformLogo p={p} size={14} />
+              {p.name} <span className="text-faint">{n}</span>
+            </button>
+          );
+        })}
         {allTags.map((t) => (
           <button key={"#" + t} aria-pressed={tag === t} onClick={() => setTag(tag === t ? null : t)} className={chip(tag === t)}>
             #{t}
@@ -832,12 +929,13 @@ export function Vault() {
             <div key={i} className="flex min-w-0 flex-col gap-2.5">
               {col.map(([name, list]) => (
                 <section key={name} className="flex flex-col">
-                  <h2 className="flex items-baseline gap-2 px-3 pt-1 pb-1 text-xs font-semibold text-muted">
+                  <h2 className="flex items-center gap-2 px-3 pt-1 pb-1 text-xs font-semibold text-muted">
+                    {platGroup(name) && <PlatformLogo p={platGroup(name)!} size={14} />}
                     {name}
                     {!searching && !name.endsWith("（续）") && <span className="font-normal text-faint">{counts.get(name)}</span>}
                   </h2>
                   {list.map((e) => (
-                    <ListRow key={e.s.id} e={e} open={sel === e.s.id} keys={data.keys} hasKey={!!vks[e.s.kid]} onToggle={() => setSel(sel === e.s.id ? null : e.s.id)} />
+                    <ListRow key={e.s.id} e={e} open={sel === e.s.id} keys={data.keys} hasKey={!!vks[e.s.kid]} onToggle={() => setSel(sel === e.s.id ? null : e.s.id)} group={platGroup(name)} />
                   ))}
                 </section>
               ))}

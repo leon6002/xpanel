@@ -17,6 +17,7 @@ import { randomBytes } from "@noble/hashes/utils.js";
 import { create } from "zustand";
 import { newId, v1 } from "./api";
 import { qc } from "./data";
+import { platformOf } from "./platforms";
 
 export type SecretKind = "login" | "bank" | "apikey" | "server" | "other";
 /** 银行下面分两种 */
@@ -49,6 +50,10 @@ export interface Fields {
   kind: AnyKind;
   /** 银行的：手机银行还是信用卡 */
   sub?: BankSub;
+  /** 哪个平台的账号（lib/platforms.ts 里的标识；"none" = 不算任何平台）。没记的按名称和网址认 */
+  platform?: string;
+  /** 用途：同一个平台有好几个账号时用来区分（美区、工作、小号…） */
+  label?: string;
   url?: string;
   username?: string;
   password?: string;
@@ -119,20 +124,26 @@ const SPECS: Record<string, Spec[]> = {
     { key: "password", label: "要保密的内容", secret: true, main: true },
   ],
 };
-export const specOf = (kind: AnyKind, sub?: BankSub): Spec[] => SPECS[kind === "bank" ? `bank:${sub === "credit" ? "credit" : "mobile"}` : kind] ?? SPECS.other;
+export function specOf(kind: AnyKind, sub?: BankSub, idLabel?: string): Spec[] {
+  const specs = SPECS[kind === "bank" ? `bank:${sub === "credit" ? "credit" : "mobile"}` : kind] ?? SPECS.other;
+  // 有的平台「账号」那一栏有自己的叫法（Apple ID、QQ 号）
+  return idLabel && kind !== "bank" ? specs.map((x) => (x.id ? { ...x, label: idLabel } : x)) : specs;
+}
+/** 这一条的各栏（带上平台对栏名的叫法） */
+export const specsFor = (f: Pick<Fields, "kind" | "sub" | "title" | "url" | "platform">) => specOf(f.kind, f.sub, platformOf(f)?.idLabel);
 /** 分组用的名字：银行会带上是手机银行还是信用卡 */
 export const groupOf = (f: Pick<Fields, "kind" | "sub">) => (f.kind === "bank" ? `银行 · ${f.sub === "credit" ? "信用卡" : "手机银行"}` : kindName(f.kind));
 /** 卡号平时的样子：只露后四位 */
 export const tailOf = (v: string) => "•••• " + v.replace(/\s+/g, "").slice(-4);
 /** 列表里「账号」那一格：这种条目规定的那一栏；没填就退而求其次，找一栏不用遮的 */
 export function identityOf(f: Fields): { spec: Spec; value: string } | null {
-  const specs = specOf(f.kind, f.sub);
+  const specs = specsFor(f);
   const s = specs.find((x) => x.id && f[x.key]) ?? specs.find((x) => !x.secret && !x.main && x.key !== "url" && f[x.key]);
   return s ? { spec: s, value: f[s.key]! } : null;
 }
 /** 最常要复制的那一栏（密码、key；信用卡是卡号） */
 export function mainOf(f: Fields): { spec: Spec; value: string } | null {
-  const specs = specOf(f.kind, f.sub);
+  const specs = specsFor(f);
   const s = specs.find((x) => x.main && f[x.key]) ?? specs.find((x) => x.secret && f[x.key]);
   return s ? { spec: s, value: f[s.key]! } : null;
 }

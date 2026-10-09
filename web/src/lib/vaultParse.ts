@@ -1,5 +1,6 @@
 /* 把快速记下的一段原文拆成各栏（整理时预填，用户看一眼再保存）。全在本机做，不问 AI。
    拆不准没关系：原文会留在一个平时隐藏的栏「原文」里（原文里有密码，不放进明着显示的备注）。 */
+import { composeTitle, detectPlatform, mentionsBank } from "./platforms";
 import type { Fields, SecretKind } from "./vault";
 
 const URL_RE = /\bhttps?:\/\/[^\s，。；,;]+/i;
@@ -19,7 +20,7 @@ const LABEL = {
 export function looksLikeSecret(text: string) {
   const t = text.trim();
   if (t.length < 6 || t.length > 2000) return false;
-  return KEY_RE.test(t) || LABEL.password.test(t) || (!!cardIn(t) && (BANK_RE.test(t) || /cvv|有效期/i.test(t))) || /(?:api[\s_-]?key|token|密钥|secret)\s*(?:[:：=]|是|为)\s*\S{6,}/i.test(t);
+  return KEY_RE.test(t) || LABEL.password.test(t) || (!!cardIn(t) && (BANK_RE.test(t) || mentionsBank(t) || /cvv|有效期/i.test(t))) || /(?:api[\s_-]?key|token|密钥|secret)\s*(?:[:：=]|是|为)\s*\S{6,}/i.test(t);
 }
 
 /** 提到了银行：「银行」「信用卡」，或者常见银行的简称 */
@@ -27,7 +28,7 @@ const BANK_RE = /银行|信用卡|储蓄卡|借记卡|网银|卡号|[工农中�
 
 /** 银行卡号：13–19 位数字，过得了校验位；话里提到了银行的，15 位以上就算（免得抄错一位就认不出来） */
 function cardIn(text: string) {
-  const loose = BANK_RE.test(text);
+  const loose = BANK_RE.test(text) || mentionsBank(text);
   for (const m of text.matchAll(/(?<![\d.])(?:\d{13,19}|\d{4}(?:[ -]\d{4}){2,3}(?:[ -]\d{1,3})?)(?![\d.])/g)) {
     const d = m[0].replace(/\D/g, "");
     let sum = 0;
@@ -56,7 +57,7 @@ export function parseSecret(raw: string): Omit<Fields, "kind"> & { kind: SecretK
 
   // 0. 银行卡：有卡号，或者提到了银行、信用卡
   const card = cardIn(text);
-  const bank = !!card || BANK_RE.test(text);
+  const bank = !!card || BANK_RE.test(text) || mentionsBank(text);
   if (bank) {
     out.kind = "bank";
     const cvv = text.match(/(?:cvv2?|cvc|安全码|后三位)\s*(?:[:：=]|是|为)?\s*(\d{3,4})\b/i)?.[1];
@@ -104,7 +105,9 @@ export function parseSecret(raw: string): Omit<Fields, "kind"> & { kind: SecretK
     else rest.push(t);
   }
   // 带中文的、或者排在最前面的短词当名称
-  const nameAt = rest.findIndex((t) => /[一-鿿]/.test(t));
+  // 写了平台名字的（apple、谷歌、招行）拿它当名称；否则带中文的、或者排在最前面的短词当名称
+  const platAt = rest.findIndex((t) => !!detectPlatform({ title: t }, bank));
+  const nameAt = platAt >= 0 ? platAt : rest.findIndex((t) => /[一-鿿]/.test(t));
   if (nameAt >= 0) out.title = rest.splice(nameAt, 1)[0];
   else if (rest.length >= 3 || (rest.length === 2 && out.username && !out.password)) out.title = rest.shift()!;
   else if (rest.length >= 1 && out.password && (out.username || out.kind === "apikey")) out.title = rest.shift()!;
@@ -122,8 +125,19 @@ export function parseSecret(raw: string): Omit<Fields, "kind"> & { kind: SecretK
   if (out.kind !== "apikey" && out.kind !== "bank" && (IP_RE.test(host) || /:(?:22|3306|5432|6379|27017|3389|8006)\b/.test(host) || /ssh|root@|服务器|路由器|nas|数据库|交换机|树莓派/i.test(text))) out.kind = "server";
   // 「wifi密码」这种把栏名连在名称后面的
   out.title = out.title.replace(/的?(?:密码|口令|账号|帐号|卡号)$/, "") || out.title;
+  // 平台：从名称、网址认；都没写名称的，看邮箱是哪家的（xxx@icloud.com → Apple）
+  const named = !!out.title;
+  const p = out.kind === "server" ? undefined : detectPlatform({ title: out.title, url: out.url, email: named ? undefined : out.username }, bank);
+  if (p) {
+    out.platform = p.id;
+    if (!named || [p.name, ...p.aliases].some((a) => a.toLowerCase() === out.title.toLowerCase())) out.title = p.name;
+    if (out.kind === "login" && !out.url && p.url) out.url = p.url;
+    // 剩下的一个词当用途（「苹果 美区 xxx 密码」里的「美区」）
+    if (rest.length === 1 && rest[0].length <= 8) out.label = rest[0];
+  }
   if (!out.title) out.title = host || out.username || "";
   if (out.sub === "credit" && out.title && !/卡/.test(out.title)) out.title += "信用卡";
   if (out.kind === "login" && !out.url && !out.username) out.kind = "other";
+  out.title = composeTitle(out.title, out.label);
   return out;
 }
