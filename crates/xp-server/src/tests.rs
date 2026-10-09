@@ -312,6 +312,8 @@ async fn openapi_lists_every_route() {
             || p.ends_with("/rename")
             || p.ends_with("/progress")
             || p.ends_with("/qa")
+            || p.ends_with("/scrub")
+            || p == &"/vault/drops"
             || p.contains("/wechat/")
             || p.starts_with("/inbox/messages/");
         let put_only = p.starts_with("/vault/keys/") || p.starts_with("/vault/secrets/");

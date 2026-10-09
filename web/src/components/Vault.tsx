@@ -1,7 +1,7 @@
 /* 密码库：左边是条目列表，右边看和改一条。加解密在 lib/vault.ts，主机只有密文。
    三种状态：还没设主密码 → 设置；锁着 → 输主密码；解开 → 列表。十分钟不碰自动锁上，刷新页面也会锁上。 */
 import { useQuery } from "@tanstack/react-query";
-import { Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Lock, Pencil, Plus, Search, Server, Trash2, X } from "lucide-react";
+import { Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Lock, NotebookPen, Pencil, Pin, Plus, Search, Server, StickyNote, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, newId } from "../lib/api";
 import { qc } from "../lib/data";
@@ -26,6 +26,8 @@ import {
   unlock,
   unwrapAll,
   useVault,
+  useVaultUi,
+  type AnyKind,
   type Extra,
   type Fields,
   type KeyRec,
@@ -34,22 +36,25 @@ import {
   type SecretRec,
   type VaultRequest,
 } from "../lib/vault";
+import { parseSecret } from "../lib/vaultParse";
+import { bumpUsage, domainOf, recentEntries, searchVault, titleOf, type Entry } from "../lib/vaultSearch";
 import { cx } from "../lib/cx";
-import { Button, ErrorText, Field, IconButton, Segmented, Toggle, inputCls, textareaCls } from "./ui";
+import { Button, Chip, ErrorText, Field, IconButton, Segmented, Toggle, inputCls, textareaCls } from "./ui";
 
 const say = (t: string) => useUi.getState().say(t);
-const KIND_ICON: Record<SecretKind, typeof Globe> = { login: Globe, apikey: KeySquare, server: Server };
+export const KIND_ICON: Record<AnyKind, typeof Globe> = { login: Globe, apikey: KeySquare, server: Server, other: StickyNote, raw: NotebookPen };
 /** 每种条目里各个栏叫什么；没列的栏这种条目不用 */
 const LABELS: Record<SecretKind, { url: string; username: string; password: string; urlHint: string }> = {
   login: { url: "网址", username: "用户名", password: "密码", urlHint: "https://…" },
   apikey: { url: "服务或网址（可选）", username: "账号（可选）", password: "Key / Token", urlHint: "" },
   server: { url: "地址", username: "用户名", password: "密码", urlHint: "主机名或 IP，可以带端口" },
+  other: { url: "网址或地方（可选）", username: "账号（可选）", password: "要保密的内容", urlHint: "" },
 };
 
 export const useVaultState = (enabled = true) => useQuery({ queryKey: VAULT_KEY, queryFn: fetchVault, enabled });
 
 /** 主密码输入框：不让浏览器记住它 */
-function MasterInput({ value, onChange, placeholder, autoFocus, onEnter, label }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; onEnter?: () => void; label: string }) {
+export function MasterInput({ value, onChange, placeholder, autoFocus, onEnter, label }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; onEnter?: () => void; label: string }) {
   return (
     <input
       type="password"
@@ -223,7 +228,7 @@ function ChangePassword({ keys, close }: { keys: KeyRec[]; close: () => void }) 
 /* ---------------------------------------------------------------- 看一条 */
 
 /** 一栏：悬停时右边浮出复制（和显示 / 隐藏） */
-function Row({ label, value, secret, mono = true }: { label: string; value?: string; secret?: boolean; mono?: boolean }) {
+function Row({ label, value, secret, mono = true, onCopied }: { label: string; value?: string; secret?: boolean; mono?: boolean; onCopied?: () => void }) {
   const [show, setShow] = useState(false);
   if (!value) return null;
   const masked = secret && !show;
@@ -237,7 +242,14 @@ function Row({ label, value, secret, mono = true }: { label: string; value?: str
             {show ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
-        <IconButton label={"复制" + label} onClick={async () => say((await copyText(value)) ? `已复制${label}` : "复制失败")}>
+        <IconButton
+          label={"复制" + label}
+          onClick={async () => {
+            const ok = await copyText(value);
+            say(ok ? `已复制${label}` : "复制失败");
+            if (ok) onCopied?.();
+          }}
+        >
           <Copy />
         </IconButton>
       </span>
@@ -247,12 +259,14 @@ function Row({ label, value, secret, mono = true }: { label: string; value?: str
 
 function Detail({ s, f, hasKey, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | null; hasKey: boolean; keys: KeyRec[]; onEdit: () => void; onDeleted: () => void }) {
   const kind = f?.kind ?? s.kind;
-  const L = LABELS[kind] ?? LABELS.login;
+  const raw = kind === "raw";
+  const L = LABELS[kind === "raw" ? "other" : kind] ?? LABELS.login;
   const [sure, setSure] = useState(false);
   const [p, setP] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const Icon = KIND_ICON[kind] ?? Globe;
+  const used = () => bumpUsage(s.id);
   const del = async () => {
     if (!sure) return setSure(true);
     try {
@@ -275,6 +289,17 @@ function Detail({ s, f, hasKey, keys, onEdit, onDeleted }: { s: SecretRec; f: Fi
     }
     setBusy(false);
   };
+  const pin = async () => {
+    if (!f || raw) return;
+    const { title, kind: k, raw: _r, ...rest } = f;
+    void _r;
+    try {
+      await saveSecret(s, s.id, { ...rest, title, kind: k as SecretKind, pinned: !f.pinned || undefined });
+    } catch (e) {
+      say("没存上：" + errText(e));
+      qc.invalidateQueries({ queryKey: VAULT_KEY });
+    }
+  };
   return (
     <div className="scroll-quiet flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-7">
       <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
@@ -285,14 +310,20 @@ function Detail({ s, f, hasKey, keys, onEdit, onDeleted }: { s: SecretRec; f: Fi
           <div className="flex min-w-0 grow flex-col">
             <h1 className="text-[20px] leading-tight font-bold break-words">{f?.title ?? s.title}</h1>
             <span className="text-xs text-muted">
-              {kindName(kind)} · {ago(s.updatedAt)}改的
+              {kindName(kind)} · {ago(s.updatedAt)}
+              {raw ? "记的" : "改的"}
             </span>
           </div>
+          {f && !raw && (
+            <IconButton label={f.pinned ? "取消置顶" : "置顶"} className={f.pinned ? "text-accent" : ""} onClick={pin}>
+              <Pin />
+            </IconButton>
+          )}
           {f && (
             <>
-              <Button onClick={onEdit}>
+              <Button tone={raw ? "primary" : "soft"} onClick={onEdit}>
                 <Pencil className="size-4" />
-                编辑
+                {raw ? "整理" : "编辑"}
               </Button>
               <Button tone="danger" onClick={del} onBlur={() => setSure(false)}>
                 <Trash2 className="size-4" />
@@ -301,18 +332,30 @@ function Detail({ s, f, hasKey, keys, onEdit, onDeleted }: { s: SecretRec; f: Fi
             </>
           )}
         </div>
-        {f && (f.title !== s.title || f.kind !== s.kind) && (
+        {f && !raw && (f.title !== s.title || f.kind !== s.kind) && (
           <p className="rounded-xl bg-warn-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-warn-fg">
             主机上给这一条登记的名称是「{s.title}」，和加密保存的不一样；上面显示的是加密保存的。合并时另存的旧版本会这样。不是那种情况的话，说明有人改过主机上的数据，留意一下。
           </p>
         )}
-        {f ? (
+        {f && raw ? (
+          <div className="flex flex-col gap-2">
+            <Row label="记下来的原文" value={f.raw} onCopied={used} />
+            <p className="px-3.5 text-[13px] leading-relaxed text-muted">这是随手记下的，还没分成账号、密码各栏。点「整理」会先帮你拆好，看一眼没问题就保存；原文会留在一个平时隐藏的栏里。不整理也能在搜索里找到它。</p>
+          </div>
+        ) : f ? (
           <div className="flex flex-col gap-0.5">
-            <Row label={L.url} value={f.url} />
-            <Row label={L.username} value={f.username} />
-            <Row label={L.password} value={f.password} secret />
+            {!!f.tags?.length && (
+              <div className="flex flex-wrap gap-1.5 px-3.5 pb-1.5">
+                {f.tags.map((t) => (
+                  <Chip key={t}>#{t}</Chip>
+                ))}
+              </div>
+            )}
+            <Row label={L.url} value={f.url} onCopied={used} />
+            <Row label={L.username} value={f.username} onCopied={used} />
+            <Row label={L.password} value={f.password} secret onCopied={used} />
             {(f.extra ?? []).map((x, i) => (
-              <Row key={i} label={x.label || "其他"} value={x.value} secret={x.hidden} />
+              <Row key={i} label={x.label || "其他"} value={x.value} secret={x.hidden} onCopied={used} />
             ))}
             <Row label="备注" value={f.notes} mono={false} />
             {!f.url && !f.username && !f.password && !f.notes && !(f.extra ?? []).length && <p className="px-3.5 text-[13px] text-faint">这一条还没填内容</p>}
@@ -336,7 +379,7 @@ function Detail({ s, f, hasKey, keys, onEdit, onDeleted }: { s: SecretRec; f: Fi
   );
 }
 
-/* ---------------------------------------------------------------- 新建和编辑 */
+/* ---------------------------------------------------------------- 新建、编辑、整理 */
 
 function SecretInput({ value, onChange, label, placeholder, gen }: { value: string; onChange: (v: string) => void; label: string; placeholder?: string; gen?: boolean }) {
   const [show, setShow] = useState(false);
@@ -372,14 +415,18 @@ function SecretInput({ value, onChange, label, placeholder, gen }: { value: stri
   );
 }
 
+const NAME_HINT: Record<SecretKind, string> = { login: "比如 GitHub", apikey: "比如 OpenAI API key", server: "比如 家里的 Linux 主机", other: "比如 微信支付恢复码" };
+
 /** old 是开始编辑时的那一版（新建时没有），latest 是它现在在主机上的样子。
-    别处在这期间改了或删了，保存时主机会拿 old 来比、拒绝，这里提前说出来，不会悄悄盖掉别处的修改 */
-function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null; latest: SecretRec | null; init: Fields | null; onDone: (s: SecretRec) => void; onCancel: () => void }) {
+    别处在这期间改了或删了，保存时主机会拿 old 来比、拒绝，这里提前说出来，不会悄悄盖掉别处的修改。
+    raw 有值 = 在整理一条随手记下的：init 是从原文里拆出来的，原文放在上面对照 */
+function Editor({ old, latest, init, raw, allTags, onDone, onCancel }: { old: SecretRec | null; latest: SecretRec | null; init: Fields | null; raw?: string; allTags: string[]; onDone: (s: SecretRec) => void; onCancel: () => void }) {
   const [id] = useState(newId);
   const moved = !!old && latest?.updatedAt !== old.updatedAt;
-  const [kind, setKind] = useState<SecretKind>(init?.kind ?? "login");
+  const [kind, setKind] = useState<SecretKind>(init && init.kind !== "raw" ? init.kind : "login");
   const [title, setTitle] = useState(init?.title ?? "");
   const [f, setF] = useState<Partial<Fields>>(init ?? {});
+  const [tags, setTags] = useState((init?.tags ?? []).join(" "));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const L = LABELS[kind];
@@ -387,6 +434,7 @@ function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null
   const name = title.trim();
   const extra = f.extra ?? [];
   const setExtra = (i: number, ch: Partial<Extra>) => set({ extra: extra.map((x, j) => (j === i ? { ...x, ...ch } : x)) });
+  const tagList = [...new Set(tags.split(/[\s,，#]+/).filter(Boolean))];
   const save = async () => {
     if (!title.trim()) return setErr("先填名称");
     setBusy(true);
@@ -399,23 +447,32 @@ function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null
       password: f.password || undefined,
       notes: f.notes?.trim() || undefined,
       extra: extra.some((x) => x.value) ? extra.filter((x) => x.value).map((x) => ({ label: x.label.trim(), value: x.value, ...(x.hidden ? { hidden: true } : {}) })) : undefined,
+      tags: tagList.length ? tagList : undefined,
+      pinned: f.pinned || undefined,
     };
     try {
       onDone(await saveSecret(old, id, clean));
-      say(old ? "已保存" : `已存进密码库：「${name}」`);
+      say(raw != null ? `整理好了：「${name}」` : old ? "已保存" : `已存进密码库：「${name}」`);
     } catch (e) {
       setErr(errText(e));
       qc.invalidateQueries({ queryKey: VAULT_KEY });
       setBusy(false);
     }
   };
+  const unused = allTags.filter((t) => !tagList.includes(t)).slice(0, 12);
   return (
     <div className="scroll-quiet flex min-h-0 flex-1 flex-col overflow-y-auto p-7">
       <div className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
-        <h1 className="text-[18px] font-bold">{old ? "编辑" : "新建"}</h1>
-        {!old && <Segmented label="种类" value={kind} onChange={setKind} options={KINDS.map((k) => [k.k, k.name] as [SecretKind, string])} />}
+        <h1 className="text-[18px] font-bold">{raw != null ? "整理" : old ? "编辑" : "新建"}</h1>
+        {raw != null && (
+          <div className="flex flex-col gap-1 rounded-xl bg-surface-2 px-4 py-3">
+            <span className="text-xs text-muted">记下来的原文（下面是自动拆出来的，不对的地方改一下）</span>
+            <span className="font-mono text-[13.5px] break-all whitespace-pre-wrap text-fg">{raw}</span>
+          </div>
+        )}
+        {(!old || raw != null) && <Segmented label="种类" value={kind} onChange={setKind} options={KINDS.map((k) => [k.k, k.name] as [SecretKind, string])} />}
         <Field label="名称" hint="名称不加密：锁着的时候和给 AI 的列表里都看得到，别把密码写在这里">
-          <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder={kind === "login" ? "比如 GitHub" : kind === "apikey" ? "比如 OpenAI API key" : "比如 家里的 Linux 主机"} />
+          <input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder={NAME_HINT[kind]} />
         </Field>
         <Field label={L.url}>
           <input className={inputCls + " font-mono"} value={f.url ?? ""} onChange={(e) => set({ url: e.target.value })} placeholder={L.urlHint} autoComplete="off" />
@@ -424,7 +481,7 @@ function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null
           <input className={inputCls + " font-mono"} value={f.username ?? ""} onChange={(e) => set({ username: e.target.value })} autoComplete="off" data-1p-ignore data-lpignore="true" />
         </Field>
         <Field label={L.password}>
-          <SecretInput label={L.password} value={f.password ?? ""} onChange={(v) => set({ password: v })} gen={kind !== "apikey"} />
+          <SecretInput label={L.password} value={f.password ?? ""} onChange={(v) => set({ password: v })} gen={kind === "login" || kind === "server"} />
         </Field>
         {extra.map((x, i) => (
           <div key={i} className="flex items-center gap-2">
@@ -450,6 +507,22 @@ function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null
             加一栏（比如端口、数据库名、私钥、恢复码）
           </Button>
         </div>
+        <Field
+          label="标签（空格分开）"
+          hint={
+            unused.length ? (
+              <span className="flex flex-wrap gap-1.5">
+                {unused.map((t) => (
+                  <Chip key={t} onClick={() => setTags((v) => (v.trim() ? v.trim() + " " : "") + t)}>
+                    #{t}
+                  </Chip>
+                ))}
+              </span>
+            ) : undefined
+          }
+        >
+          <input className={inputCls} value={tags} onChange={(e) => setTags(e.target.value)} placeholder="比如 工作 服务器" aria-label="标签" autoComplete="off" />
+        </Field>
         <Field label="备注">
           <textarea className={textareaCls} rows={4} value={f.notes ?? ""} onChange={(e) => set({ notes: e.target.value })} />
         </Field>
@@ -467,29 +540,65 @@ function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null
 
 /* ---------------------------------------------------------------- 整页 */
 
+type Filter = "all" | "raw" | SecretKind;
+
+function ListRow({ e, on, locked, onPick }: { e: Entry; on: boolean; locked: string; onPick: () => void }) {
+  const { s, f } = e;
+  const Icon = KIND_ICON[f?.kind ?? s.kind] ?? Globe;
+  const sub = !f ? locked : f.kind === "raw" ? (f.raw ?? "").replace(/\s+/g, " ").slice(0, 60) : f.username || domainOf(f.url) || kindName(f.kind);
+  return (
+    <button aria-current={on ? "true" : undefined} onClick={onPick} className={cx("flex shrink-0 items-center gap-3 rounded-xl px-3.5 py-2.5 text-left transition-colors", on ? "bg-surface-3" : "hover:bg-surface-2")}>
+      <Icon className={cx("size-[18px] shrink-0", f?.kind === "raw" ? "text-accent" : "text-muted")} strokeWidth={1.8} />
+      <span className="flex min-w-0 grow flex-col">
+        <span className="truncate text-[14px] font-semibold">
+          {f?.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
+          {titleOf(e)}
+        </span>
+        <span className="truncate font-mono text-xs text-muted">{sub}</span>
+      </span>
+    </button>
+  );
+}
+
 export function Vault() {
   const { data, error, isLoading } = useVaultState();
   const vks = useVault((s) => s.vks);
   const lock = useVault((s) => s.lock);
   const touch = useVault((s) => s.touch);
-  const [sel, setSel] = useState<string | null>(null);
+  const sel = useVaultUi((s) => s.sel);
+  const setSel = useVaultUi((s) => s.setSel);
   const [mode, setMode] = useState<"view" | "edit" | "new">("view");
   const [q, setQ] = useState("");
-  const [kind, setKind] = useState<SecretKind | "all">("all");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [tag, setTag] = useState<string | null>(null);
 
   const secrets = data?.secrets ?? [];
   // 解开的内容只留在内存里，锁上就没了
-  const opened = useMemo(() => new Map(secrets.map((s) => [s.id, openSecret(s, vks)])), [secrets, vks]);
-  const lq = q.trim().toLowerCase();
-  const shown = secrets.filter((s) => {
-    if (kind !== "all" && (opened.get(s.id)?.kind ?? s.kind) !== kind) return false;
-    if (!lq) return true;
-    const f = opened.get(s.id);
-    return [s.title, f?.title, f?.url, f?.username, f?.notes, ...(f?.extra ?? []).map((x) => x.label)].some((t) => (t || "").toLowerCase().includes(lq));
-  });
+  const entries = useMemo<Entry[]>(() => secrets.map((s) => ({ s, f: openSecret(s, vks) })), [secrets, vks]);
+  const opened = useMemo(() => new Map(entries.map((e) => [e.s.id, e.f])), [entries]);
+  const kindOf = (e: Entry) => e.f?.kind ?? e.s.kind;
+  const rawCount = entries.filter((e) => kindOf(e) === "raw").length;
+  const allTags = useMemo(() => [...new Set(entries.flatMap((e) => e.f?.tags ?? []))].sort((a, b) => a.localeCompare(b)), [entries]);
+  const pool = entries.filter((e) => (filter === "all" || kindOf(e) === filter) && (!tag || e.f?.tags?.includes(tag)));
+  const searching = !!q.trim();
+  const shown = searchVault(pool, q);
+  // 不搜索、不筛选时分几段：待整理、置顶、最近用过，然后是全部
+  const sections = ((): [string, Entry[]][] => {
+    if (searching || filter !== "all" || tag) return [["", shown]];
+    const raws = shown.filter((e) => kindOf(e) === "raw");
+    const pinned = shown.filter((e) => e.f?.pinned);
+    const recent = recentEntries(shown.filter((e) => kindOf(e) !== "raw" && !e.f?.pinned));
+    const rest = shown.filter((e) => kindOf(e) !== "raw" && !e.f?.pinned && !recent.includes(e));
+    const top: [string, Entry[]][] = [
+      ["待整理", raws],
+      ["置顶", pinned],
+      ["最近用过", recent],
+    ];
+    return [...top, [top.some((x) => x[1].length) ? "其他" : "", rest] as [string, Entry[]]].filter((x) => x[1].length);
+  })();
   const cur = secrets.find((s) => s.id === sel) ?? null;
   // 正在编辑的那一条：进编辑时记下来，之后列表刷新、甚至这一条在别处被删了，编辑器都不动（由它自己提示）
-  const [editing, setEditing] = useState<{ s: SecretRec; f: Fields } | null>(null);
+  const [editing, setEditing] = useState<{ s: SecretRec; f: Fields; raw?: string } | null>(null);
   const stopEdit = () => {
     setEditing(null);
     setMode("view");
@@ -498,6 +607,10 @@ export function Vault() {
   useEffect(() => {
     if (!vks) stopEdit();
   }, [vks]);
+  // 从别处（全局搜索）跳过来看某一条：退出编辑
+  useEffect(() => {
+    if (sel) setMode((m) => (m === "new" ? "view" : m));
+  }, [sel]);
 
   if (isLoading && !data) return <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface text-sm text-muted">加载中…</main>;
   if (error || !data)
@@ -514,12 +627,23 @@ export function Vault() {
   if (!data.keys.length) return <Setup />;
   if (!vks) return <Locked keys={data.keys} count={secrets.length} />;
 
+  const chip = (on: boolean) => cx("rounded-lg px-2.5 py-1 text-[12.5px] transition-colors", on ? "bg-surface-3 font-medium text-fg" : "text-muted hover:bg-surface-2");
+  const startEdit = (s: SecretRec) => {
+    const f = opened.get(s.id);
+    if (!f) return;
+    // 待整理的：先从原文里拆出各栏，原文放进备注留底
+    setEditing(f.kind === "raw" ? { s, f: parseSecret(f.raw ?? ""), raw: f.raw ?? "" } : { s, f });
+    setMode("edit");
+  };
   return (
     <div className="flex min-h-0 min-w-0 flex-1 gap-5" onPointerDown={touch} onKeyDown={touch}>
       <section aria-label="密码库" className="flex w-[340px] shrink-0 flex-col gap-3.5 max-[1200px]:w-[290px]">
         <label className="flex h-[42px] shrink-0 items-center gap-2 rounded-xl bg-surface-2 px-3.5 text-muted">
           <Search className="size-4" />
-          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜名称、网址、用户名" aria-label="搜索密码库" className="min-w-0 grow bg-transparent text-fg outline-none placeholder:text-faint" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜名称、网址、用户名、标签…" aria-label="搜索密码库" className="min-w-0 grow bg-transparent text-fg outline-none placeholder:text-faint" />
+          <kbd className="shrink-0 rounded-md bg-surface-3 px-1.5 text-[11px] text-muted" title="在任何页面按 Ctrl+K 都能搜密码库">
+            Ctrl K
+          </kbd>
         </label>
         <div className="flex items-center gap-1.5 px-1">
           <h1 className="truncate text-[19px] font-bold">密码库</h1>
@@ -549,35 +673,44 @@ export function Vault() {
           </Button>
         </div>
         <div className="flex flex-wrap gap-1.5 px-1">
-          {([["all", "全部"], ...KINDS.map((k) => [k.k, k.name])] as [SecretKind | "all", string][]).map(([k, name]) => (
-            <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)} className={cx("rounded-lg px-2.5 py-1 text-[12.5px] transition-colors", kind === k ? "bg-surface-3 font-medium text-fg" : "text-muted hover:bg-surface-2")}>
-              {name}
+          <button aria-pressed={filter === "all" && !tag} onClick={() => (setFilter("all"), setTag(null))} className={chip(filter === "all" && !tag)}>
+            全部
+          </button>
+          {rawCount > 0 && (
+            <button aria-pressed={filter === "raw"} onClick={() => setFilter(filter === "raw" ? "all" : "raw")} className={chip(filter === "raw")}>
+              待整理 <span className="text-accent-strong">{rawCount}</span>
+            </button>
+          )}
+          {KINDS.filter((k) => entries.some((e) => kindOf(e) === k.k)).map((k) => (
+            <button key={k.k} aria-pressed={filter === k.k} onClick={() => setFilter(filter === k.k ? "all" : k.k)} className={chip(filter === k.k)}>
+              {k.name}
+            </button>
+          ))}
+          {allTags.map((t) => (
+            <button key={"#" + t} aria-pressed={tag === t} onClick={() => setTag(tag === t ? null : t)} className={chip(tag === t)}>
+              #{t}
             </button>
           ))}
         </div>
         <div className="scroll-quiet -mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
-          {shown.map((s) => {
-            const f = opened.get(s.id);
-            const Icon = KIND_ICON[f?.kind ?? s.kind] ?? Globe;
-            return (
-              <button
-                key={s.id}
-                aria-current={sel === s.id && mode !== "new" ? "true" : undefined}
-                onClick={() => {
-                  setSel(s.id);
-                  setMode("view");
-                }}
-                className={cx("flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-left transition-colors", sel === s.id && mode !== "new" ? "bg-surface-3" : "hover:bg-surface-2")}
-              >
-                <Icon className="size-[18px] shrink-0 text-muted" strokeWidth={1.8} />
-                <span className="flex min-w-0 grow flex-col">
-                  <span className="truncate text-[14px] font-semibold">{f?.title ?? s.title}</span>
-                  <span className="truncate font-mono text-xs text-muted">{f ? f.username || f.url || kindName(f.kind) : vks[s.kid] ? "解不开" : "用另一个主密码加密的"}</span>
-                </span>
-              </button>
-            );
-          })}
-          {!shown.length && <div className="px-3.5 py-2 text-xs leading-relaxed text-faint">{secrets.length ? "没有匹配的" : "还是空的。点「新建」存第一条。"}</div>}
+          {sections.map(([name, list]) => (
+            <div key={name} className="flex shrink-0 flex-col gap-0.5">
+              {name && <h2 className="px-3.5 pt-2.5 pb-1 text-xs font-semibold text-muted">{name}</h2>}
+              {list.map((e) => (
+                <ListRow
+                  key={name + e.s.id}
+                  e={e}
+                  on={sel === e.s.id && mode !== "new"}
+                  locked={vks[e.s.kid] ? "解不开" : "用另一个主密码加密的"}
+                  onPick={() => {
+                    setSel(e.s.id);
+                    setMode("view");
+                  }}
+                />
+              ))}
+            </div>
+          ))}
+          {!shown.length && <div className="px-3.5 py-2 text-xs leading-relaxed text-faint">{secrets.length ? "没有对得上的" : "还是空的。点「新建」，或者在快速记录里选「密码」随手记一条。"}</div>}
         </div>
       </section>
       <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface">
@@ -587,6 +720,7 @@ export function Vault() {
             old={null}
             latest={null}
             init={null}
+            allTags={allTags}
             onCancel={() => setMode("view")}
             onDone={(s) => {
               setSel(s.id);
@@ -594,16 +728,9 @@ export function Vault() {
             }}
           />
         ) : mode === "edit" && editing ? (
-          <Editor key={editing.s.id} old={editing.s} latest={secrets.find((x) => x.id === editing.s.id) ?? null} init={editing.f} onCancel={stopEdit} onDone={stopEdit} />
+          <Editor key={editing.s.id} old={editing.s} latest={secrets.find((x) => x.id === editing.s.id) ?? null} init={editing.f} raw={editing.raw} allTags={allTags} onCancel={stopEdit} onDone={stopEdit} />
         ) : cur ? (
-          <Detail key={cur.id + cur.updatedAt} s={cur} f={opened.get(cur.id) ?? null} hasKey={!!vks[cur.kid]} keys={data.keys} onEdit={() => {
-              const f = opened.get(cur.id);
-              if (!f) return;
-              setEditing({ s: cur, f });
-              setMode("edit");
-            }}
-            onDeleted={() => setSel(null)}
-          />
+          <Detail key={cur.id + cur.updatedAt} s={cur} f={opened.get(cur.id) ?? null} hasKey={!!vks[cur.kid]} keys={data.keys} onEdit={() => startEdit(cur)} onDeleted={() => setSel(null)} />
         ) : (
           <div className="grid flex-1 place-items-center p-6 text-center text-sm text-faint">
             <div className="flex flex-col items-center gap-3">

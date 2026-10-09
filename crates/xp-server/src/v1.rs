@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
         .route("/items/reprioritize", post(reprioritize))
         .route("/items/:id", get(get_one).patch(update).delete(remove))
         .route("/items/:id/progress", post(progress))
+        .route("/items/:id/scrub", post(scrub))
         .route("/items/:id/qa", post(add_qa))
         .route("/templates", get(get_templates).put(put_templates))
         .route("/export", get(export))
@@ -214,6 +215,16 @@ async fn remove(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     blocking(move || st.delete(&id, &actor)).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 把一条的内容彻底抹掉（转入密码库之后用）
+async fn scrub(
+    State(st): State<AppState>,
+    Actor(actor): Actor,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    blocking(move || st.scrub_item(&id, &actor)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

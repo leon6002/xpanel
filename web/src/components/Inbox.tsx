@@ -2,14 +2,16 @@
    - 随手记：发出去的是 type=inbox 的条目（和其他条目一样同步、离线可用），之后一键归到待办 / 问题 / 笔记…
    - 微信聊天：导入「合并转发 → 导出」的 ZIP；选中消息后转成笔记 / 待办、复制 Markdown、交给 AI */
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, FileText, Lightbulb, Link2, CircleAlert, PanelRight, Pencil, Plus, Search, Send, Settings2, SquareCheck, Trash2, Sparkles, NotebookPen } from "lucide-react";
+import { Check, Copy, FileText, KeyRound, Lightbulb, Link2, CircleAlert, PanelRight, Pencil, Plus, Search, Send, Settings2, SquareCheck, Trash2, Sparkles, NotebookPen } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { copyText, errText, v1, v1Text } from "../lib/api";
+import { copyText, errText, scrubItem, v1, v1Text } from "../lib/api";
 import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useChats, useDevices, useMe } from "../lib/data";
 import { useDrafts } from "../lib/drafts";
 import { INBOX_AUTO, assetMd, inboxTitle, dateStr, dayLabel, dueInfo, findTarget, hm, nowLabel, parseCapture, shortTime } from "../lib/logic";
 import { useUi } from "../lib/store";
-import type { Chat, Item, ItemType, Msg } from "../lib/types";
+import type { Chat, Item, ItemType, Msg, State } from "../lib/types";
+import { dropSecret, useVaultUi } from "../lib/vault";
+import { looksLikeSecret } from "../lib/vaultParse";
 import { typeName } from "../lib/types";
 import { cx } from "../lib/cx";
 import { openAgent } from "../dialogs/Agent";
@@ -117,6 +119,24 @@ export function InboxList() {
 
 /* ---------------------------------------------------------------- 随手记 */
 
+/** 已经发进收件箱的账号密码：加密后转入密码库（待整理），再把这条消息的内容从主机上抹掉。
+    抹不到的地方只有以前做的备份 */
+async function moveToVault(it: Item) {
+  try {
+    await dropSecret([inboxTitle(it), it.body].filter(Boolean).join("\n"));
+  } catch (e) {
+    return say("没转成：" + errText(e));
+  }
+  try {
+    await scrubItem(it.id);
+    qc.setQueryData<State>(["state"], (s) => (s ? { ...s, items: s.items.filter((x) => x.id !== it.id) } : s));
+    qc.invalidateQueries({ queryKey: ["state"] });
+    say("已转入密码库，这条消息已经抹掉（以前的备份里还有）");
+  } catch (e) {
+    say("已存进密码库，但这条消息没抹掉：" + errText(e) + "。请手动删除它");
+  }
+}
+
 function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecting: boolean; toggle: () => void }) {
   const ui = useUi();
   const d = new Date(it.createdAt || 0);
@@ -157,6 +177,10 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
         <button className={tool} title="追加到某篇笔记的末尾" onClick={() => openAppendToNote(it)}>
           <NotebookPen />
           追加到笔记
+        </button>
+        <button className={tool} title="这条是账号密码：加密后转入密码库，并把这条消息从主机上抹掉" onClick={() => moveToVault(it)}>
+          <KeyRound />
+          密码库
         </button>
         <button className={tool} title="在右侧打开" aria-label="在右侧打开" onClick={() => ui.openPeek(it.id)}>
           <PanelRight />
@@ -677,9 +701,36 @@ function Composer({ devices, onSent }: { devices: ReturnType<typeof useDevices>;
     ta.current?.focus();
   }
 
+  /** 像账号密码的：不进收件箱，加密后直接进密码库 */
+  async function toVault() {
+    const raw = draft.text.trim();
+    if (!raw) return;
+    const keep = { ...draft };
+    d.setText("inbox", "");
+    try {
+      const rec = await dropSecret(raw);
+      say("已存进密码库，有空再整理", {
+        label: "查看",
+        run: () => {
+          useVaultUi.getState().setSel(rec?.id ?? null);
+          useUi.getState().setView("vault");
+        },
+      });
+    } catch (e) {
+      d.restore("inbox", keep);
+      say("没存上：" + errText(e));
+    }
+    ta.current?.focus();
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <PendingFiles box="inbox" />
+      {looksLikeSecret(draft.text) && (
+        <button onClick={toVault} className="self-start rounded-lg bg-accent-soft px-2.5 py-1 text-[12.5px] text-accent-strong hover:brightness-95" title="加密后直接进密码库，不会出现在收件箱里">
+          看起来是账号密码，点这里存进密码库（不进收件箱）
+        </button>
+      )}
       <div className="flex items-end gap-2 rounded-[14px] bg-surface-2/80 py-1.5 pr-1.5 pl-3.5 transition-shadow focus-within:bg-surface focus-within:shadow-2">
         <textarea
           ref={ta}

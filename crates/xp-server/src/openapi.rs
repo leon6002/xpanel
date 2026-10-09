@@ -33,6 +33,7 @@ pub const PATHS: &[&str] = &[
     "/items/reprioritize",
     "/items/{id}",
     "/items/{id}/progress",
+    "/items/{id}/scrub",
     "/items/{id}/qa",
     "/templates",
     "/export",
@@ -61,6 +62,8 @@ pub const PATHS: &[&str] = &[
     "/vault",
     "/vault/index",
     "/vault/keys/{id}",
+    "/vault/keys/{id}/box",
+    "/vault/drops",
     "/vault/secrets/{id}",
     "/vault/requests",
     "/vault/requests/{id}",
@@ -240,6 +243,7 @@ pub fn spec() -> Value {
 /// 收件箱的接口（单独写，json! 宏一次展开不了太长）
 fn inbox_paths(err: &Value) -> Value {
     json!({
+            "/items/{id}/scrub": { "post": { "summary": "把一条的内容彻底抹掉：正文、全文索引、操作记录里存的前后内容都清掉，只留删除标记（界面把收件箱里的账号密码转入密码库后用）。以前的备份不受影响", "parameters": [id_param()], "responses": { "204": { "description": "已抹掉" }, "404": err.clone() } } },
             "/items/{id}/progress": { "post": {
                 "summary": "AI 回写进展：追加到条目的 agentProgress（显示在条目的「AI 进展」里，最多保留 50 条）",
                 "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
@@ -297,13 +301,19 @@ fn inbox_paths(err: &Value) -> Value {
                 "get": { "summary": "密码库（密文）：keys 是钥匙（主密码包着的密码库密钥），secrets 是条目（title、kind 是明文的标签，n、c 是密文）。界面拿去在本地解密，接口这边没有明文。/vault 下的接口不接受别的网站上的网页发来的请求（Origin 和 Host 不一致时 403）", "responses": { "200": { "description": "{keys, secrets}" } } }
             },
             "/vault/index": {
-                "get": { "summary": "密码库里有哪些条目：只有 id、title、kind（login 网站账号 / apikey / server 服务器和设备），没有内容", "responses": { "200": { "description": "{secrets}" } } }
+                "get": { "summary": "密码库里有哪些条目：只有 id、title、kind（login 网站账号 / apikey / server 服务器和设备 / other 其他 / raw 还没整理、不能取用），没有内容", "responses": { "200": { "description": "{secrets}" } } }
             },
             "/vault/keys/{id}": {
                 "put": { "summary": "界面用：第一次设主密码（新建钥匙，data 里带 auth），或改主密码（带 expect = 原来的 updatedAt 和 mac）。mac 是用解锁后才有的校验密钥算的 HMAC-SHA256，没解锁的调用方改不了密码库", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["data"], "properties": { "data": { "type": "object" }, "expect": { "type": "number" }, "mac": { "type": "string" } } } } } }, "responses": { "200": { "description": "{keys, secrets}" }, "400": err.clone(), "409": err.clone() } }
             },
+            "/vault/keys/{id}/box": {
+                "put": { "summary": "界面用：登记这把钥匙的公钥（解锁后才算得出 mac）。有了它，锁着时也能用 /vault/drops 往里存", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["pub", "mac"], "properties": { "pub": { "type": "string" }, "mac": { "type": "string" } } } } } }, "responses": { "200": { "description": "{keys, secrets}" }, "400": err.clone(), "404": err.clone() } }
+            },
+            "/vault/drops": {
+                "post": { "summary": "界面用：快速记下一条，之后再整理。内容是用钥匙的公钥加密的原文（epk、n、c），不用解锁；进来的条目种类是 raw，名称只有「待整理 · 时间」", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["kid", "epk", "n", "c"], "properties": { "kid": { "type": "string" }, "epk": { "type": "string" }, "n": { "type": "string" }, "c": { "type": "string" } } } } } }, "responses": { "201": { "description": "条目" }, "400": err.clone(), "503": err.clone() } }
+            },
             "/vault/secrets/{id}": {
-                "put": { "summary": "界面用：新建或修改一条（内容已经加密）。要带 mac；改已有的带 expect = 原来的 updatedAt，对不上返回 409", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["kid", "title", "kind", "n", "c", "mac"], "properties": { "kid": { "type": "string" }, "title": { "type": "string" }, "kind": { "type": "string", "enum": ["login", "apikey", "server"] }, "n": { "type": "string" }, "c": { "type": "string" }, "expect": { "type": "number" }, "mac": { "type": "string" } } } } } }, "responses": { "200": { "description": "条目" }, "400": err.clone(), "404": err.clone(), "409": err.clone() } },
+                "put": { "summary": "界面用：新建或修改一条（内容已经加密）。要带 mac；改已有的带 expect = 原来的 updatedAt，对不上返回 409", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["kid", "title", "kind", "n", "c", "mac"], "properties": { "kid": { "type": "string" }, "title": { "type": "string" }, "kind": { "type": "string", "enum": ["login", "apikey", "server", "other"] }, "n": { "type": "string" }, "c": { "type": "string" }, "expect": { "type": "number" }, "mac": { "type": "string" } } } } } }, "responses": { "200": { "description": "条目" }, "400": err.clone(), "404": err.clone(), "409": err.clone() } },
                 "delete": { "summary": "界面用：删除一条。请求体带 expect（原来的 updatedAt）和 mac", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["expect", "mac"], "properties": { "expect": { "type": "number" }, "mac": { "type": "string" } } } } } }, "responses": { "204": { "description": "已删除" }, "400": err.clone(), "404": err.clone(), "409": err.clone() } }
             },
             "/vault/requests": {

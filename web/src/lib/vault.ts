@@ -18,27 +18,43 @@ import { create } from "zustand";
 import { newId, v1 } from "./api";
 import { qc } from "./data";
 
-export type SecretKind = "login" | "apikey" | "server";
+export type SecretKind = "login" | "apikey" | "server" | "other";
+/** raw = 待整理：快速记下的原文，还没拆成各栏 */
+export type AnyKind = SecretKind | "raw";
 export const KINDS: { k: SecretKind; name: string; hint: string }[] = [
   { k: "login", name: "网站账号", hint: "网址、用户名、密码" },
   { k: "apikey", name: "API key", hint: "各种服务的 key、token" },
   { k: "server", name: "服务器和设备", hint: "SSH、路由器、NAS、数据库" },
+  { k: "other", name: "其他", hint: "恢复码、门禁、证件号…" },
 ];
-export const kindName = (k: string) => KINDS.find((x) => x.k === k)?.name ?? k;
+export const kindName = (k: string) => (k === "raw" ? "待整理" : (KINDS.find((x) => x.k === k)?.name ?? k));
 
 export interface Kdf { alg: "scrypt"; N: number; r: number; p: number }
 /** 一把钥匙：主密码包着的密码库密钥 */
-export interface KeyRec { kid: string; createdAt: number; updatedAt: number; kdf: Kdf; salt: string; n: string; c: string }
-/** 主机上存的一条（密文） */
-export interface SecretRec { id: string; kid: string; title: string; kind: SecretKind; createdAt: number; updatedAt: number; n: string; c: string }
+export interface KeyRec { kid: string; createdAt: number; updatedAt: number; kdf: Kdf; salt: string; n: string; c: string; /** 「只进不出」的公钥：锁着时用它往里存 */ pub?: string | null }
+/** 主机上存的一条（密文）。有 epk 的是快速记下、还没整理的：用钥匙的公钥加密的 */
+export interface SecretRec { id: string; kid: string; title: string; kind: AnyKind; createdAt: number; updatedAt: number; n: string; c: string; epk?: string | null }
 export interface VaultState { keys: KeyRec[]; secrets: SecretRec[] }
 export interface Extra { label: string; value: string; hidden?: boolean }
 /** 一条里加密的内容。title、kind 在这里才是真的，主机上那份明文只是标签 */
-export interface Fields { title: string; kind: SecretKind; url?: string; username?: string; password?: string; notes?: string; extra?: Extra[] }
+export interface Fields {
+  title: string;
+  kind: AnyKind;
+  url?: string;
+  username?: string;
+  password?: string;
+  notes?: string;
+  extra?: Extra[];
+  /** 标签和置顶也在密文里：锁着时和给 AI 的列表里看不到 */
+  tags?: string[];
+  pinned?: boolean;
+  /** 待整理的：记下来的原文 */
+  raw?: string;
+}
 /** AI 发来、等用户确认的取用请求。title 是主机上的标签（不可信），left 是还剩多少毫秒 */
 export interface VaultRequest { id: string; secretId: string; title: string; actor: string; reason: string; pub: string; left: number }
-/** 解开的一把钥匙：密码库密钥，和从它派生的校验密钥 */
-export interface Opened { vk: Uint8Array; auth: Uint8Array }
+/** 解开的一把钥匙：密码库密钥，和从它派生的校验密钥、「只进不出」的私钥 */
+export interface Opened { vk: Uint8Array; auth: Uint8Array; box: Uint8Array }
 export type OpenedKeys = Record<string, Opened>;
 
 const KDF: Kdf = { alg: "scrypt", N: 2 ** 17, r: 8, p: 1 };
@@ -48,9 +64,13 @@ const AAD_KEY = enc.encode("xpanel-vault-key-v1");
 const AAD_SECRET = enc.encode("xpanel-vault-secret-v1");
 const INFO_REQUEST = enc.encode("xpanel-vault-request-v1");
 const INFO_AUTH = enc.encode("xpanel-vault-auth-v1");
+const INFO_BOX = enc.encode("xpanel-vault-box-v1");
+const INFO_DROP = enc.encode("xpanel-vault-drop-v1");
 
 const authOf = (vk: Uint8Array) => hkdf(sha256, vk, undefined, INFO_AUTH, 32);
-const opened = (vk: Uint8Array): Opened => ({ vk, auth: authOf(vk) });
+/** 「只进不出」的密钥对从密码库密钥派生：公钥登记在主机上，谁都能用它往里存；私钥要解锁才有 */
+const opened = (vk: Uint8Array): Opened => ({ vk, auth: authOf(vk), box: hkdf(sha256, vk, undefined, INFO_BOX, 32) });
+const pubOf = (k: Opened) => b64(x25519.getPublicKey(k.box));
 /** 这次改动的校验值：各部分用换行连起来算 HMAC（主机那边 vault.rs 的 check_mac 按同样的顺序验） */
 const mac = (k: Opened, parts: (string | number)[]) => b64(hmac(sha256, k.auth, enc.encode(parts.join("\n"))));
 /** updatedAt 放进校验串里的写法：主机上的时间都是整数毫秒 */
@@ -113,8 +133,8 @@ export function decryptFields(vk: Uint8Array, s: Pick<SecretRec, "n" | "c">): Fi
   return JSON.parse(dec.decode(xchacha20poly1305(vk, unb64(s.n), AAD_SECRET).decrypt(unb64(s.c)))) as Fields;
 }
 
-/** 把内容加密给请求方（AI 那边的临时公钥），主机只转交 */
-export function seal(pub: string, payload: unknown) {
+/** 把内容加密给一个公钥：请求方（AI 那边的临时公钥，主机只转交），或者密码库自己的公钥（快速记录） */
+export function seal(pub: string, payload: unknown, info = INFO_REQUEST) {
   const their = unb64(pub);
   const mine = x25519.utils.randomSecretKey();
   const epk = x25519.getPublicKey(mine);
@@ -124,8 +144,18 @@ export function seal(pub: string, payload: unknown) {
   salt.set(epk, 0);
   salt.set(their, 32);
   const n = randomBytes(24);
-  const k = hkdf(sha256, shared, salt, INFO_REQUEST, 32);
+  const k = hkdf(sha256, shared, salt, info, 32);
   return { epk: b64(epk), n: b64(n), c: b64(xchacha20poly1305(k, n).encrypt(enc.encode(JSON.stringify(payload)))) };
+}
+
+/** 解开快速记下的一条（seal 的反过程，用密码库的私钥） */
+function unseal(k: Opened, s: { epk: string; n: string; c: string }): unknown {
+  const epk = unb64(s.epk);
+  const salt = new Uint8Array(64);
+  salt.set(epk, 0);
+  salt.set(x25519.getPublicKey(k.box), 32);
+  const key = hkdf(sha256, x25519.getSharedSecret(k.box, epk), salt, INFO_DROP, 32);
+  return JSON.parse(dec.decode(xchacha20poly1305(key, unb64(s.n)).decrypt(unb64(s.c))));
 }
 
 /** 随机密码。symbols = false 时只有字母和数字（有些网站不让用符号） */
@@ -178,6 +208,7 @@ export const useVault = create<Unlocked>((set, get) => ({
       for (const k of Object.values(vks)) {
         k.vk.fill(0);
         k.auth.fill(0);
+        k.box.fill(0);
       }
     set({ vks: null });
   },
@@ -191,6 +222,9 @@ window.setInterval(lockIfIdle, 15000);
 document.addEventListener("visibilitychange", lockIfIdle);
 window.addEventListener("focus", lockIfIdle);
 
+/** 密码库页面里选中的是哪一条（全局搜索也会改它，跳过来看） */
+export const useVaultUi = create<{ sel: string | null; setSel: (id: string | null) => void }>((set) => ({ sel: null, setSel: (sel) => set({ sel }) }));
+
 export const VAULT_KEY = ["vault"] as const;
 export const fetchVault = () => v1<VaultState>("GET", "/vault");
 const setVault = (f: (s: VaultState) => VaultState) => qc.setQueryData<VaultState>(VAULT_KEY, (s) => (s ? f(s) : s));
@@ -200,9 +234,22 @@ const setOpened = (vks: OpenedKeys) => useVault.setState({ vks, touched: Date.no
 export async function createVault(password: string) {
   const k = opened(randomBytes(32));
   const kid = newId();
-  const st = await v1<VaultState>("PUT", `/vault/keys/${kid}`, { data: { ...(await wrap(password, k.vk)), auth: b64(k.auth) } });
+  const st = await v1<VaultState>("PUT", `/vault/keys/${kid}`, { data: { ...(await wrap(password, k.vk)), auth: b64(k.auth), pub: pubOf(k) } });
   qc.setQueryData(VAULT_KEY, st);
   setOpened({ [kid]: k });
+}
+
+/** 旧版本建的钥匙还没登记公钥：解锁后补上，之后锁着也能快速记录 */
+async function ensureBox(keys: KeyRec[], got: OpenedKeys) {
+  for (const key of keys) {
+    const k = got[key.kid];
+    if (!k || key.pub === pubOf(k)) continue;
+    try {
+      qc.setQueryData(VAULT_KEY, await v1<VaultState>("PUT", `/vault/keys/${key.kid}/box`, { pub: pubOf(k), mac: mac(k, ["put-box", key.kid, pubOf(k)]) }));
+    } catch {
+      /* 这次没登记上不影响用，下次解锁再试 */
+    }
+  }
 }
 
 /** 解锁：主密码能解开哪几把钥匙就解开哪几把。一把都解不开 = 主密码不对 */
@@ -211,6 +258,20 @@ export async function unlock(keys: KeyRec[], password: string) {
   if (!Object.keys(got).length) throw new Error(keys.some((k) => !kdfOk(k.kdf)) ? "这把钥匙的参数这个版本不认识，请把 xpanel 升级到最新" : "主密码不对");
   // 算密钥要一秒左右，这期间可能自动锁上了（旧的钥匙已经被抹掉）：以现在的状态为准
   setOpened({ ...(useVault.getState().vks ?? {}), ...got });
+  void ensureBox(keys, got);
+}
+
+/** 快速记一条进密码库，之后再整理。不用解锁：用钥匙的公钥加密，解锁了才看得到 */
+export async function dropSecret(text: string) {
+  const raw = text.trim();
+  if (!raw) return null;
+  const st: VaultState = qc.getQueryData<VaultState>(VAULT_KEY) ?? (await fetchVault());
+  if (!st.keys.length) throw new Error("还没有密码库：先点左边的「密码库」设一个主密码");
+  const key = st.keys.find((k) => k.pub);
+  if (!key?.pub) throw new Error("先去密码库解锁一次（升级后第一次需要），之后锁着也能直接存");
+  const rec = await v1<SecretRec>("POST", "/vault/drops", { kid: key.kid, ...seal(key.pub, { raw, at: Date.now() }, INFO_DROP) });
+  setVault((s) => ({ ...s, secrets: [...s.secrets.filter((x) => x.id !== rec.id), rec] }));
+  return rec;
 }
 
 /** 改主密码：先用旧的验证，再用新的把每把解开的钥匙重新包一次（条目不用动，密码库密钥也不变） */
@@ -233,7 +294,7 @@ export async function changePassword(keys: KeyRec[], oldPassword: string, newPas
 
 /** 新建或保存一条。old 是开始编辑时的那条（没有 = 新建，这时用 id）。
     别处在这期间改过的话主机会拒绝（409），不会悄悄盖掉 */
-export async function saveSecret(old: SecretRec | null, id: string, p: Omit<Fields, "title" | "kind"> & { title: string; kind: SecretKind }) {
+export async function saveSecret(old: SecretRec | null, id: string, p: Omit<Fields, "title" | "kind" | "raw"> & { title: string; kind: SecretKind }) {
   const { vks } = useVault.getState();
   const kid = old?.kid ?? Object.keys(vks ?? {})[0];
   const k = vks?.[kid];
@@ -268,6 +329,10 @@ export function openSecret(s: SecretRec, vks: OpenedKeys | null): Fields | null 
   const k = vks?.[s.kid];
   if (!k) return null;
   try {
+    if (s.epk) {
+      const d = unseal(k, { epk: s.epk, n: s.n, c: s.c }) as { raw?: unknown };
+      return typeof d?.raw === "string" ? { title: s.title, kind: "raw", raw: d.raw } : null;
+    }
     const f = decryptFields(k.vk, s);
     return typeof f?.title === "string" ? f : null;
   } catch {

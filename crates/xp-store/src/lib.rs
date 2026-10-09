@@ -840,6 +840,43 @@ fn soft_delete(tx: &Connection, id: &str, actor: &str, now: f64) -> Result<bool>
     }
 }
 
+impl Store {
+    /// 把一条的内容彻底抹掉（转入密码库的收件箱消息用）：正文、全文索引、操作记录里存的前后内容都清掉。
+    /// 留一个删除标记，这样合并时别的电脑上的那一份也会跟着删掉。以前的备份里还有，这里管不了
+    pub fn scrub_item(&self, id: &str, actor: &str) -> Result<()> {
+        let now = now_ms();
+        // 让 SQLite 把删掉的内容用 0 盖掉，而不是只标记成空闲（不然旧内容还躺在数据库文件里）
+        let _ = self.lock().pragma_update(None, "secure_delete", "ON");
+        self.write(|tx| {
+            let _ = tx.execute(
+                "INSERT INTO items_fts(items_fts, rank) VALUES('secure-delete', 1)",
+                [],
+            );
+            let r = read_row(tx, id)?.ok_or_else(|| StoreError::NotFound("没有这一条".into()))?;
+            let blank = json!({
+                "id": id,
+                "type": str_of(&r.data, "type"),
+                "title": "",
+                "body": "",
+                "createdAt": r.data["createdAt"],
+                "updatedAt": now,
+            });
+            write_row(tx, &blank, Some(now))?;
+            tx.execute("DELETE FROM items_fts WHERE id = ?1", [id])?;
+            tx.execute(
+                "UPDATE audit_log SET before = NULL, after = NULL WHERE item_id = ?1",
+                [id],
+            )?;
+            log(tx, actor, "delete", id, None, None, Some("内容已抹掉"))
+        })?;
+        // 日志文件里还留着改之前的页：并回主文件并清空
+        let _ = self
+            .lock()
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        Ok(())
+    }
+}
+
 /// 记一条操作记录。界面自己的修改很频繁，只记动作不存前后内容；外部 AI 的修改存完整前后内容，方便追查和撤销。
 fn log(
     tx: &Connection,

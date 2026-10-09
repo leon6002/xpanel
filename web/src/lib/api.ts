@@ -118,6 +118,9 @@ export async function v1Text(path: string): Promise<string> {
   return r.text();
 }
 
+/** 把一条的内容从主机上彻底抹掉（转入密码库之后用），只留删除标记 */
+export const scrubItem = (id: string) => v1("POST", `/items/${encodeURIComponent(id)}/scrub`);
+
 export const errText = (e: unknown) => (e instanceof Error ? e.message : typeof e === "string" ? e : String(e));
 
 export async function copyText(v: string): Promise<boolean> {

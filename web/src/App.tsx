@@ -9,6 +9,7 @@ import { Peek, Reader } from "./components/Reader";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { Vault, VaultRequests } from "./components/Vault";
+import { VaultPalette } from "./components/VaultPalette";
 import { DebugPanel } from "./components/Debug";
 import { SettingsForm } from "./dialogs/Settings";
 import { isApp } from "./lib/api";
@@ -86,6 +87,7 @@ function Shell() {
       <QaFloat />
       <DialogHost />
       <VaultRequests enabled={!isApp || !!cfg.data?.config.mode} />
+      <VaultPalette enabled={!isApp || !!cfg.data?.config.mode} />
       <Toast />
       <DebugPanel />
       {dropping && (

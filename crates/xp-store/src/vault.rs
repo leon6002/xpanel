@@ -27,7 +27,12 @@ const MAX_TITLE: usize = 200;
 /// 取用请求多久过期（毫秒）
 pub const REQUEST_TTL_MS: f64 = 120_000.0;
 const MAX_REQUESTS: usize = 5;
-pub const KINDS: &[&str] = &["login", "apikey", "server"];
+/// 整理好的条目的种类。还有一种 raw（待整理）：快速记下的原文，只能通过 `vault_drop` 进来
+pub const KINDS: &[&str] = &["login", "apikey", "server", "other"];
+const RAW: &str = "raw";
+/// 待整理的最多攒这么多条（锁着也能往里放，得有个上限）
+const MAX_RAW: i64 = 300;
+const MAX_DROP: usize = 64 * 1024;
 const ACTOR_MERGE: &str = "merge";
 
 /// AI 发来的取用请求（只在内存里）
@@ -83,7 +88,7 @@ impl Row {
         json!({
             "id": id, "kid": self.kid, "title": self.title, "kind": self.kind,
             "createdAt": self.created, "updatedAt": self.updated,
-            "n": d["n"], "c": d["c"],
+            "n": d["n"], "c": d["c"], "epk": d["epk"],
         })
     }
 }
@@ -208,6 +213,16 @@ fn check_mac(auth: &[u8], parts: &[&str], mac: &str) -> Result<()> {
         .map_err(|_| deny())
 }
 
+fn key_data(conn: &Connection, kid: &str) -> Result<Value> {
+    let d: Option<String> = conn
+        .query_row("SELECT data FROM vault_keys WHERE kid = ?1", [kid], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    Ok(d.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null))
+}
+
 fn stamp(t: Option<f64>) -> String {
     t.map(|x| (x as i64).to_string()).unwrap_or_default()
 }
@@ -304,11 +319,13 @@ impl Store {
                         return Err(conflict("主密码在别处刚改过，请刷新后重新解锁"));
                     }
                     // 校验密钥是从密码库密钥派生的，改主密码不会变：沿用原来的，不信请求里带的
+                    // 「只进不出」的公钥也一样（见 vault_put_box）
                     let mut d = data.clone();
                     d["auth"] = json!(base64::Engine::encode(
                         &base64::engine::general_purpose::STANDARD,
                         &auth
                     ));
+                    d["pub"] = key_data(tx, kid)?["pub"].take();
                     tx.execute(
                         "UPDATE vault_keys SET data = ?2, updated_at = ?3 WHERE kid = ?1",
                         params![kid, d.to_string(), now.max(cur + 1.0)],
@@ -338,6 +355,81 @@ impl Store {
         self.vault_state()
     }
 
+    /// 登记这把钥匙的「只进不出」公钥（从密码库密钥派生的 X25519 公钥）：有了它，锁着的时候也能往密码库里放东西
+    /// （`vault_drop`），但要解锁才看得到。旧版本建的钥匙没有它，界面解锁后补登记一次
+    pub fn vault_put_box(&self, kid: &str, pubkey: &str, mac: &str) -> Result<Value> {
+        if b64d(pubkey).map(|p| p.len()) != Some(32) {
+            return Err(invalid("公钥不对"));
+        }
+        self.write(|tx| {
+            let (_, auth) =
+                key_auth(tx, kid)?.ok_or_else(|| StoreError::NotFound("没有这把钥匙".into()))?;
+            check_mac(&auth, &["put-box", kid, pubkey], mac)?;
+            let mut d = key_data(tx, kid)?;
+            d["pub"] = json!(pubkey);
+            // 不动 updated_at：这不是改主密码，别让别的电脑以为钥匙换了
+            tx.execute(
+                "UPDATE vault_keys SET data = ?2 WHERE kid = ?1",
+                params![kid, d.to_string()],
+            )?;
+            Ok(())
+        })?;
+        self.vault_state()
+    }
+
+    /// 快速记下一条，之后再整理。sealed（epk、n、c）是界面用钥匙的公钥加密的原文，不用解锁就能放进来，
+    /// 所以也不要校验值；进来的都标成「待整理」，名称只写时间
+    pub fn vault_drop(&self, kid: &str, sealed: &Value, actor: &str) -> Result<Value> {
+        let f = |k: &str| str_of(sealed, k);
+        if b64d(f("epk")).map(|p| p.len()) != Some(32)
+            || f("n").is_empty()
+            || f("c").is_empty()
+            || f("c").len() > MAX_DROP
+        {
+            return Err(invalid("内容不对或太长"));
+        }
+        let now = ts();
+        let s = xp_core::stamp_local();
+        let title = format!("待整理 · {} {}:{}", &s[5..10], &s[11..13], &s[13..15]);
+        let (out, _) = self.write(|tx| {
+            if key_data(tx, kid)?["pub"].as_str().is_none_or(str::is_empty) {
+                return Err(invalid("密码库还不能直接存：先去密码库解锁一次"));
+            }
+            let n: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM secrets WHERE kind = ?1 AND deleted_at IS NULL",
+                [RAW],
+                |r| r.get(0),
+            )?;
+            if n >= MAX_RAW {
+                return Err(StoreError::Unavailable(
+                    "待整理的太多了，先去密码库整理或删掉一些".into(),
+                ));
+            }
+            let id = new_id();
+            let row = Row {
+                kid: kid.to_string(),
+                title: title.clone(),
+                kind: RAW.to_string(),
+                created: now,
+                updated: now,
+                deleted: None,
+                data: json!({ "epk": f("epk"), "n": f("n"), "c": f("c") }).to_string(),
+            };
+            write_secret(tx, &id, &row)?;
+            log(
+                tx,
+                actor,
+                "vault",
+                "",
+                None,
+                None,
+                Some("密码库：快速记了一条"),
+            )?;
+            Ok(row.json(&id))
+        })?;
+        Ok(out)
+    }
+
     /// 新建或修改一条。body：kid、title、kind、n、c、mac，改已有的要带 expect（界面看到的 updatedAt）
     pub fn vault_put_secret(&self, id: &str, body: &Value, actor: &str) -> Result<Value> {
         if !valid_id(id) {
@@ -353,7 +445,7 @@ impl Store {
         }
         let kind = str_of(body, "kind");
         if !KINDS.contains(&kind) {
-            return Err(invalid("种类只能是 login、apikey、server"));
+            return Err(invalid("种类只能是 login、apikey、server、other"));
         }
         let (n, c) = (str_of(body, "n"), str_of(body, "c"));
         if n.is_empty() || c.is_empty() || c.len() > MAX_SECRET {
@@ -477,6 +569,11 @@ impl Store {
         let row = read_secret(&self.lock(), secret_id)?
             .filter(|r| r.alive())
             .ok_or_else(|| StoreError::NotFound("密码库里没有这一条，先用列表看看有哪些".into()))?;
+        if row.kind == RAW {
+            return Err(invalid(
+                "这一条用户还没整理（只是随手记下的原文），不能取用。请用户先在密码库里整理它",
+            ));
+        }
         if b64d(pubkey).map(|p| p.len()) != Some(32) {
             return Err(invalid("pub 不对：要 32 字节 X25519 公钥的 base64"));
         }

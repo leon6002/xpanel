@@ -1,10 +1,12 @@
 /* 左侧：导航、分类树、标签、设备、连接状态和外观 */
 import { BookMarked, KeyRound, ChevronDown, ChevronRight, FileText, HardDrive, Inbox, Link2, Moon, Plus, Settings2, SquareCheck, Sun, SunMoon, Tags, MonitorSmartphone } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { isApp } from "../lib/api";
 import { useAppState, useChats, useConfig, useThisDevice } from "../lib/data";
 import { allCats, allTags, devOnline, inCat, parentCat } from "../lib/logic";
 import { ls, useUi, type View } from "../lib/store";
+import { VAULT_KEY, fetchVault } from "../lib/vault";
 import { cx } from "../lib/cx";
 import { openCatMgr } from "../dialogs/Categories";
 import { openDevices } from "../dialogs/Devices";
@@ -52,13 +54,15 @@ export function Sidebar() {
     ls.set("wb-catclosed", JSON.stringify([...n]));
   };
 
+  // 密码库里随手记下、还没整理的有几条
+  const rawCount = (useQuery({ queryKey: VAULT_KEY, queryFn: fetchVault, enabled: !!data }).data?.secrets ?? []).filter((x) => x.kind === "raw").length;
   const counts: Record<View, number> = {
     inbox: items.filter((i) => i.type === "inbox").length + chats.reduce((n, c) => n + (c.unread || 0), 0),
     work: items.filter((i) => ["todo", "issue", "idea"].includes(i.type) && !i.done).length,
     notes: items.filter((i) => i.type === "note").length,
     links: items.filter((i) => i.type === "link").length,
     rules: items.filter((i) => i.type === "rule").length,
-    vault: 0,
+    vault: rawCount,
   };
   const cats = useMemo(() => allCats(items, data?.categories ?? []), [items, data?.categories]);
   const tags = useMemo(() => allTags(items).slice(0, 24), [items]);
@@ -127,9 +131,9 @@ export function Sidebar() {
           >
             <Icon strokeWidth={1.8} />
             <span className="grow max-[1200px]:hidden">{name}</span>
-            {k === "inbox" && counts.inbox > 0 ? (
+            {(k === "inbox" || k === "vault") && counts[k] > 0 ? (
               <span className="grid h-5 min-w-5 place-items-center rounded-full bg-accent-soft px-1.5 text-xs font-semibold text-accent-strong max-[1200px]:absolute max-[1200px]:-top-1 max-[1200px]:right-0 max-[1200px]:h-4 max-[1200px]:min-w-4 max-[1200px]:px-1 max-[1200px]:text-[10px]">
-                {counts.inbox}
+                {counts[k]}
               </span>
             ) : (
               <span className="text-xs font-normal text-muted max-[1200px]:hidden">{counts[k] || ""}</span>

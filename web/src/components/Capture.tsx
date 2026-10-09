@@ -3,11 +3,14 @@
    有没发出去的草稿时保持展开；空着时点别处或按 Esc 收起。 */
 import { Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { errText } from "../lib/api";
 import { addItem, useAppState } from "../lib/data";
 import { useDrafts } from "../lib/drafts";
 import { assetMd, nowLabel, parseCapture } from "../lib/logic";
 import { useUi } from "../lib/store";
 import { TYPES, typeName, type ItemType } from "../lib/types";
+import { dropSecret, useVaultUi } from "../lib/vault";
+import { looksLikeSecret } from "../lib/vaultParse";
 import { cx } from "../lib/cx";
 import { PendingFiles } from "./Files";
 import { viewOf } from "./Reader";
@@ -26,7 +29,24 @@ export function Capture() {
   const box = useRef<HTMLElement>(null);
   const type = ui.capType;
   const [open, setOpen] = useState(false);
-  const hasDraft = !!draft.text.trim() || draft.files.length > 0;
+  // 记成「密码」时，打的字只放在内存里（普通草稿会存到本机，刷新不丢；密码不该那样留着）
+  const [secret, setSecret] = useState(false);
+  const [stext, setStext] = useState("");
+  const text = secret ? stext : draft.text;
+  const toSecret = (on: boolean) => {
+    if (on === secret) return;
+    if (on) {
+      setStext(draft.text);
+      d.setText("capture", "");
+    } else {
+      d.setText("capture", stext);
+      setStext("");
+    }
+    setSecret(on);
+  };
+  const stextRef = useRef(stext);
+  stextRef.current = stext;
+  const hasDraft = !!text.trim() || draft.files.length > 0;
   const expanded = open || hasDraft;
 
   const grow = () => {
@@ -35,7 +55,7 @@ export function Capture() {
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 240) + "px";
   };
-  useLayoutEffect(grow, [draft.text]);
+  useLayoutEffect(grow, [text]);
   useEffect(() => {
     if (ui.capFocus && ui.view !== "inbox") setOpen(true);
   }, [ui.capFocus, ui.view]);
@@ -49,13 +69,36 @@ export function Capture() {
     const down = (e: MouseEvent) => {
       const t = e.target as Node;
       if (box.current?.contains(t) || (t as HTMLElement).closest?.('[role="dialog"]')) return;
-      if (!useDrafts.getState().capture.text.trim() && !useDrafts.getState().capture.files.length) setOpen(false);
+      if (!useDrafts.getState().capture.text.trim() && !useDrafts.getState().capture.files.length && !stextRef.current.trim()) setOpen(false);
     };
     document.addEventListener("mousedown", down);
     return () => document.removeEventListener("mousedown", down);
   }, [expanded]);
 
+  /** 记成「密码」：整段加密后直接进密码库（不经过条目和收件箱），之后再去整理 */
+  async function submitSecret() {
+    const raw = stext.trim();
+    if (!raw) return;
+    setStext("");
+    setOpen(false);
+    try {
+      const rec = await dropSecret(raw);
+      ui.say("已存进密码库，有空再整理", {
+        label: "查看",
+        run: () => {
+          useVaultUi.getState().setSel(rec?.id ?? null);
+          useUi.getState().setView("vault");
+        },
+      });
+    } catch (e) {
+      setStext(raw);
+      setOpen(true);
+      ui.say("没存上：" + errText(e));
+    }
+  }
+
   async function submit() {
+    if (secret) return submitSecret();
     const raw = draft.text.trim();
     if (draft.files.some((f) => f.uploading)) return ui.say("截图还在保存，稍等一下");
     const files = draft.files.filter((f) => f.name);
@@ -123,8 +166,8 @@ export function Capture() {
           ref={ref}
           id="xp-capture"
           rows={1}
-          value={draft.text}
-          onChange={(e) => d.setText("capture", e.target.value)}
+          value={text}
+          onChange={(e) => (secret ? setStext(e.target.value) : d.setText("capture", e.target.value))}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -136,38 +179,58 @@ export function Capture() {
               ref.current?.blur();
             }
           }}
-          placeholder="想到什么，直接记下来…"
+          placeholder={secret ? "账号、密码随便怎么写，回车存进密码库，之后再整理" : "想到什么，直接记下来…"}
+          spellCheck={false}
+          autoComplete="off"
           aria-label="快速记录"
           className="scroll-quiet min-w-0 grow resize-none self-center border-none bg-transparent py-1.5 text-[15px] leading-6 text-fg outline-none placeholder:text-faint focus-visible:outline-none"
         />
         <button
           aria-label="记下"
           title="记下（回车）"
-          disabled={(!draft.text.trim() && !draft.files.length) || draft.files.some((f) => f.uploading)}
+          disabled={(!text.trim() && !draft.files.length) || draft.files.some((f) => f.uploading)}
           onClick={submit}
           className="grid size-[38px] shrink-0 place-items-center rounded-xl bg-ink text-on-ink transition-colors hover:bg-ink-hover disabled:opacity-40 [&_svg]:size-[18px]"
         >
           <Plus strokeWidth={2.2} />
         </button>
       </div>
+      {!secret && looksLikeSecret(draft.text) && (
+        <button onClick={() => (toSecret(true), ref.current?.focus())} className="self-start rounded-lg bg-accent-soft px-2.5 py-1 text-[12.5px] text-accent-strong hover:brightness-95">
+          看起来是账号密码，改成存进密码库
+        </button>
+      )}
       <div role="radiogroup" aria-label="记成" className="flex flex-wrap items-center gap-1 text-[12.5px]">
         {TYPES.map((t, i) => (
           <button
             key={t.k}
             role="radio"
-            aria-checked={type === t.k}
+            aria-checked={!secret && type === t.k}
             title={`Alt+${i + 1}`}
             onClick={() => {
+              toSecret(false);
               ui.setCapType(t.k);
               ref.current?.focus();
             }}
-            className={cx("rounded-full px-2.5 py-0.5", type === t.k ? "bg-surface-3 font-semibold text-fg" : "text-muted hover:text-fg")}
+            className={cx("rounded-full px-2.5 py-0.5", !secret && type === t.k ? "bg-surface-3 font-semibold text-fg" : "text-muted hover:text-fg")}
           >
             {t.short ?? t.name}
           </button>
         ))}
-        <span className="ml-auto truncate pr-1 text-[11.5px] text-faint" title={HINT[type] || "回车保存 · Shift+回车写详情 · #标签 @设备 !1 优先级 ~明天 截止"}>
-          {HINT[type] ? (type === "note" ? "Markdown · 截图 Ctrl+V" : "网址或路径") : "#标签 !1 ~明天"}
+        <button
+          role="radio"
+          aria-checked={secret}
+          title="加密后直接进密码库，之后再整理"
+          onClick={() => {
+            toSecret(true);
+            ref.current?.focus();
+          }}
+          className={cx("rounded-full px-2.5 py-0.5", secret ? "bg-surface-3 font-semibold text-fg" : "text-muted hover:text-fg")}
+        >
+          密码
+        </button>
+        <span className="ml-auto truncate pr-1 text-[11.5px] text-faint" title={secret ? "加密后进密码库，锁着也能存" : HINT[type] || "回车保存 · Shift+回车写详情 · #标签 @设备 !1 优先级 ~明天 截止"}>
+          {secret ? "加密保存" : HINT[type] ? (type === "note" ? "Markdown · 截图 Ctrl+V" : "网址或路径") : "#标签 !1 ~明天"}
         </span>
       </div>
     </section>

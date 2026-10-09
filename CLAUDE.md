@@ -37,6 +37,8 @@
   + `xp-server/src/vault.rs`（`/api/v1/vault/*`）+ 界面 `web/src/lib/vault.ts`（加解密都在界面里：scrypt + XChaCha20-Poly1305，用纯 JS 的 @noble 库，
   因为局域网的明文 HTTP 页面没有 `crypto.subtle`）和 `web/src/components/Vault.tsx`（整页 + AI 取用的确认弹窗 `VaultRequests`）
   + MCP `xp-cli/src/vault.rs`（`xpanel_vault_list` 只有名称；`xpanel_vault_get` 要用户点允许，内容用临时 X25519 公钥加密后经主机转交）。
+  随手记：快速记录选「密码」/ 收件箱里的提醒 / 消息工具栏的「密码库」→ `dropSecret`（用钥匙的公钥加密，锁着也能存，`kind = raw` 待整理）→ 之后在密码库里「整理」
+  （`lib/vaultParse.ts` 拆各栏）；转入的收件箱消息用 `scrub_item` 真的抹掉。搜索在本机做：`lib/vaultSearch.ts` + `components/VaultPalette.tsx`（Ctrl+K）。
   规矩：主密码和明文不发给主机、不进日志和操作记录；密码库的内容不要接进条目、搜索、导出、@AI 上下文、项目目录；
   写操作都要过 `check_mac`（只有解锁了的界面算得出校验值）；界面解开后只认密文里的名称，不认主机上的 `title` 列。说明和安全边界见 `docs/vault.md`，改之前先看。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。

@@ -1554,3 +1554,127 @@ fn vault_merge_keeps_its_own_write_key() {
         let _ = fs::remove_dir_all(d);
     }
 }
+
+/// 锁着也能往密码库里放：登记了公钥之后，不用校验值就能快速记一条，进来的是「待整理」；整理时才要解锁
+#[test]
+fn vault_drop_works_while_locked() {
+    let d = tmp("vault-drop");
+    let st = Store::open(&d).unwrap();
+    vault_key(&st, "k1abcd");
+    let pk = b64(&[7; 32]);
+    let sealed = json!({"kid": "k1abcd", "epk": b64(&[8; 32]), "n": "bm9uY2U", "c": "cmF3"});
+    // 旧版本建的钥匙还没登记公钥：存不了
+    assert!(matches!(
+        st.vault_drop("k1abcd", &sealed, ACTOR_UI),
+        Err(StoreError::Invalid(_))
+    ));
+    // 登记公钥要解锁（校验值）
+    assert!(matches!(
+        st.vault_put_box("k1abcd", &pk, "AAAA"),
+        Err(StoreError::Invalid(_))
+    ));
+    let s = st
+        .vault_put_box("k1abcd", &pk, &vmac(&["put-box", "k1abcd", &pk]))
+        .unwrap();
+    assert_eq!(s["keys"][0]["pub"], pk);
+    let at = s["keys"][0]["updatedAt"].as_f64().unwrap();
+
+    let r = st.vault_drop("k1abcd", &sealed, ACTOR_UI).unwrap();
+    assert_eq!(r["kind"], "raw");
+    assert!(r["title"].as_str().unwrap().starts_with("待整理 · "));
+    assert_eq!(r["epk"], b64(&[8; 32]));
+    let id = r["id"].as_str().unwrap().to_string();
+    let t = r["updatedAt"].as_f64().unwrap();
+    // 没整理的不能给 AI
+    assert!(matches!(
+        st.vault_request_create(&id, "", &b64(&[1; 32]), "claude"),
+        Err(StoreError::Invalid(_))
+    ));
+    // 不能通过普通的保存接口造一条「待整理」
+    let mut raw = secret("sec7", "k1abcd", "x", "AAAA", None);
+    raw["kind"] = json!("raw");
+    assert!(st.vault_put_secret("sec7", &raw, ACTOR_UI).is_err());
+    // 整理：变成正式的条目，换成用密码库密钥加密的内容
+    let done = st
+        .vault_put_secret(
+            &id,
+            &secret(&id, "k1abcd", "阿里云", "QUFB", Some(t)),
+            ACTOR_UI,
+        )
+        .unwrap();
+    assert_eq!(done["kind"], "login");
+    assert!(done["epk"].is_null());
+    // 改主密码不会把公钥弄丢
+    let fresh = json!({"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "YQ", "n": "Yg", "c": "bmV3"});
+    let s = st
+        .vault_put_key(
+            "k1abcd",
+            &fresh,
+            Some(at),
+            &vmac(&[
+                "put-key",
+                "k1abcd",
+                "YQ",
+                "Yg",
+                "bmV3",
+                "16",
+                "8",
+                "1",
+                &stamp(Some(at)),
+            ]),
+            ACTOR_UI,
+        )
+        .unwrap();
+    assert_eq!(s["keys"][0]["pub"], pk);
+    assert!(st.vault_drop("k1abcd", &sealed, ACTOR_UI).is_ok());
+    let _ = fs::remove_dir_all(d);
+}
+
+/// 转入密码库的消息要真的抹掉：条目、搜索、操作记录、数据库文件里都不能再有原文
+#[test]
+fn scrub_item_removes_the_content() {
+    let d = tmp("scrub");
+    let st = Store::open(&d).unwrap();
+    let item = |body: &str, at: f64| json!({"id": "m1", "type": "inbox", "title": "阿里云账号", "body": body, "createdAt": 1, "updatedAt": at});
+    // 外部调用方的修改会把前后内容记进操作记录
+    st.apply_op(
+        Op::Upsert {
+            item: item("hunter2-PLAINTEXT", 10.0),
+        },
+        "claude",
+    )
+    .unwrap();
+    st.apply_op(
+        Op::Upsert {
+            item: item("hunter2-PLAINTEXT 第二版", 20.0),
+        },
+        "claude",
+    )
+    .unwrap();
+    st.scrub_item("m1", ACTOR_UI).unwrap();
+    assert!(st.get("m1").is_err());
+    assert!(st.all_items().unwrap().is_empty());
+    assert!(matches!(
+        st.scrub_item("nope", ACTOR_UI),
+        Err(StoreError::NotFound(_))
+    ));
+    drop(st);
+    for f in ["xpanel.db", "xpanel.db-wal"] {
+        let bytes = fs::read(d.join(f)).unwrap_or_default();
+        let hay = String::from_utf8_lossy(&bytes);
+        assert!(!hay.contains("hunter2-PLAINTEXT"), "{f} 里还有原文");
+        assert!(!hay.contains("阿里云账号"), "{f} 里还有标题");
+    }
+    // 删除标记还在：合并时别的电脑上的那一份会跟着删
+    let st = Store::open(&d).unwrap();
+    let n: i64 = st
+        .lock()
+        .query_row(
+            "SELECT COUNT(*) FROM items WHERE id = 'm1' AND deleted_at IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    let _ = fs::remove_dir_all(d);
+}

@@ -18,6 +18,8 @@ pub fn routes() -> Router<AppState> {
         .route("/", get(state))
         .route("/index", get(index))
         .route("/keys/:id", put(put_key))
+        .route("/keys/:id/box", put(put_box))
+        .route("/drops", axum::routing::post(drop_in))
         .route("/secrets/:id", put(put_secret).delete(delete_secret))
         .route("/requests", get(pending).post(create_request))
         .route("/requests/:id", get(get_request).post(resolve_request))
@@ -117,6 +119,34 @@ async fn put_key(
     Ok(Json(
         blocking(move || st.vault_put_key(&id, &b.data, b.expect, &b.mac, &actor)).await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct BoxReq {
+    #[serde(rename = "pub")]
+    pubkey: String,
+    mac: String,
+}
+
+async fn put_box(
+    State(st): State<AppState>,
+    _a: Actor,
+    Path(id): Path<String>,
+    Json(b): Json<BoxReq>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        blocking(move || st.vault_put_box(&id, &b.pubkey, &b.mac)).await?,
+    ))
+}
+
+/// 快速记下一条（密文），之后再整理。锁着也能存，所以不用校验值
+async fn drop_in(
+    State(st): State<AppState>,
+    Actor(actor): Actor,
+    Json(b): Json<Value>,
+) -> ApiResult<(StatusCode, Json<Value>)> {
+    let v = blocking(move || st.vault_drop(b["kid"].as_str().unwrap_or(""), &b, &actor)).await?;
+    Ok((StatusCode::CREATED, Json(v)))
 }
 
 async fn put_secret(
