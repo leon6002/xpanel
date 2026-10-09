@@ -35,10 +35,11 @@ Built with Tauri 2 (Rust). External AI tools can read and write through a REST A
 - **对外接口**：外部 AI 可以写入待办、整理优先级、导出、做统计分析，每次修改都记录是谁改的。
 - **多机共用**：一台「主机」存数据并在局域网开放；其他电脑选「连接到主机」，浏览器直接访问 `http://主机:8765`。
 - **离线可用**：连接模式下连不上主机时照常能看、能记，恢复后自动补传；主机暂时存不了时改动也不会丢。
-- **外置硬盘同步**：左下角硬盘图标（或「设置 → 外置硬盘同步」）把整份数据（数据库和附件）和外置硬盘上的文件夹同步，
-  谁在上次同步后改过就用谁的；两边都改过时让你选，被覆盖的一边先备份。出差时硬盘插到别的电脑（Windows / Mac），
-  把那台的数据文件夹设成硬盘上的文件夹即可；回来再同步一次。命令行：`xp sync --data D:\xpanel F:\xpanel`。详见 [docs/drive-sync.md](docs/drive-sync.md)。
-- **备份**：每天自动备份数据库到 `backups/`，保留 60 份；可再设一个冷备份文件夹（比如大容量硬盘），每天复制一份过去。
+- **外置硬盘同步（换电脑）**：每台电脑用自己的数据文件夹，外置硬盘交接。左下角硬盘图标（或「设置 → 外置硬盘同步」）：
+  离开前「备份到外置硬盘」，到另一台电脑（Windows / Mac）「从外置硬盘合并」。合并按条目来：列出在别的电脑上新增、修改、删除的条目，
+  两边改了同一条时逐条选用哪边，或两份都留；合并前本机自动留一份备份。还没合并就备份会先提醒，不会把别的电脑的改动盖掉。
+  命令行：`xp sync --data D:\xpanel F:\xpanel`。详见 [docs/drive-sync.md](docs/drive-sync.md)。
+- **备份**：每天自动备份数据库到 `backups/`，保留 60 份；可再设一个冷备份文件夹（比如大容量硬盘），每天在后台复制一份备份和新增附件过去。
 
 ## 对外接口（给 AI 和脚本）
 
@@ -73,6 +74,8 @@ curl "http://主机:8765/api/v1/stats"
 | `GET /api/v1/export` | 导出 md / csv / json |
 | `GET /api/v1/stats` | 各类型数量、优先级分布、逾期、长期未动、最近 8 周趋势 |
 | `GET /api/v1/audit` | 操作记录：谁在什么时候改了什么 |
+| `GET/POST /api/v1/backup` | 外置硬盘同步的状态；一键备份到外置硬盘上的文件夹（数据库快照 + 补齐附件） |
+| `GET/POST /api/v1/backup/merge` | 从外置硬盘合并：预览（每条在哪台电脑改的）、按选择合并 |
 | `GET/POST/DELETE /api/v1/categories`、`POST /categories/rename` | 分类列表（带数量）、新建、改名 / 移动、删除 |
 | `GET/DELETE /api/v1/tags`、`POST /tags/rename` | 标签列表、改名 / 合并、删除 |
 | `GET/POST /api/v1/devices`、`PATCH/DELETE /api/v1/devices/{id}` | 设备列表与维护（改名时条目里的设备名一起改） |

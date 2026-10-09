@@ -149,7 +149,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
             <Field label="数据文件夹">
               <input className={inputCls + " font-mono"} value={dataDir} onChange={(e) => setDataDir(e.target.value)} placeholder="例如 D:\xpanel" />
             </Field>
-            <Field label="冷备份文件夹（可选，比如 8TB 盘）" hint="每天复制一份备份和新附件过去；留空 = 不做冷备份">
+            <Field label="冷备份文件夹（可选，比如 8TB 盘）" hint="每天自动复制一份备份和新附件过去；留空 = 不做冷备份。换电脑用下面的「外置硬盘同步」">
               <input className={inputCls + " font-mono"} value={cold} onChange={(e) => setCold(e.target.value)} />
             </Field>
             <Toggle checked={lan} onChange={setLan}>
@@ -223,12 +223,10 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
                 打开数据文件夹
               </Button>
             )}
-            {c.mode === "host" && (
-              <Button onClick={() => openDriveSync()}>
-                <HardDrive className="size-4" />
-                外置硬盘同步
-              </Button>
-            )}
+            <Button onClick={() => openDriveSync()}>
+              <HardDrive className="size-4" />
+              外置硬盘同步
+            </Button>
             <Button onClick={() => desk.createShortcut().then((p) => say("已放到桌面：" + p), (e) => say(errText(e)))}>桌面快捷方式</Button>
             <ImportExport />
           </>

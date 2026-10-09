@@ -101,6 +101,10 @@ pub fn v1_raw(url: &str, method: &str, path: &str, body: Option<Value>) -> Resul
         // 导入聊天记录可能有几十 MB
         req = req.timeout(Duration::from_secs(600));
     }
+    if path.starts_with("/backup") && method.eq_ignore_ascii_case("POST") {
+        // 一键备份 / 合并：第一次要复制全部附件，可能有好几 GB
+        req = req.timeout(Duration::from_secs(3600));
+    }
     let r = match body {
         Some(v) => req.send_json(v),
         None => req.call(),

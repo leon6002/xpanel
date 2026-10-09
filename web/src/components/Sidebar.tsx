@@ -222,11 +222,9 @@ export function Sidebar() {
             {conn.text}
           </span>
         </button>
-        {isApp && cfg?.config.mode === "host" && (
-          <button onClick={() => openDriveSync()} aria-label="外置硬盘同步" title="外置硬盘同步（带着数据出差）" className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-4">
-            <HardDrive />
-          </button>
-        )}
+        <button onClick={() => openDriveSync()} aria-label="外置硬盘同步" title="外置硬盘同步（换电脑、带着数据出差）" className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-4">
+          <HardDrive />
+        </button>
         <button onClick={() => openSettings()} aria-label="设置" title="设置" className="grid size-7 place-items-center rounded-md text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-4">
           <Settings2 />
         </button>

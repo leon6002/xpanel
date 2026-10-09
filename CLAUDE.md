@@ -29,9 +29,10 @@
   编辑器保存标题、正文时带 `expect`（这边最后同步到的内容），主机上对不上就返回冲突（409），界面提示「用对方的 / 用我的 / 两份都留」，不会静默覆盖。
 - 子笔记：条目的 `parentId` 指向父笔记（笔记、规范）。找不到父笔记就当顶层；删除父笔记时子笔记挪到上一层（`xp-store` 的 `soft_delete`）。
   界面 `web/src/lib/tree.ts` + `web/src/components/Tree.tsx`（路径、子笔记列表、移动到…、列表里拖动改层级）。
-- 外置硬盘同步：`xp-store/src/sync.rs`（整份复制，用 SQLite 在线备份 / restore；两边数据库 meta 里记同一个同步标记 {id, rev}，
-  rev 变了就是改过；只一边改过自动同步，两边都改过要选；被覆盖的一边先备份到它的 backups/）。桌面版命令 `sync_plan` / `sync_run`，
-  界面 `web/src/dialogs/DriveSync.tsx`；命令行 `xp sync`。
+- 备份和外置硬盘同步（换电脑）：`xp-store/src/backup.rs`（每日备份、冷备份、一键备份 `backup_to_drive` 写到外置硬盘文件夹的 `xpanel-backup/` + `latest.json`）
+  + `xp-store/src/sync.rs`（每个数据文件夹一个 `replica_id`，条目 `origin` 列记在哪改的；同步点 `sync/base.db`；本机 / 外置硬盘 / 同步点三方对比，按条目合并，冲突逐条选）。
+  接口 `/api/v1/backup`、`/api/v1/backup/merge`；界面 `web/src/dialogs/DriveSync.tsx`（`lib/api.ts` 的 `drive`，桌面版和浏览器都能用）；
+  外置硬盘上的文件夹是桌面版配置的 `syncDir`（命令 `set_sync_dir` → `Store::set_drive_dir`，没设置时用冷备份位置）；命令行 `xp sync`、`xp serve --drive`。说明见 `docs/drive-sync.md`。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。
 - `src-tauri`：桌面版。主机模式用 xp-store + xp-server；连接模式（`client.rs`）读写主机的 v1 接口，离线队列 `pending.json`。
 - `web/`：界面（Vite + React 19 + TypeScript + Tailwind v4 + Radix），构建到 `web/dist`。桌面版直接用它（`tauri.conf.json` 的 frontendDist，`beforeBuildCommand` 先构建），

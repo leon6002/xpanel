@@ -42,11 +42,11 @@ pub struct Config {
     pub agents: Vec<Agent>,
     /// 启动 AI 时默认进入的文件夹
     pub agent_cwd: String,
-    /// 冷备份文件夹（比如 8TB 盘）。界面不传这个字段时保留原值
+    /// 冷备份文件夹（比如 8TB 盘），每天自动复制一份过去。界面不传这个字段时保留原值
     pub cold_backup_dir: Option<String>,
     /// 这台电脑在设备表里的 id；空 = 还没选。界面不传这个字段时保留原值
     pub device_id: String,
-    /// 上次同步用的文件夹（外置硬盘上的，比如 F:\xpanel）。界面不传这个字段时保留原值
+    /// 外置硬盘上的文件夹（比如 F:\xpanel），一键备份和合并用。界面不传这个字段时保留原值
     pub sync_dir: String,
 }
 
@@ -102,6 +102,11 @@ impl AppState {
         }
         let s = Arc::new(Store::open(&cfg.data_dir).map_err(|e| e.to_string())?);
         s.set_cold_backup_dir(cfg.cold_backup_dir.clone().map(PathBuf::from));
+        s.set_drive_dir(Some(PathBuf::from(&cfg.sync_dir)));
+        // 合并时显示「在哪台电脑改的」：用这台电脑在设备表里的名字
+        if let Ok(d) = s.get_device(&cfg.device_id) {
+            let _ = s.set_replica_name(d["name"].as_str().unwrap_or(""));
+        }
         *cur = Some(s.clone());
         Ok(s)
     }
@@ -380,47 +385,23 @@ fn asset_bytes(st: &AppState, name: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-/// 和外置硬盘（或别的文件夹）同步：先看看该怎么同步
-fn sync_store(st: &AppState, dir: &str) -> Result<(Arc<Store>, PathBuf), String> {
-    let dir = dir.trim();
-    if dir.is_empty() {
-        return Err("先填外置硬盘上的文件夹，比如 F:\\xpanel".into());
-    }
-    if st.cfg().mode != "host" {
-        return Err("只有「本机存储」模式可以同步；连接模式的数据在主机上".into());
-    }
-    Ok((st.host_store()?, PathBuf::from(dir)))
-}
-
+/// 设置外置硬盘上的文件夹（一键备份、从外置硬盘合并用），记到配置里。
+/// 备份和合并本身走 /api/v1/backup（`api_call`），浏览器里也能用
 #[tauri::command]
-async fn sync_plan(s: St<'_>, dir: String) -> Result<xp_store::SyncPlan, String> {
+async fn set_sync_dir(s: St<'_>, dir: String) -> Result<Value, String> {
     let st = s.inner().clone();
     blocking(move || {
-        let (store, dir) = sync_store(&st, &dir)?;
-        store.sync_plan(&dir).map_err(|e| e.to_string())
-    })
-    .await
-}
-
-/// 执行同步。direction：auto / push（本机 → 那边）/ pull（那边 → 本机）
-#[tauri::command]
-async fn sync_run(
-    s: St<'_>,
-    dir: String,
-    direction: String,
-) -> Result<xp_store::SyncReport, String> {
-    let st = s.inner().clone();
-    blocking(move || {
-        let (store, path) = sync_store(&st, &dir)?;
-        let r = store
-            .sync_run(&path, &direction)
-            .map_err(|e| e.to_string())?;
+        if st.cfg().mode != "host" {
+            return Err("连接模式的数据在主机上，请在主机上设置外置硬盘的文件夹".into());
+        }
+        let dir = dir.trim().to_string();
         let mut cfg = st.cfg();
-        if cfg.sync_dir != dir.trim() {
-            cfg.sync_dir = dir.trim().to_string();
+        if cfg.sync_dir != dir {
+            cfg.sync_dir = dir.clone();
             write_config(&st, &cfg)?;
         }
-        Ok(r)
+        st.host_store()?.set_drive_dir(Some(PathBuf::from(dir)));
+        Ok(json!({ "config": st.cfg() }))
     })
     .await
 }
@@ -601,8 +582,7 @@ pub fn run() {
             set_this_device,
             api_call,
             ask_ai,
-            sync_plan,
-            sync_run,
+            set_sync_dir,
             workspace::workspace_defaults,
             workspace::workspace_check,
             workspace::workspace_prepare,

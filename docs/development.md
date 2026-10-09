@@ -40,7 +40,7 @@ cargo test --workspace                # 第一次会编译所有依赖，要几�
 开发时一般不要直接连正在用的数据。两种做法：
 
 - 用一个单独的测试文件夹跑服务：`cargo run -p xp-cli -- serve --data D:\xpanel-dev --port 18765`
-- 要用真实数据调试，先用[外置硬盘同步](drive-sync.md)或拷一份数据文件夹，别直接指向主机正在用的文件夹。
+- 要用真实数据调试，先用[外置硬盘同步](drive-sync.md)合并到一个单独的文件夹，或拷一份数据文件夹，别直接指向主机正在用的文件夹。
 
 ---
 
@@ -164,7 +164,7 @@ CI（`.github/workflows/ci.yml`）目前只跑 Rust 和旧界面，还没有跑 
 2. Playwright 打开 `http://127.0.0.1:<端口>/` 操作界面，用接口读回数据验证，并截图检查外观。
 3. 测桌面版才有的功能时，在页面加载前注入一个假的 `window.__TAURI__.core.invoke`。
    - 它把 `get_state` / `apply_op` / `api_call` 转发给上面的服务。
-   - `ask_ai`、`sync_plan` 等返回模拟结果。
+   - `ask_ai` 等返回模拟结果。
    - 这样浏览器里也能测 @AI 评论、冲突提示、外置硬盘同步窗口等。
 4. 多台电脑同时编辑：开两个独立的浏览器上下文连同一个服务。
 
@@ -176,7 +176,7 @@ CI（`.github/workflows/ci.yml`）目前只跑 Rust 和旧界面，还没有跑 
 
 **旧电脑上：**
 - [ ] 所有改动已提交，并推送：`git push --force-with-lease origin main phase1-foundation`
-- [ ] 数据同步到外置硬盘（左下角硬盘图标，见 [drive-sync.md](drive-sync.md)）
+- [ ] 数据备份到外置硬盘（左下角硬盘图标，见 [drive-sync.md](drive-sync.md)）
 - [ ] 备份 Claude Code 的个人配置：用户目录下的 `.claude` 文件夹和 `.claude.json`（见下面的说明）
 - [ ] 抄下 `CLAUDE.local.md` 的内容
 
@@ -184,7 +184,7 @@ CI（`.github/workflows/ci.yml`）目前只跑 Rust 和旧界面，还没有跑 
 - [ ] 按第 1 节装环境、拉代码、启用 hook
 - [ ] `cargo test --workspace` 和 `npm --prefix web run build` 都通过
 - [ ] 新建 `CLAUDE.local.md`
-- [ ] 构建安装（`build-windows.bat` / `build-mac.sh`），设置里数据文件夹指向外置硬盘或同步下来的文件夹
+- [ ] 构建安装（`build-windows.bat` / `build-mac.sh`），数据文件夹用本机的，再从外置硬盘合并（左下角硬盘图标）
 - [ ] 在 AI 工具里重新配置 xpanel 的 MCP：命令 `xp mcp`，环境变量 `XPANEL_URL`（主机地址）和 `XPANEL_KEY`；key 用 `xp key create <名字> --data <数据文件夹>` 生成
 
 **关于 `.claude` 备份：**

@@ -37,6 +37,8 @@ pub fn routes() -> Router<AppState> {
         .route("/export", get(export))
         .route("/stats", get(get_stats))
         .route("/audit", get(audit))
+        .route("/backup", get(backup_status).post(backup_run))
+        .route("/backup/merge", get(merge_preview).post(merge_apply))
         .route("/events", get(events))
         .route(
             "/categories",
@@ -383,6 +385,49 @@ async fn audit(
 ) -> ApiResult<Json<Value>> {
     let v = blocking(move || st.audit(q.limit.unwrap_or(100), q.item_id.as_deref())).await?;
     Ok(Json(json!({ "entries": v })))
+}
+
+// ---------------------------------------------------------------- 备份
+
+async fn backup_status(State(st): State<AppState>, _a: Actor) -> ApiResult<Json<Value>> {
+    Ok(Json(blocking(move || st.backup_status()).await?))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct BackupReq {
+    force: bool,
+}
+
+/// 一键备份到外置硬盘上的文件夹（附件多时要等一阵子）。请求体可以没有
+async fn backup_run(
+    State(st): State<AppState>,
+    _a: Actor,
+    body: axum::body::Bytes,
+) -> ApiResult<Json<Value>> {
+    let req: BackupReq = serde_json::from_slice(&body).unwrap_or_default();
+    Ok(Json(blocking(move || st.backup_to_drive(req.force)).await?))
+}
+
+async fn merge_preview(State(st): State<AppState>, _a: Actor) -> ApiResult<Json<Value>> {
+    Ok(Json(blocking(move || st.merge_preview()).await?))
+}
+
+#[derive(Deserialize)]
+struct MergeReq {
+    file: String,
+    #[serde(default)]
+    choices: std::collections::HashMap<String, String>,
+}
+
+async fn merge_apply(
+    State(st): State<AppState>,
+    _a: Actor,
+    Json(b): Json<MergeReq>,
+) -> ApiResult<Json<Value>> {
+    Ok(Json(
+        blocking(move || st.merge_apply(&b.file, &b.choices)).await?,
+    ))
 }
 
 /// 有写入就推一条 `change` 事件，内容是新的 rev；另外每 20 秒一条保活

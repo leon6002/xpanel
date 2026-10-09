@@ -38,6 +38,8 @@ pub const PATHS: &[&str] = &[
     "/export",
     "/stats",
     "/audit",
+    "/backup",
+    "/backup/merge",
     "/events",
     "/devices",
     "/devices/{id}",
@@ -186,6 +188,14 @@ pub fn spec() -> Value {
                 { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } },
                 { "name": "itemId", "in": "query", "schema": { "type": "string" } }
             ], "responses": { "200": { "description": "{entries}" } } } },
+            "/backup": {
+                "get": { "summary": "备份状态：dir（外置硬盘上的文件夹，在主机上设置；没单独设置时是冷备份位置）、available（插没插上）、running（正在复制）、last（最近一次一键备份：at、items、assets、file、replicaName…）、replica（本机）、base（上次对齐的备份）、needsMerge（外置硬盘上有别的电脑的新备份，要先合并）", "responses": { "200": { "description": "{dir, available, running, last, replica, base, needsMerge}" } } },
+                "post": { "summary": "一键备份：数据库完整快照 + 补齐附件，写到外置硬盘文件夹的 xpanel-backup/ 下。附件多时要等一阵子。需要先合并时不备份，返回 {needsMerge: true, latest}；请求体 {\"force\": true} 照样备份", "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "properties": { "force": { "type": "boolean" } } } } } }, "responses": { "200": { "description": "{dir, manifest, copiedFiles, copiedBytes, tookMs} 或 {needsMerge, latest}" }, "400": err.clone(), "503": err.clone() } }
+            },
+            "/backup/merge": {
+                "get": { "summary": "合并预览：外置硬盘文件夹里最新的一键备份和本机比。changes 每条有 id、kind（add / update / delete / conflict）、title、originName（在哪台电脑改的）、choice（默认 remote 用外置硬盘的，local 保留本机的）", "responses": { "200": { "description": "{latest, base, first, changes, counts, assets}" }, "400": err.clone(), "503": err.clone() } },
+                "post": { "summary": "执行合并。file 是预览时 latest.file；choices 是 {条目id: \"remote\" | \"both\"（冲突时两份都留）}，没列出的保留本机的。附件、分类、设备、导入的聊天直接合到一起；合并前本机自动备份到 backups/premerge-*.db", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["file"], "properties": { "file": { "type": "string" }, "choices": { "type": "object", "additionalProperties": { "type": "string", "enum": ["remote", "both", "local"] } } } } } } }, "responses": { "200": { "description": "{latest, applied, kept, other, copiedFiles, copiedBytes}" }, "400": err.clone(), "503": err.clone() } }
+            },
             "/categories": {
                 "get": { "summary": "分类列表：path、depth、direct（本分类条数）、total / open（含子分类）、explicit（手工建的）", "responses": { "200": { "description": "{categories}" } } },
                 "post": { "summary": "新建（空）分类", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["path"], "properties": { "path": { "type": "string", "example": "工作/AutoSAR" } } } } } }, "responses": { "201": { "description": "{path}" }, "400": err.clone() } },

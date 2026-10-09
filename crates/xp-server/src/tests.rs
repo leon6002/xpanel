@@ -317,7 +317,10 @@ async fn openapi_lists_every_route() {
         let m = if post_only { Method::POST } else { Method::GET };
         let (c, _) = call(&st, m, &format!("/api/v1{real}"), None, &[]).await;
         assert_ne!(c, StatusCode::METHOD_NOT_ALLOWED, "{p}");
-        if !post_only && !p.contains("{id}") {
+        if *p == "/backup/merge" {
+            // 还没设置外置硬盘上的文件夹：说清楚，不是暂时故障
+            assert_eq!(c, StatusCode::BAD_REQUEST, "{p}");
+        } else if !post_only && !p.contains("{id}") {
             assert_eq!(c, StatusCode::OK, "{p}");
         }
     }

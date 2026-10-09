@@ -171,22 +171,23 @@ enum Cmd {
         /// 冷备份文件夹（可选）
         #[arg(long)]
         cold_backup: Option<String>,
+        /// 外置硬盘上的文件夹（可选，一键备份和合并用）
+        #[arg(long)]
+        drive: Option<String>,
     },
-    /// 和外置硬盘同步整份数据：xp sync --data D:\xpanel F:\xpanel（谁改过用谁的；两边都改过时要加 --push 或 --pull）。
-    /// 桌面版的「设置 → 外置硬盘同步」做的是同一件事；同步前先退出正在用这两个文件夹的 xpanel
+    /// 和外置硬盘交接数据：xp sync --data D:\xpanel F:\xpanel。
+    /// 先把外置硬盘上别的电脑的改动按条目合并进来，再把本机的最新数据备份过去。
+    /// 两边都改了同一条时用 --prefer 决定；桌面版的「外置硬盘同步」可以逐条选
     Sync {
         /// 本机的数据文件夹
         #[arg(long, env = "XPANEL_DATA")]
         data: String,
-        /// 另一边（外置硬盘上的文件夹）
+        /// 外置硬盘上的文件夹
         target: String,
-        /// 用本机的覆盖那边
-        #[arg(long, conflicts_with = "pull")]
-        push: bool,
-        /// 用那边的覆盖本机
-        #[arg(long)]
-        pull: bool,
-        /// 只看看会怎么同步，不改任何东西
+        /// 两边都改了同一条时用哪边：newer（较新的）、drive（外置硬盘上的）、local（本机的）、both（两份都留）
+        #[arg(long, value_parser = ["newer", "drive", "local", "both"])]
+        prefer: Option<String>,
+        /// 只看看会怎么合并，不改任何东西
         #[arg(long)]
         dry_run: bool,
     },
@@ -751,62 +752,87 @@ fn run(cli: Cli) -> Result<(), String> {
             data,
             port,
             cold_backup,
+            drive,
         } => {
             let st = xp_store::Store::open(&data).map_err(|e| e.to_string())?;
             st.set_cold_backup_dir(cold_backup.map(Into::into));
+            st.set_drive_dir(drive.map(Into::into));
             xp_server::serve_blocking(Arc::new(st), port)?;
         }
         Cmd::Sync {
             data,
             target,
-            push,
-            pull,
+            prefer,
             dry_run,
         } => {
             let st = xp_store::Store::open(&data).map_err(|e| e.to_string())?;
-            let p = st
-                .sync_plan(std::path::Path::new(&target))
-                .map_err(|e| e.to_string())?;
-            let side = |n: &str, s: &xp_store::SideInfo| {
-                if s.exists {
-                    println!(
-                        "{n}：{} 条，{} 个附件{}",
-                        s.items,
-                        s.assets,
-                        if s.changed {
-                            "，上次同步后改过"
-                        } else {
-                            ""
+            st.set_drive_dir(Some(target.into()));
+            let status = st.backup_status().map_err(|e| e.to_string())?;
+            if status["needsMerge"] == true {
+                let p = st.merge_preview().map_err(|e| e.to_string())?;
+                let changes = p["changes"].as_array().cloned().unwrap_or_default();
+                println!(
+                    "外置硬盘上有「{}」的备份，和本机不一样的有 {} 条：",
+                    p["latest"]["replicaName"].as_str().unwrap_or("另一台电脑"),
+                    changes.len()
+                );
+                let mut choices = std::collections::HashMap::new();
+                let mut conflicts = 0;
+                for c in &changes {
+                    let kind = c["kind"].as_str().unwrap_or("");
+                    let label = match kind {
+                        "add" => "新增",
+                        "update" => "修改",
+                        "delete" => "删除",
+                        _ => "两边都改过",
+                    };
+                    println!("  {label}  {}", c["title"].as_str().unwrap_or(""));
+                    let choice = if kind == "conflict" {
+                        conflicts += 1;
+                        match prefer.as_deref() {
+                            Some("drive") => "remote",
+                            Some("both") => "both",
+                            Some("local") => "local",
+                            _ => c["choice"].as_str().unwrap_or("local"),
                         }
+                    } else {
+                        "remote"
+                    };
+                    choices.insert(
+                        c["id"].as_str().unwrap_or("").to_string(),
+                        choice.to_string(),
                     );
-                } else {
-                    println!("{n}：还没有数据");
                 }
-            };
-            side("本机", &p.local);
-            side("那边", &p.remote);
-            println!("{}", p.message);
-            if dry_run {
-                return Ok(());
-            }
-            let dir = if push {
-                "push"
-            } else if pull {
-                "pull"
+                if dry_run {
+                    return Ok(());
+                }
+                if conflicts > 0 && prefer.is_none() {
+                    return Err(format!(
+                        "有 {conflicts} 条两边都改过，没有合并。加 --prefer newer|drive|local|both 决定用哪边，或在桌面版的「外置硬盘同步」里逐条选"
+                    ));
+                }
+                let file = p["latest"]["file"].as_str().unwrap_or("");
+                let r = st.merge_apply(file, &choices).map_err(|e| e.to_string())?;
+                let n: u64 = r["applied"]
+                    .as_object()
+                    .map(|m| m.values().filter_map(|v| v.as_u64()).sum())
+                    .unwrap_or(0);
+                println!(
+                    "已合并 {n} 条，保留本机的 {} 条，补了 {} 个附件（合并前的数据备份在 backups/premerge-*.db）",
+                    r["kept"], r["copiedFiles"]
+                );
             } else {
-                "auto"
-            };
-            let r = st
-                .sync_run(std::path::Path::new(&target), dir)
-                .map_err(|e| format!("{e}（用 --push 或 --pull 选择）"))?;
-            println!(
-                "{}{}",
-                r.message,
-                if r.assets_copied > 0 {
-                    format!("，复制了 {} 个附件", r.assets_copied)
-                } else {
-                    String::new()
+                println!("外置硬盘上没有别的电脑的新改动");
+                if dry_run {
+                    return Ok(());
                 }
+            }
+            let r = st.backup_to_drive(false).map_err(|e| e.to_string())?;
+            println!(
+                "已把本机的数据备份到 {}：{} 条，新复制 {} 个附件",
+                r["dir"].as_str().unwrap_or(""),
+                r["manifest"]["items"],
+                r["copiedFiles"]
             );
         }
     }

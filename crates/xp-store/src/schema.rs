@@ -114,6 +114,11 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE VIRTUAL TABLE messages_fts USING fts5(id UNINDEXED, sender, text, tokenize = 'trigram');
     "#,
+    // v5：多台电脑合并。每个数据文件夹一个标识（replica_id），条目记下最后在哪个数据文件夹改的（origin）
+    r#"
+    ALTER TABLE items ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+    INSERT OR IGNORE INTO meta(key, value) VALUES ('replica_id', lower(hex(randomblob(6))));
+    "#,
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;

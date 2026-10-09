@@ -76,10 +76,44 @@ export const TYPES: { k: ItemType; name: string; short?: string; check?: string;
 export const typeName = (t: ItemType) => (t === "inbox" ? "收件箱" : TYPES.find((x) => x.k === t)?.name ?? t);
 export const isCheckable = (t: ItemType) => !!TYPES.find((x) => x.k === t)?.check;
 
-/* ---- 外置硬盘同步 ---- */
-export interface SyncSide { exists: boolean; rev: number; items: number; assets: number; last_change: number; changed: boolean }
-export interface SyncPlan { action: "none" | "push" | "pull" | "conflict" | "choose"; local: SyncSide; remote: SyncSide; message: string }
-export interface SyncReport { action: string; assets_copied: number; message: string }
+/* ---- 外置硬盘同步（/api/v1/backup） ---- */
+/** 外置硬盘上的一份一键备份（latest.json） */
+export interface DriveBackup { at: number; file: string; rev: number; items: number; assets: number; assetBytes: number; replicaId: string; replicaName: string }
+export interface DriveStatus {
+  /** 外置硬盘上的文件夹（在主机上设置） */
+  dir: string | null;
+  /** 文件夹在不在（硬盘插没插） */
+  available: boolean;
+  running: boolean;
+  /** 外置硬盘上最近一次备份 */
+  last: DriveBackup | null;
+  /** 本机的数据文件夹是谁 */
+  replica: { id: string; name: string };
+  /** 本机上次对齐的那份备份 */
+  base: DriveBackup | null;
+  /** 外置硬盘上有别的电脑的新备份，要先合并 */
+  needsMerge: boolean;
+}
+export type MergeChoice = "remote" | "local" | "both";
+export interface MergeChange {
+  id: string;
+  kind: "add" | "update" | "delete" | "conflict";
+  type: ItemType;
+  title: string;
+  localTitle?: string | null;
+  remoteDeleted: boolean;
+  localDeleted: boolean;
+  remoteAt: number;
+  localAt?: number | null;
+  /** 在哪台电脑改的 */
+  originName: string;
+  originIsMe: boolean;
+  /** 默认选哪边 */
+  choice: "remote" | "local";
+}
+export interface MergePreview { latest: DriveBackup; base: DriveBackup | null; first: boolean; changes: MergeChange[]; counts: Record<string, number>; assets: { missing: number; bytes: number } }
+export interface BackupResult { needsMerge?: boolean; latest?: DriveBackup; manifest?: DriveBackup; copiedFiles?: number; copiedBytes?: number }
+export interface MergeResult { applied: Record<string, number>; kept: number; copiedFiles: number; copiedBytes: number }
 
 /* ---- 桌面版配置（get_config） ---- */
 export interface Agent { name: string; cmd: string; ask?: string }
@@ -92,7 +126,7 @@ export interface Config {
   agents: Agent[];
   agentCwd: string;
   coldBackupDir?: string | null;
-  /** 上次同步用的文件夹（外置硬盘上的） */
+  /** 外置硬盘上的文件夹（一键备份和合并用） */
   syncDir?: string;
   deviceId: string;
 }
