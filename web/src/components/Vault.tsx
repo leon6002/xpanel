@@ -245,7 +245,7 @@ function Row({ label, value, secret, mono = true }: { label: string; value?: str
   );
 }
 
-function Detail({ s, f, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | null; keys: KeyRec[]; onEdit: () => void; onDeleted: () => void }) {
+function Detail({ s, f, hasKey, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | null; hasKey: boolean; keys: KeyRec[]; onEdit: () => void; onDeleted: () => void }) {
   const kind = f?.kind ?? s.kind;
   const L = LABELS[kind] ?? LABELS.login;
   const [sure, setSure] = useState(false);
@@ -317,6 +317,8 @@ function Detail({ s, f, keys, onEdit, onDeleted }: { s: SecretRec; f: Fields | n
             <Row label="备注" value={f.notes} mono={false} />
             {!f.url && !f.username && !f.password && !f.notes && !(f.extra ?? []).length && <p className="px-3.5 text-[13px] text-faint">这一条还没填内容</p>}
           </div>
+        ) : hasKey ? (
+          <p className="rounded-xl bg-danger-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-danger">这一条解不开：内容坏了，或者被人改过。上面的名称是主机上登记的，不一定是真的。可以从备份里找回（见密码库说明的「出问题时」）。</p>
         ) : (
           <div className="flex flex-col gap-3 rounded-xl bg-surface-2 p-4">
             <p className="text-[13px] leading-relaxed text-fg-2">这一条现在的主密码解不开：它是用另一个主密码加密的（两台电脑各自设过主密码，后来合并到了一起）。输入当时那个主密码就能解开。</p>
@@ -370,9 +372,9 @@ function SecretInput({ value, onChange, label, placeholder, gen }: { value: stri
   );
 }
 
-function Editor({ old: latest, init, onDone, onCancel }: { old: SecretRec | null; init: Fields | null; onDone: (s: SecretRec) => void; onCancel: () => void }) {
-  // 开始编辑时的那一版。之后别处改了（列表会自己刷新），保存时主机拿它来比，对不上就拒绝，不会悄悄盖掉别处的修改
-  const [old] = useState(latest);
+/** old 是开始编辑时的那一版（新建时没有），latest 是它现在在主机上的样子。
+    别处在这期间改了或删了，保存时主机会拿 old 来比、拒绝，这里提前说出来，不会悄悄盖掉别处的修改 */
+function Editor({ old, latest, init, onDone, onCancel }: { old: SecretRec | null; latest: SecretRec | null; init: Fields | null; onDone: (s: SecretRec) => void; onCancel: () => void }) {
   const [id] = useState(newId);
   const moved = !!old && latest?.updatedAt !== old.updatedAt;
   const [kind, setKind] = useState<SecretKind>(init?.kind ?? "login");
@@ -488,6 +490,14 @@ export function Vault() {
   const cur = secrets.find((s) => s.id === sel) ?? null;
   // 正在编辑的那一条：进编辑时记下来，之后列表刷新、甚至这一条在别处被删了，编辑器都不动（由它自己提示）
   const [editing, setEditing] = useState<{ s: SecretRec; f: Fields } | null>(null);
+  const stopEdit = () => {
+    setEditing(null);
+    setMode("view");
+  };
+  // 锁上时把正在编辑的内容也丢掉：解开的东西不留在内存里，解锁后也不会拿着旧内容接着存
+  useEffect(() => {
+    if (!vks) stopEdit();
+  }, [vks]);
 
   if (isLoading && !data) return <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface text-sm text-muted">加载中…</main>;
   if (error || !data)
@@ -562,7 +572,7 @@ export function Vault() {
                 <Icon className="size-[18px] shrink-0 text-muted" strokeWidth={1.8} />
                 <span className="flex min-w-0 grow flex-col">
                   <span className="truncate text-[14px] font-semibold">{f?.title ?? s.title}</span>
-                  <span className="truncate font-mono text-xs text-muted">{f ? f.username || f.url || kindName(f.kind) : "用另一个主密码加密的"}</span>
+                  <span className="truncate font-mono text-xs text-muted">{f ? f.username || f.url || kindName(f.kind) : vks[s.kid] ? "解不开" : "用另一个主密码加密的"}</span>
                 </span>
               </button>
             );
@@ -575,6 +585,7 @@ export function Vault() {
           <Editor
             key="new"
             old={null}
+            latest={null}
             init={null}
             onCancel={() => setMode("view")}
             onDone={(s) => {
@@ -583,9 +594,9 @@ export function Vault() {
             }}
           />
         ) : mode === "edit" && editing ? (
-          <Editor key={editing.s.id} old={cur} init={editing.f} onCancel={() => setMode("view")} onDone={() => setMode("view")} />
+          <Editor key={editing.s.id} old={editing.s} latest={secrets.find((x) => x.id === editing.s.id) ?? null} init={editing.f} onCancel={stopEdit} onDone={stopEdit} />
         ) : cur ? (
-          <Detail key={cur.id + cur.updatedAt} s={cur} f={opened.get(cur.id) ?? null} keys={data.keys} onEdit={() => {
+          <Detail key={cur.id + cur.updatedAt} s={cur} f={opened.get(cur.id) ?? null} hasKey={!!vks[cur.kid]} keys={data.keys} onEdit={() => {
               const f = opened.get(cur.id);
               if (!f) return;
               setEditing({ s: cur, f });
@@ -696,6 +707,7 @@ function RequestDialog({ r, more, secret, keys, onDone }: { r: VaultRequest; mor
       title="有 AI 想用密码库里的一条"
       desc="允许后，这一条的全部内容（网址、用户名、密码、备注和你加的其他栏）会交给它，只这一次。"
       onClose={onDone}
+      dismissable={false}
       footer={
         <>
           {f && (
@@ -754,7 +766,7 @@ export function VaultRequests({ enabled }: { enabled: boolean }) {
   const vault = useVaultState(enabled).data;
   const has = !!vault?.keys.length;
   const reqs = useQuery({ queryKey: ["vault-requests"], queryFn: fetchRequests, enabled: enabled && has, refetchInterval: 4000 }).data ?? [];
-  // 关掉弹窗只是先不看，不算拒绝；过期前不再弹这一个
+  // 答复过的（或者作废的）不再弹；主机那边下一次轮询也就没有它了
   const [hidden, setHidden] = useState<string[]>([]);
   const waiting = reqs.filter((x) => !hidden.includes(x.id));
   const r = waiting[0];

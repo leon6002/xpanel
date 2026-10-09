@@ -107,10 +107,21 @@ async fn get_asset(
 ) -> ApiResult<impl IntoResponse> {
     let n = name.clone();
     let bytes = blocking(move || st.get_asset(&n)).await?;
+    let mime = mime_of(&name);
+    // 附件是谁都能传的，直接在浏览器里打开时不能让它在这个站点的名义下跑脚本
+    // （比如带 <script> 的 SVG：跑起来就能以界面的身份调接口、读密码库的密文）。
+    // sandbox 让它没有脚本、也不算同一个站点。PDF 除外：浏览器自带的阅读器在 sandbox 里打不开
+    let csp = if mime == "application/pdf" {
+        "frame-ancestors 'self'"
+    } else {
+        "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
+    };
     Ok((
         [
-            (header::CONTENT_TYPE, mime_of(&name)),
+            (header::CONTENT_TYPE, mime),
             (header::CACHE_CONTROL, "max-age=31536000, immutable"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_SECURITY_POLICY, csp),
         ],
         bytes,
     ))

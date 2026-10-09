@@ -568,7 +568,7 @@ export function BlockEditor({
           if (a && (e.ctrlKey || e.metaKey)) {
             const h = a.getAttribute("href") || "";
             if (h.startsWith("asset:")) openAsset(h.slice(6));
-            else window.open(h, "_blank");
+            else window.open(h, "_blank", "noopener");
             return true;
           }
           void node;

@@ -903,6 +903,35 @@ async fn vault_api_round_trip() {
     )
     .await;
     assert_eq!(c, StatusCode::OK);
+    let (c, _) = call(
+        &st,
+        Method::GET,
+        "/api/v1/vault",
+        None,
+        &[("sec-fetch-site", "cross-site")],
+    )
+    .await;
+    assert_eq!(c, StatusCode::FORBIDDEN);
+    // 谁都能传附件：带脚本的 SVG 直接打开时不能在这个站点的名义下跑
+    st.put_asset(
+        "x-1.svg",
+        b"<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>",
+    )
+    .unwrap();
+    {
+        use tower::ServiceExt;
+        let req = Request::builder()
+            .uri("/api/asset/x-1.svg")
+            .body(Body::empty())
+            .unwrap();
+        let resp = crate::router(st.clone()).oneshot(req).await.unwrap();
+        let csp = resp.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(csp.starts_with("sandbox"), "{csp}");
+        assert_eq!(resp.headers()["x-content-type-options"], "nosniff");
+    }
 
     // AI 请求取用：要用 API key（自己报名字不算）→ 用户允许 → 取到加密后的内容
     let pk = b64(&[1u8; 32]);
@@ -916,6 +945,32 @@ async fn vault_api_round_trip() {
     )
     .await;
     assert_eq!(c, StatusCode::UNAUTHORIZED);
+    // 带一个不对的、或者读不出来的 Authorization，不能退回去用自己报的名字
+    let (c, _) = call(
+        &st,
+        Method::POST,
+        "/api/v1/vault/requests",
+        Some(ask.clone()),
+        &[("authorization", "Bearer nope"), ("x-actor", "claude-code")],
+    )
+    .await;
+    assert_eq!(c, StatusCode::UNAUTHORIZED);
+    {
+        use tower::ServiceExt;
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/v1/vault/requests")
+            .header("content-type", "application/json")
+            .header(
+                "authorization",
+                axum::http::HeaderValue::from_bytes(b"\xff").unwrap(),
+            )
+            .header("x-actor", "claude-code")
+            .body(Body::from(ask.to_string()))
+            .unwrap();
+        let resp = crate::router(st.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
     let key = st.create_key("claude-code").unwrap();
     let bearer = format!("Bearer {key}");
     let ai = [("authorization", bearer.as_str())];

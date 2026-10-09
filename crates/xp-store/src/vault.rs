@@ -160,7 +160,11 @@ fn has_control(s: &str) -> bool {
 }
 
 fn clean(s: &str, max: usize) -> String {
+    // 控制字符换成空格；看不见的字符（零宽、改变文字方向的）直接去掉，免得在弹窗里把字排成别的样子
     s.chars()
+        .filter(|c| {
+            !matches!(*c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+        })
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect::<String>()
         .trim()
@@ -661,11 +665,17 @@ pub(crate) fn merge_vault(
                         params![kid, created, updated, data],
                     )?;
                 }
+                // 同一把钥匙：较新的是改过主密码的。校验密钥是从密码库密钥派生的，改主密码不会变；
+                // 那边的和本机的不一样，说明那份不是这把钥匙正常改出来的（被人动过），不要
                 Some(cur) if updated > cur => {
-                    keys += tx.execute(
-                        "UPDATE vault_keys SET data = ?2, updated_at = ?3 WHERE kid = ?1",
-                        params![kid, data, updated],
-                    )?;
+                    let theirs: Value = serde_json::from_str(&data).unwrap_or(Value::Null);
+                    let mine = key_auth(tx, &kid)?.map(|x| x.1).unwrap_or_default();
+                    if b64d(str_of(&theirs, "auth")).is_some_and(|a| a == mine) {
+                        keys += tx.execute(
+                            "UPDATE vault_keys SET data = ?2, updated_at = ?3 WHERE kid = ?1",
+                            params![kid, data, updated],
+                        )?;
+                    }
                 }
                 _ => {}
             }

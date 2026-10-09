@@ -1517,3 +1517,40 @@ fn vault_merges_between_computers() {
         let _ = fs::remove_dir_all(d);
     }
 }
+
+/// 合并时不接受「同一把钥匙、但校验密钥不一样」的版本：正常改主密码不会变校验密钥，变了就是被人动过
+#[test]
+fn vault_merge_keeps_its_own_write_key() {
+    let (da, dc, drive) = (tmp("vkey-a"), tmp("vkey-c"), tmp("vkey-drive"));
+    let a = Store::open(&da).unwrap();
+    let c = Store::open(&dc).unwrap();
+    a.set_drive_dir(Some(drive.clone()));
+    c.set_drive_dir(Some(drive.clone()));
+    vault_key(&a, "k1abcd");
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    // 另一份数据里，同一个标识的钥匙换了内容和校验密钥，时间还更新
+    c.vault_put_key(
+        "k1abcd",
+        &json!({"kdf": {"alg": "scrypt", "N": 16, "r": 8, "p": 1}, "salt": "ZXZpbA", "n": "bm9uY2U", "c": "ZXZpbA", "auth": b64(&[9; 32])}),
+        None,
+        "",
+        ACTOR_UI,
+    )
+    .unwrap();
+    c.backup_to_drive(false).unwrap();
+    let p = a.merge_preview().unwrap();
+    let file = p["latest"]["file"].as_str().unwrap().to_string();
+    let r = a.merge_apply(&file, &HashMap::new()).unwrap();
+    assert_eq!(r["other"]["vault"]["keys"], 0);
+    assert_eq!(a.vault_state().unwrap()["keys"][0]["salt"], "c2FsdA");
+    // 本机解锁了的界面照样能写
+    a.vault_put_secret(
+        "sec1",
+        &secret("sec1", "k1abcd", "x", "AAAA", None),
+        ACTOR_UI,
+    )
+    .unwrap();
+    for d in [da, dc, drive] {
+        let _ = fs::remove_dir_all(d);
+    }
+}

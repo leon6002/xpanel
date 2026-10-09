@@ -63,34 +63,51 @@ pub fn routes() -> Router<AppState> {
 
 pub struct Actor(pub String);
 
+/// 带了 API key 的话验证它，返回 key 的名字；没带返回 None。带了但不对（包括读不出来的）一律 401，
+/// 不能退回去用自己报的名字
+async fn key_name(parts: &Parts, st: &AppState) -> Result<Option<String>, ApiError> {
+    let Some(raw) = parts.headers.get(header::AUTHORIZATION) else {
+        return Ok(None);
+    };
+    let bad = || ApiError(StatusCode::UNAUTHORIZED, "API key 不对或已被删除".into());
+    let auth = raw.to_str().map_err(|_| bad())?.trim();
+    let key = auth
+        .strip_prefix("Bearer ")
+        .or_else(|| auth.strip_prefix("bearer "))
+        .unwrap_or(auth)
+        .trim()
+        .to_string();
+    let st = st.clone();
+    blocking(move || st.verify_key(&key))
+        .await?
+        .map(Some)
+        .ok_or_else(bad)
+}
+
+/// 用 API key 验证过的调用方（名字是 key 的名字）。没带 key 的 401：自己报的名字（X-Actor）不算
+pub struct KeyActor(pub String);
+
+#[async_trait]
+impl FromRequestParts<AppState> for KeyActor {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
+        key_name(parts, st).await?.map(KeyActor).ok_or_else(|| {
+            ApiError(
+                StatusCode::UNAUTHORIZED,
+                "这个接口要带 API key（在主机上用 xp key create <名字> 生成，MCP 里设成 XPANEL_KEY）".into(),
+            )
+        })
+    }
+}
+
 #[async_trait]
 impl FromRequestParts<AppState> for Actor {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, st: &AppState) -> Result<Self, Self::Rejection> {
-        let h = |k: header::HeaderName| {
-            parts
-                .headers
-                .get(k)
-                .and_then(|v| v.to_str().ok())
-                .map(str::trim)
-                .map(String::from)
-        };
-        if let Some(auth) = h(header::AUTHORIZATION) {
-            let key = auth
-                .strip_prefix("Bearer ")
-                .or_else(|| auth.strip_prefix("bearer "))
-                .unwrap_or(&auth)
-                .trim()
-                .to_string();
-            let st = st.clone();
-            return match blocking(move || st.verify_key(&key)).await? {
-                Some(name) => Ok(Actor(name)),
-                None => Err(ApiError(
-                    StatusCode::UNAUTHORIZED,
-                    "API key 不对或已被删除".into(),
-                )),
-            };
+        if let Some(name) = key_name(parts, st).await? {
+            return Ok(Actor(name));
         }
         let name = parts
             .headers

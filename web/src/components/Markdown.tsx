@@ -171,7 +171,7 @@ function AssetImg(props: { src?: string; alt?: string; "data-idx"?: number | str
 export function useOpenAsset() {
   const cfg = useConfig().data?.config;
   return (name: string) => {
-    if (!isApp || !cfg) return window.open("/api/asset/" + encodeURIComponent(name), "_blank");
+    if (!isApp || !cfg) return window.open("/api/asset/" + encodeURIComponent(name), "_blank", "noopener");
     const p =
       cfg.mode === "host"
         ? cfg.dataDir.replace(/[\\/]+$/, "") + (cfg.dataDir.includes("/") ? "/assets/" : "\\assets\\") + name

@@ -2,7 +2,7 @@
 //! AI 不直接读条目内容：先 `GET /vault/index` 看有哪些，再 `POST /vault/requests` 请求取用，
 //! 用户在界面上点了允许，才能从 `GET /vault/requests/{id}` 拿到（用请求里的公钥加密过的）内容。
 
-use crate::v1::Actor;
+use crate::v1::{Actor, KeyActor};
 use crate::{blocking, ApiError, ApiResult, AppState};
 use axum::extract::{Path, Request, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -41,6 +41,13 @@ async fn same_site_only(req: Request, next: Next) -> Result<Response, ApiError> 
 
 fn same_site(headers: &HeaderMap) -> bool {
     let h = |k: header::HeaderName| headers.get(k).and_then(|v| v.to_str().ok());
+    // 浏览器自己标明了是别的网站发起的
+    if headers
+        .get("sec-fetch-site")
+        .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"cross-site"))
+    {
+        return false;
+    }
     match (h(header::HOST), h(header::ORIGIN)) {
         // 程序内部的调用（桌面版界面）
         (None, None) => true,
@@ -153,20 +160,12 @@ struct NewRequest {
     pubkey: String,
 }
 
+/// 弹窗里要告诉用户是谁在要：只认 API key 验证过的名字（`KeyActor`），自己报的名字不算
 async fn create_request(
     State(st): State<AppState>,
-    Actor(actor): Actor,
-    headers: HeaderMap,
+    KeyActor(actor): KeyActor,
     Json(b): Json<NewRequest>,
 ) -> ApiResult<(StatusCode, Json<Value>)> {
-    // 弹窗里要告诉用户是谁在要：只认 API key 验证过的名字，自己报的名字（X-Actor）不算
-    if !headers.contains_key(header::AUTHORIZATION) {
-        return Err(ApiError(
-            StatusCode::UNAUTHORIZED,
-            "取用密码库要带 API key（在主机上用 xp key create <名字> 生成，MCP 里设成 XPANEL_KEY）"
-                .into(),
-        ));
-    }
     let v = blocking(move || st.vault_request_create(&b.secret_id, &b.reason, &b.pubkey, &actor))
         .await?;
     Ok((StatusCode::CREATED, Json(v)))

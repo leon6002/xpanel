@@ -69,9 +69,10 @@ export function unb64(s: string) {
 }
 
 /** 主密码 → 包装密钥。要算一会儿（故意的，让猜密码变慢） */
+/** 参数是主机给的，不能照单全收：太小等于没保护，太大会把这台电脑卡死 */
+const kdfOk = (kdf?: Kdf) => !!kdf && kdf.alg === "scrypt" && kdf.N >= 2 ** 15 && kdf.N <= 2 ** 18 && Number.isInteger(Math.log2(kdf.N)) && kdf.r === 8 && kdf.p >= 1 && kdf.p <= 2;
 function kek(password: string, salt: Uint8Array, kdf: Kdf) {
-  // 参数是主机给的，不能照单全收：太小等于没保护，太大会把这台电脑卡死
-  if (kdf.alg !== "scrypt" || !(kdf.N >= 2 ** 15 && kdf.N <= 2 ** 18 && Number.isInteger(Math.log2(kdf.N))) || kdf.r !== 8 || !(kdf.p >= 1 && kdf.p <= 2)) throw new Error("这把钥匙的参数不认识，请升级 xpanel");
+  if (!kdfOk(kdf)) throw new Error("这把钥匙的参数不认识");
   return scryptAsync(enc.encode(password.normalize("NFKC")), salt, { N: kdf.N, r: kdf.r, p: kdf.p, dkLen: 32, maxmem: 2 ** 31 });
 }
 
@@ -152,7 +153,7 @@ export function strength(p: string) {
   const kinds = [/[a-z]/, /[A-Z]/, /\d/, /[^\da-zA-Z]/].filter((r) => r.test(p)).length;
   const n = [...p].length;
   if (n < 12 || new Set(p).size < 6 || /^\d+$/.test(p)) return 0;
-  if (COMMON.test(p) && n < 20) return 0;
+  if (COMMON.test(p)) return 0;
   return n >= 20 || (n >= 14 && kinds >= 3) ? 2 : 1;
 }
 
@@ -206,10 +207,10 @@ export async function createVault(password: string) {
 
 /** 解锁：主密码能解开哪几把钥匙就解开哪几把。一把都解不开 = 主密码不对 */
 export async function unlock(keys: KeyRec[], password: string) {
-  const have = useVault.getState().vks ?? {};
-  const got = await unwrapAll(keys, password, have);
-  if (!Object.keys(got).length) throw new Error("主密码不对");
-  setOpened({ ...have, ...got });
+  const got = await unwrapAll(keys, password, useVault.getState().vks ?? {});
+  if (!Object.keys(got).length) throw new Error(keys.some((k) => !kdfOk(k.kdf)) ? "这把钥匙的参数这个版本不认识，请把 xpanel 升级到最新" : "主密码不对");
+  // 算密钥要一秒左右，这期间可能自动锁上了（旧的钥匙已经被抹掉）：以现在的状态为准
+  setOpened({ ...(useVault.getState().vks ?? {}), ...got });
 }
 
 /** 改主密码：先用旧的验证，再用新的把每把解开的钥匙重新包一次（条目不用动，密码库密钥也不变） */
@@ -240,15 +241,16 @@ export async function saveSecret(old: SecretRec | null, id: string, p: Omit<Fiel
   const title = p.title.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim();
   if (old) id = old.id;
   const { n, c } = encryptFields(k.vk, { ...p, title });
-  const rec = await v1<SecretRec>("PUT", `/vault/secrets/${id}`, {
-    kid,
-    title,
-    kind: p.kind,
-    n,
-    c,
-    ...(old ? { expect: old.updatedAt } : {}),
-    mac: mac(k, ["put-secret", id, kid, title, p.kind, n, c, stamp(old?.updatedAt)]),
-  });
+  const body = { kid, title, kind: p.kind, n, c, ...(old ? { expect: old.updatedAt } : {}), mac: mac(k, ["put-secret", id, kid, title, p.kind, n, c, stamp(old?.updatedAt)]) };
+  let rec: SecretRec;
+  try {
+    rec = await v1<SecretRec>("PUT", `/vault/secrets/${id}`, body);
+  } catch (e) {
+    // 新建时上一次其实存上了、只是没收到回复（再点保存会被当成重复）：主机上已经有这一条，而且解得开，就算成功
+    const mine = old ? undefined : (await fetchVault().catch(() => null))?.secrets.find((x) => x.id === id);
+    if (!mine || !openSecret(mine, vks)) throw e;
+    rec = mine;
+  }
   setVault((s) => ({ ...s, secrets: [...s.secrets.filter((x) => x.id !== id), rec].sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase())) }));
   useVault.getState().touch();
   return rec;
