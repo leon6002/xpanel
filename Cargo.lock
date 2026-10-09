@@ -5338,6 +5338,7 @@ dependencies = [
 name = "xp-store"
 version = "0.2.0"
 dependencies = [
+ "gethostname",
  "getrandom 0.2.17",
  "rusqlite",
  "serde",

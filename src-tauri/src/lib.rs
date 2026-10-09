@@ -231,6 +231,13 @@ async fn set_this_device(s: St<'_>, id: String) -> Result<Value, String> {
         cfg.device_id = id.trim().to_string();
         write_config(&st, &cfg)?;
         device::send_heartbeat(&st)?;
+        // 合并时显示的「在哪台电脑改的」跟着换
+        if cfg.mode == "host" {
+            let s = st.host_store()?;
+            if let Ok(d) = s.get_device(&cfg.device_id) {
+                let _ = s.set_replica_name(d["name"].as_str().unwrap_or(""));
+            }
+        }
         Ok(json!({ "config": st.cfg() }))
     })
     .await

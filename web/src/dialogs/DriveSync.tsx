@@ -117,7 +117,7 @@ export function DriveSync() {
     const s = await drive.status();
     setStatus(s);
     setPreview(null);
-    if (s.dir && !dir) setDir(s.dir);
+    setDir((d) => d || s.dir || "");
     if (s.available && s.needsMerge) {
       const p = await drive.preview();
       setPreview(p);
@@ -143,14 +143,18 @@ export function DriveSync() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const check = () =>
+  const check = () => {
+    if (busy) return;
     guard("check", async () => {
-      if (canEdit) {
-        const r = await desk.setSyncDir(dir.trim());
+      // 只在填的和已保存的、正在用的都不一样时才保存（没单独设置时框里显示的是冷备份文件夹，不把它存成外置硬盘的）
+      const d = dir.trim();
+      if (canEdit && d !== (cfg?.syncDir || "") && d !== (status?.dir || "")) {
+        const r = await desk.setSyncDir(d);
         setConfig({ config: r.config });
       }
       await load();
     });
+  };
 
   const backup = (force: boolean) =>
     guard("backup", async () => {
@@ -213,8 +217,7 @@ export function DriveSync() {
           <Side title={`本机 · ${status.replica.name || "这台电脑"}`}>
             {status.base ? (
               <>
-                上次和外置硬盘对齐：{ago(status.base.at)}
-                {status.base.replicaId !== status.replica.id && status.base.replicaName ? `（合并了「${status.base.replicaName}」的备份）` : ""}
+                {status.base.replicaId === status.replica.id ? `已备份到外置硬盘（${ago(status.base.at)}那份）` : `已合并「${status.base.replicaName || "另一台电脑"}」${ago(status.base.at)}的备份`}
               </>
             ) : (
               "还没和外置硬盘同步过"
@@ -263,7 +266,11 @@ export function DriveSync() {
               </>
             )}
           </div>
-          {preview.first && changes.length > 0 && <p className="text-xs text-warn-fg">第一次和这块硬盘合并，分不出是哪边改的：两边不一样的都算「两边都改过」，默认选了较新的那边，请过一遍。</p>}
+          {preview.first && changes.length > 0 && (
+            <p className="text-xs text-warn-fg">
+              找不到两边共同的起点（第一次合并，或者有一边没合并就备份过），分不出是哪边改的：两边不一样的都算「两边都改过」，默认选了较新的那边，请过一遍。
+            </p>
+          )}
           {changes.length > 0 && (
             <ul className="scroll-quiet -mx-3 flex max-h-[38vh] flex-col overflow-y-auto">
               {changes.map((c) => (
@@ -278,13 +285,13 @@ export function DriveSync() {
 
       {status?.available && (
         <div className="flex flex-wrap items-center gap-2">
-          {preview ? (
+          {preview || status.needsMerge ? (
             <>
-              <Button tone="primary" disabled={!!busy} onClick={merge}>
-                {busy === "merge" ? "正在合并…" : changes.length ? (taking ? `合并 ${taking} 条` : "完成（全部保留本机的）") : "完成合并"}
+              <Button tone="primary" disabled={!!busy || !preview} onClick={merge}>
+                {busy === "merge" ? "正在合并…" : !preview ? "读不出要合并的内容" : changes.length ? (taking ? `合并 ${taking} 条` : "完成（全部保留本机的）") : "完成合并"}
               </Button>
               <span className="grow" />
-              <Button tone="ghost" disabled={!!busy} onClick={() => (sure ? backup(true) : setSure(true))} title="外置硬盘上那份备份里没合并的改动，之后不会再提示">
+              <Button tone="ghost" disabled={!!busy} onClick={() => (sure ? backup(true) : setSure(true))} title="外置硬盘上那份备份里没合并的改动不会进到本机；另一台电脑下次合并时，两边不一样的条目要逐条确认">
                 {busy === "backup" ? "正在备份…" : sure ? "再点一次：不合并，直接备份" : "不合并，直接备份"}
               </Button>
             </>

@@ -32,7 +32,9 @@
 - **合并前本机自动留一份备份**：数据文件夹的 `backups/premerge-日期-时间.db`，保留最近 6 份。
 - 外置硬盘上最新的备份来自别的电脑、而本机还没合并过时，「备份到外置硬盘」会先让你合并，免得把那边的改动盖掉。
 
-> 第一次和一块硬盘合并时还没有同步点，分不出是哪边改的：两边不一样的条目都算「两边都改过」，默认选较新的，请过一遍列表。
+> 同步点只有在外置硬盘上那份备份「包含过它」时才能用。下面几种情况没有可用的同步点，分不出是哪边改的，
+> 两边不一样的条目都算「两边都改过」，默认选较新的，请过一遍列表：
+> 第一次和这块硬盘合并；另一台电脑没合并就直接备份过；换了一块硬盘；本机恢复过旧的数据库。
 
 ---
 
@@ -95,12 +97,14 @@
 2. 打开数据文件夹里的 `backups/`，找到合并前的 `premerge-日期-时间.db`（每天自动备份的 `xpanel-日期.db` 也可以用）。
 3. 把当前的 `xpanel.db` 改名留底（比如 `xpanel.db.bad`），同时删掉 `xpanel.db-wal` 和 `xpanel.db-shm`。
 4. 把备份文件复制过来，改名为 `xpanel.db`，重新打开 xpanel。
+5. 再打开同步窗口：外置硬盘上那份备份会重新列出来，这次两边不一样的都算「两边都改过」，重新选一遍。
 
 单条合错了也可以不整体恢复：「操作记录」（`GET /api/v1/audit`）里记着每条合并前后的内容。
 
 ### 不想合并，直接备份
 
-点「不合并，直接备份」再确认一次。外置硬盘上那份备份还在 `snapshots/` 里（保留最近 6 份），但之后不会再提示合并它。
+点「不合并，直接备份」再确认一次。外置硬盘上那份备份还在 `snapshots/` 里（保留最近 6 份），但本机不会再提示合并它。
+另一台电脑下次合并时，因为这份备份没有包含它的改动，两边不一样的条目都会算「两边都改过」，要逐条确认，不会被悄悄盖掉。
 
 ### 常见提示
 
@@ -108,8 +112,8 @@
 |---|---|
 | 「还没设置外置硬盘上的文件夹」 | 在同步窗口里填一个，比如 `F:\xpanel` |
 | 「文件夹 … 不在，外置硬盘插上了吗？」 | 硬盘没插、盘符变了，或者路径填错 |
-| 「外置硬盘上的文件夹就是本机的数据文件夹」 | 换一个文件夹，备份不能放在数据文件夹里 |
-| 「外置硬盘上还没有一键备份」 | 先在另一台电脑上点「备份到外置硬盘」 |
+| 「外置硬盘上的文件夹不能是本机的数据文件夹或它里面的文件夹」 | 换一个文件夹 |
+| 「外置硬盘上还没有备份」 | 先在另一台电脑上点「备份到外置硬盘」 |
 | 「外置硬盘上的备份刚刚变了」 | 打开窗口后别的电脑又备份过，重新点「检查」 |
 | 「数据库版本 … 比程序支持的新，请升级 xpanel」 | 这台电脑的 xpanel 太旧，拉代码重新构建 |
 
@@ -120,7 +124,7 @@
 适合写脚本或定时任务。`xp` 由 `build-windows.bat` / `build-mac.sh` 一起装好。
 
 ```bash
-# 只看会合并什么，不改任何东西
+# 只看会合并什么：不合并，也不备份
 xp sync --data D:\xpanel F:\xpanel --dry-run
 
 # 先合并外置硬盘上别的电脑的改动，再把本机的数据备份过去
@@ -164,6 +168,9 @@ xp sync --data D:\xpanel F:\xpanel --prefer both    # 两份都留
 - 代码：`crates/xp-store/src/backup.rs`（`backup_to_drive`、`backup_status`）、`crates/xp-store/src/sync.rs`（三方对比、`merge_preview`、`merge_apply`）。
 - 接口：`GET/POST /api/v1/backup`、`GET/POST /api/v1/backup/merge`（`crates/xp-server/src/v1.rs`）。界面 `web/src/dialogs/DriveSync.tsx` 通过 `lib/api.ts` 的 `drive` 调用，桌面版和浏览器走同一套。
 - 外置硬盘上的文件夹：桌面版配置的 `syncDir`，命令 `set_sync_dir`（`src-tauri/src/lib.rs`）写配置并调 `Store::set_drive_dir`；`xp serve --drive`、`xp sync` 也是调它。
-- 数据库：`items.origin` 列（最后在哪个数据文件夹改的）；`meta` 表的 `replica_id`、`replica_name`、`replicas`（认识的电脑）、`sync_base`（上次对齐的那份备份的 `latest.json`）。
+- 数据库：`items.origin` 列（最后在哪个数据文件夹改的）；`meta` 表的 `replica_id`、`replica_name`、`replicas`（认识的电脑）、`sync_base`（上次对齐的那份备份的 `latest.json`）、
+  `sync_lineage`（本机的数据包含过哪些备份）。
+- 同步点能不能用（`base_rows`）：`sync/base.json` 记着 `base.db` 是哪份，要和 `sync_base` 一致；外置硬盘上那份备份的 `latest.json` 里的 `lineage` 要包含它。
+  对不上就按没有同步点处理。
 - 数据文件夹被整个复制到另一台电脑时（机器名变了），`init_replica` 会换一个新标识并清掉同步点。
-- 测试：`cargo test -p xp-store`（`merge_between_two_computers`、`one_click_backup_to_drive`、`drive_dir_is_separate_from_cold_backup`）。
+- 测试：`cargo test -p xp-store`（`merge_between_two_computers`、`one_click_backup_to_drive`、`stale_sync_point_is_not_trusted`、`drive_dir_is_separate_from_cold_backup`）。

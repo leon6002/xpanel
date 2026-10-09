@@ -365,7 +365,10 @@ fn one_click_backup_to_drive() {
         st.backup_to_drive(false),
         Err(StoreError::Invalid(_))
     ));
-    st.set_cold_backup_dir(Some(d.join("not-mounted/xpanel")));
+    st.set_cold_backup_dir(Some(std::env::temp_dir().join(format!(
+        "xp-store-not-mounted-{}/xpanel",
+        std::process::id()
+    ))));
     assert!(matches!(
         st.backup_to_drive(false),
         Err(StoreError::Unavailable(_))
@@ -1039,6 +1042,94 @@ fn patch_merges_fields_and_detects_conflicts() {
     assert_eq!(it["body"], "B 接着写");
     assert!(it.get("tags").is_none());
     let _ = fs::remove_dir_all(d);
+}
+
+/// 同步点不是两边共同的起点时不能用：一边没合并就备份了，或者本机的同步点文件对不上。
+/// 这时本机改过、删过的条目不能被当成「对方改回去了」悄悄盖掉，要当冲突让人选
+#[test]
+fn stale_sync_point_is_not_trusted() {
+    let (da, db, drive) = (tmp("stale-a"), tmp("stale-b"), tmp("stale-drive"));
+    let a = Store::open(&da).unwrap();
+    let b = Store::open(&db).unwrap();
+    a.set_replica_name("台式机").unwrap();
+    b.set_replica_name("笔记本").unwrap();
+    a.set_drive_dir(Some(drive.clone()));
+    b.set_drive_dir(Some(drive.clone()));
+    let up = |st: &Store, item: Value| st.apply_op(Op::Upsert { item }, ACTOR_UI).unwrap();
+    let take_all = |st: &Store| {
+        let p = st.merge_preview().unwrap();
+        let file = p["latest"]["file"].as_str().unwrap().to_string();
+        let all: HashMap<String, String> = p["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["id"].as_str().unwrap().to_string(), "remote".to_string()))
+            .collect();
+        st.merge_apply(&file, &all).unwrap();
+    };
+    let change = |p: &Value, id: &str| -> Value {
+        p["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["id"] == id)
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+
+    for id in ["x1", "x2", "x3"] {
+        up(&a, todo(id, "原来的", 10.0));
+    }
+    a.backup_to_drive(false).unwrap();
+    // 笔记本合并，改一条、删一条，备份
+    take_all(&b);
+    up(&b, todo("x1", "笔记本改的", 20.0));
+    b.apply_op(Op::Delete { id: "x2".into() }, ACTOR_UI)
+        .unwrap();
+    b.backup_to_drive(false).unwrap();
+    // 台式机没合并笔记本的备份，改了一条就强行备份
+    up(&a, todo("x3", "台式机改的", 30.0));
+    assert_eq!(a.backup_to_drive(false).unwrap()["needsMerge"], true);
+    assert!(a.backup_to_drive(true).unwrap()["manifest"].is_object());
+
+    // 笔记本再合并：台式机那份备份不包含笔记本的同步点，三条都要当冲突，默认各用较新的
+    let p = b.merge_preview().unwrap();
+    assert_eq!(p["first"], true);
+    assert_eq!(change(&p, "x1")["kind"], "conflict");
+    assert_eq!(change(&p, "x1")["choice"], "local");
+    assert_eq!(change(&p, "x2")["kind"], "conflict");
+    assert_eq!(change(&p, "x2")["choice"], "local");
+    assert_eq!(change(&p, "x3")["kind"], "conflict");
+    assert_eq!(change(&p, "x3")["choice"], "remote");
+    let file = p["latest"]["file"].as_str().unwrap().to_string();
+    let pick = HashMap::from([("x3".to_string(), "remote".to_string())]);
+    b.merge_apply(&file, &pick).unwrap();
+    assert_eq!(b.get("x1").unwrap()["title"], "笔记本改的");
+    assert!(b.get("x2").is_err());
+    assert_eq!(b.get("x3").unwrap()["title"], "台式机改的");
+
+    // 之后正常来回：笔记本备份，台式机的同步点在这份备份的来历里，可以正常三方对比
+    b.backup_to_drive(false).unwrap();
+    let p = a.merge_preview().unwrap();
+    assert_eq!(p["first"], false);
+    assert_eq!(change(&p, "x1")["kind"], "update");
+    assert_eq!(change(&p, "x2")["kind"], "delete");
+    assert!(change(&p, "x3").is_null());
+    // 本机的同步点文件和记录对不上（比如恢复过旧数据库）：不用它
+    fs::write(da.join("sync/base.json"), r#"{"file":"snapshots/别的.db"}"#).unwrap();
+    let p = a.merge_preview().unwrap();
+    assert_eq!(p["first"], true);
+    assert_eq!(change(&p, "x1")["kind"], "conflict");
+
+    // 外置硬盘上的文件夹不能放在数据文件夹里面
+    a.set_drive_dir(Some(da.join("inside")));
+    assert!(matches!(
+        a.backup_to_drive(false),
+        Err(StoreError::Invalid(_))
+    ));
+    for d in [da, db, drive] {
+        let _ = fs::remove_dir_all(d);
+    }
 }
 
 /// 外置硬盘文件夹和冷备份位置分开设置：一键备份写到外置硬盘那边，每天自动的还是去冷备份

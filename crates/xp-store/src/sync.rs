@@ -5,6 +5,9 @@
 //! - 同步点：每次一键备份或合并后，把那份快照存成本机的 `sync/base.db`，meta `sync_base` 记下它是哪份
 //! - 合并：本机 / 外置硬盘上的最新备份 / 同步点 三方对比。只有一边改了就用改了的那边；
 //!   两边都改了算冲突，由人选。没有同步点（第一次合并）时，两边不一样的都算冲突，默认用较新的
+//! - 同步点只有在「外置硬盘上那份备份是在它之后做的」时才能用：每份备份的 `latest.json` 里带着
+//!   它包含过哪些备份（`lineage`），本机的同步点不在里面（对方没合并就备份了、换了一块硬盘、
+//!   本机恢复过旧数据库）就当作没有同步点，免得把本机的修改当成「对方改回去了」
 //! - 附件、分类、设备、导入的聊天只增不减，直接合到一起
 
 use crate::backup::{copy_atomic, host_name, prune, read_manifest, sync_assets};
@@ -19,6 +22,10 @@ use xp_core::{new_id, now_ms, str_of, updated_at};
 pub(crate) const SYNC_DIR: &str = "sync";
 const BASE_DB: &str = "base.db";
 const INCOMING_DB: &str = "incoming.db";
+/// 记着 base.db 是哪份备份（数据库被换成旧的时，meta 里的 sync_base 会和它对不上）
+const BASE_INFO: &str = "base.json";
+/// 「包含过哪些备份」最多记这么多份，更早的忘掉（忘掉的只会让合并更保守）
+const KEEP_LINEAGE: usize = 200;
 const ACTOR_MERGE: &str = "merge";
 /// 合并前的本机备份保留份数
 const KEEP_PREMERGE: usize = 6;
@@ -41,6 +48,37 @@ fn meta_json(conn: &Connection, key: &str) -> Result<Value> {
     Ok(meta_get(conn, key)?
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(Value::Null))
+}
+
+/// 一份备份记录（latest.json）里的「包含过哪些备份」
+fn lineage_of(manifest: &Value) -> Vec<String> {
+    manifest
+        .get("lineage")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 本机的数据包含过哪些备份（自己做的、合并进来的）
+pub(crate) fn local_lineage(conn: &Connection) -> Result<Vec<String>> {
+    Ok(lineage_of(
+        &json!({ "lineage": meta_json(conn, "sync_lineage")? }),
+    ))
+}
+
+fn add_lineage(conn: &Connection, files: &[String]) -> Result<()> {
+    let mut all = local_lineage(conn)?;
+    for f in files {
+        if !f.is_empty() && !all.contains(f) {
+            all.push(f.clone());
+        }
+    }
+    let skip = all.len().saturating_sub(KEEP_LINEAGE);
+    meta_set(conn, "sync_lineage", &json!(all[skip..]).to_string())
 }
 
 /// 认识的数据文件夹：{标识: 名字}
@@ -209,7 +247,7 @@ impl Store {
                         [],
                     )?;
                     conn.execute(
-                        "DELETE FROM meta WHERE key IN ('replica_name', 'sync_base')",
+                        "DELETE FROM meta WHERE key IN ('replica_name', 'sync_base', 'sync_lineage')",
                         [],
                     )?;
                 }
@@ -264,14 +302,29 @@ impl Store {
         if snapshot != sdir.join(BASE_DB) {
             copy_atomic(snapshot, &sdir.join(BASE_DB)).map_err(fail)?;
         }
-        meta_set(&self.lock(), "sync_base", &manifest.to_string())
+        self.record_base(manifest)
+    }
+
+    /// sync/base.db 已经换成 manifest 说的那份：记下它是谁，本机的数据从此包含这份备份（和它包含过的）
+    fn record_base(&self, manifest: &Value) -> Result<()> {
+        let file = str_of(manifest, "file").to_string();
+        fs::write(
+            self.dir.join(SYNC_DIR).join(BASE_INFO),
+            json!({ "file": file }).to_string(),
+        )
+        .map_err(|e| StoreError::Unavailable(format!("记录同步点失败：{e}")))?;
+        let conn = self.lock();
+        meta_set(&conn, "sync_base", &manifest.to_string())?;
+        let mut files = lineage_of(manifest);
+        files.push(file);
+        add_lineage(&conn, &files)
     }
 
     /// 外置硬盘上最新的一键备份：复制到本机 sync/incoming.db 再打开（不直接读外置硬盘上的文件）
     fn fetch_latest(&self) -> Result<(Value, PathBuf, PathBuf)> {
         let cold = self.drive_root_ready()?;
         let manifest = read_manifest(&cold)
-            .ok_or_else(|| invalid("外置硬盘上还没有一键备份。先在另一台电脑上点「立即备份」"))?;
+            .ok_or_else(|| invalid("外置硬盘上还没有备份。先在另一台电脑上点「备份到外置硬盘」"))?;
         let file = str_of(&manifest, "file").to_string();
         if !file.starts_with("snapshots/") || file.contains("..") {
             return Err(invalid("备份记录 latest.json 有误"));
@@ -295,9 +348,24 @@ impl Store {
         Ok((manifest, local, cold))
     }
 
-    fn base_rows(&self) -> Result<Option<HashMap<String, MRow>>> {
-        let p = self.dir.join(SYNC_DIR).join(BASE_DB);
-        if self.sync_base()?.is_null() || !p.is_file() {
+    /// 同步点里的条目。只有它确实是本机和外置硬盘上那份备份（remote）共同的起点时才返回：
+    /// - sync/base.db 就是 meta 里 sync_base 说的那份（本机恢复过旧数据库时对不上）
+    /// - 外置硬盘上那份备份就是它，或者是在包含了它之后做的（对方没合并就备份、换了硬盘时不是）
+    fn base_rows(&self, remote: &Value) -> Result<Option<HashMap<String, MRow>>> {
+        let sdir = self.dir.join(SYNC_DIR);
+        let p = sdir.join(BASE_DB);
+        let base = self.sync_base()?;
+        let file = str_of(&base, "file");
+        if file.is_empty() || !p.is_file() {
+            return Ok(None);
+        }
+        let on_disk = fs::read_to_string(sdir.join(BASE_INFO))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+        if on_disk.as_ref().map(|v| str_of(v, "file")) != Some(file) {
+            return Ok(None);
+        }
+        if str_of(remote, "file") != file && !lineage_of(remote).iter().any(|f| f == file) {
             return Ok(None);
         }
         Ok(Some(load_items(&open_copy(&p)?)?))
@@ -311,7 +379,7 @@ impl Store {
             let rc = open_copy(&incoming)?;
             (load_items(&rc)?, meta_json(&rc, "replicas")?)
         };
-        let base = self.base_rows()?;
+        let base = self.base_rows(&manifest)?;
         let (local, names, me) = {
             let conn = self.lock();
             (
@@ -392,7 +460,7 @@ impl Store {
         }
         let rconn = open_copy(&incoming)?;
         let remote = load_items(&rconn)?;
-        let base = self.base_rows()?;
+        let base = self.base_rows(&manifest)?;
         let remote_names = meta_json(&rconn, "replicas")?;
         let now = now_ms();
         let (summary, _) = self.write(|tx| {
@@ -464,7 +532,7 @@ impl Store {
         for ext in ["-wal", "-shm"] {
             let _ = fs::remove_file(sdir.join(format!("{INCOMING_DB}{ext}")));
         }
-        meta_set(&self.lock(), "sync_base", &manifest.to_string())?;
+        self.record_base(&manifest)?;
         Ok(json!({
             "latest": manifest,
             "applied": summary["applied"],

@@ -187,7 +187,7 @@ enum Cmd {
         /// 两边都改了同一条时用哪边：newer（较新的）、drive（外置硬盘上的）、local（本机的）、both（两份都留）
         #[arg(long, value_parser = ["newer", "drive", "local", "both"])]
         prefer: Option<String>,
-        /// 只看看会怎么合并，不改任何东西
+        /// 只看看会合并什么：不合并，也不备份
         #[arg(long)]
         dry_run: bool,
     },
@@ -766,8 +766,11 @@ fn run(cli: Cli) -> Result<(), String> {
             dry_run,
         } => {
             let st = xp_store::Store::open(&data).map_err(|e| e.to_string())?;
-            st.set_drive_dir(Some(target.into()));
+            st.set_drive_dir(Some(target.clone().into()));
             let status = st.backup_status().map_err(|e| e.to_string())?;
+            if status["available"] != true {
+                return Err(format!("文件夹 {target} 不在，外置硬盘插上了吗？"));
+            }
             if status["needsMerge"] == true {
                 let p = st.merge_preview().map_err(|e| e.to_string())?;
                 let changes = p["changes"].as_array().cloned().unwrap_or_default();
@@ -828,6 +831,11 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
             }
             let r = st.backup_to_drive(false).map_err(|e| e.to_string())?;
+            if r["needsMerge"] == true {
+                return Err(
+                    "外置硬盘上的备份刚刚变了（别的电脑又备份过），没有备份。再运行一次".into(),
+                );
+            }
             println!(
                 "已把本机的数据备份到 {}：{} 条，新复制 {} 个附件",
                 r["dir"].as_str().unwrap_or(""),

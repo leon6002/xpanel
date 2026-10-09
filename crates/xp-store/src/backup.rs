@@ -106,9 +106,9 @@ impl Store {
         let drive = self.drive_dir().ok_or_else(|| {
             StoreError::Invalid("还没设置外置硬盘上的文件夹，先填一个（比如 F:\\xpanel）".into())
         })?;
-        if same_dir(&drive, &self.dir) {
+        if inside(&drive, &self.dir) {
             return Err(StoreError::Invalid(
-                "外置硬盘上的文件夹就是本机的数据文件夹，换一个".into(),
+                "外置硬盘上的文件夹不能是本机的数据文件夹或它里面的文件夹，换一个".into(),
             ));
         }
         if !drive_available(&drive) {
@@ -190,6 +190,8 @@ impl Store {
             "assetBytes": a.total_bytes,
             "replicaId": replica_id,
             "replicaName": replica_name,
+            // 这份备份包含过哪些备份（自己以前做的、合并进来的），别的电脑据此判断它的同步点还能不能用
+            "lineage": crate::sync::local_lineage(&self.lock())?,
             "host": host_name(),
             "dataDir": self.dir.display().to_string(),
         });
@@ -201,7 +203,8 @@ impl Store {
         .map_err(fail)?;
         fs::rename(&mpart, root.join(MANIFEST)).map_err(fail)?;
         self.set_sync_base(&sdir.join(&name), &manifest)?;
-        prune(&sdir, "xpanel-", KEEP_SNAPSHOTS);
+        // 别的电脑的时钟可能比本机快：按名字清理时别把刚写的这份清掉
+        prune_keeping(&sdir, "xpanel-", KEEP_SNAPSHOTS, &name);
         Ok(json!({
             "dir": root.display().to_string(),
             "manifest": manifest,
@@ -301,13 +304,25 @@ fn sweep_parts(dir: &Path) {
     }
 }
 
+/// 机器名。Mac 上一般没有这两个环境变量，问系统；
+/// 系统给的名字可能带跟着网络变的后缀（xxx.local、xxx.lan），只取第一段
 pub(crate) fn host_name() -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_default()
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            let h = gethostname::gethostname().to_string_lossy().into_owned();
+            h.split('.').next().unwrap_or("").to_string()
+        })
 }
 
 pub(crate) fn prune(dir: &Path, prefix: &str, keep: usize) {
+    prune_keeping(dir, prefix, keep, "");
+}
+
+/// 只留最新的 keep 份；名字是 always 的那份不删
+fn prune_keeping(dir: &Path, prefix: &str, keep: usize, always: &str) {
     let Ok(rd) = fs::read_dir(dir) else { return };
     let mut names: Vec<_> = rd
         .flatten()
@@ -319,7 +334,9 @@ pub(crate) fn prune(dir: &Path, prefix: &str, keep: usize) {
                 .unwrap_or(false)
         })
         .collect();
+    names.retain(|p| p.file_name().and_then(|n| n.to_str()) != Some(always) || always.is_empty());
     names.sort();
+    let keep = keep.saturating_sub(usize::from(!always.is_empty()));
     while names.len() > keep {
         let _ = fs::remove_file(names.remove(0));
     }
@@ -330,9 +347,11 @@ fn drive_available(dir: &Path) -> bool {
     dir.is_dir() || dir.parent().is_some_and(|p| p.is_dir())
 }
 
-fn same_dir(a: &Path, b: &Path) -> bool {
-    match (fs::canonicalize(a), fs::canonicalize(b)) {
-        (Ok(x), Ok(y)) => x == y,
-        _ => a == b,
+/// dir 就是 data，或者在 data 里面
+fn inside(dir: &Path, data: &Path) -> bool {
+    match (fs::canonicalize(dir), fs::canonicalize(data)) {
+        (Ok(x), Ok(y)) => x.starts_with(y),
+        // dir 还没建：按写的路径比
+        _ => dir.starts_with(data),
     }
 }
