@@ -28,7 +28,7 @@ const MAX_TITLE: usize = 200;
 pub const REQUEST_TTL_MS: f64 = 120_000.0;
 const MAX_REQUESTS: usize = 5;
 /// 整理好的条目的种类。还有一种 raw（待整理）：快速记下的原文，只能通过 `vault_drop` 进来
-pub const KINDS: &[&str] = &["login", "apikey", "server", "other"];
+pub const KINDS: &[&str] = &["login", "bank", "apikey", "server", "other"];
 const RAW: &str = "raw";
 /// 待整理的最多攒这么多条（锁着也能往里放，得有个上限）
 const MAX_RAW: i64 = 300;
@@ -445,7 +445,7 @@ impl Store {
         }
         let kind = str_of(body, "kind");
         if !KINDS.contains(&kind) {
-            return Err(invalid("种类只能是 login、apikey、server、other"));
+            return Err(invalid("种类只能是 login、bank、apikey、server、other"));
         }
         let (n, c) = (str_of(body, "n"), str_of(body, "c"));
         if n.is_empty() || c.is_empty() || c.len() > MAX_SECRET {

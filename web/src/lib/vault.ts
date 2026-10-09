@@ -18,11 +18,18 @@ import { create } from "zustand";
 import { newId, v1 } from "./api";
 import { qc } from "./data";
 
-export type SecretKind = "login" | "apikey" | "server" | "other";
+export type SecretKind = "login" | "bank" | "apikey" | "server" | "other";
+/** 银行下面分两种 */
+export type BankSub = "mobile" | "credit";
+export const SUBS: { k: BankSub; name: string }[] = [
+  { k: "mobile", name: "手机银行" },
+  { k: "credit", name: "信用卡" },
+];
 /** raw = 待整理：快速记下的原文，还没拆成各栏 */
 export type AnyKind = SecretKind | "raw";
 export const KINDS: { k: SecretKind; name: string; hint: string }[] = [
   { k: "login", name: "网站账号", hint: "网址、用户名、密码" },
+  { k: "bank", name: "银行", hint: "手机银行、信用卡" },
   { k: "apikey", name: "API key", hint: "各种服务的 key、token" },
   { k: "server", name: "服务器和设备", hint: "SSH、路由器、NAS、数据库" },
   { k: "other", name: "其他", hint: "恢复码、门禁、证件号…" },
@@ -40,9 +47,16 @@ export interface Extra { label: string; value: string; hidden?: boolean }
 export interface Fields {
   title: string;
   kind: AnyKind;
+  /** 银行的：手机银行还是信用卡 */
+  sub?: BankSub;
   url?: string;
   username?: string;
   password?: string;
+  /** 银行卡：卡号、有效期、安全码、交易（取款、查询）密码 */
+  card?: string;
+  expiry?: string;
+  cvv?: string;
+  pin?: string;
   notes?: string;
   extra?: Extra[];
   /** 标签和置顶也在密文里：锁着时和给 AI 的列表里看不到 */
@@ -51,6 +65,78 @@ export interface Fields {
   /** 待整理的：记下来的原文 */
   raw?: string;
 }
+/* ---- 每种条目有哪几栏、各叫什么。列表、详情、编辑、搜索都照这个来 ---- */
+export type FieldKey = "url" | "username" | "password" | "card" | "expiry" | "cvv" | "pin";
+export interface Spec {
+  key: FieldKey;
+  label: string;
+  /** 平时遮住 */
+  secret?: boolean;
+  /** 列表里「账号」那一格放它（用来认这一条是哪个号） */
+  id?: boolean;
+  /** 列表里「密码」那一格放它，全局搜索里回车复制的也是它 */
+  main?: boolean;
+  /** 卡号：平时只露出后四位 */
+  tail?: boolean;
+  /** 可以生成随机密码 */
+  gen?: boolean;
+  hint?: string;
+}
+const SPECS: Record<string, Spec[]> = {
+  login: [
+    { key: "url", label: "网址", hint: "https://…" },
+    { key: "username", label: "用户名", id: true },
+    { key: "password", label: "密码", secret: true, main: true, gen: true },
+  ],
+  "bank:mobile": [
+    { key: "username", label: "登录账号", id: true, hint: "手机号、身份证号或用户名" },
+    { key: "password", label: "登录密码", secret: true, main: true },
+    { key: "card", label: "卡号", tail: true },
+    { key: "pin", label: "交易 / 取款密码", secret: true },
+    { key: "url", label: "网址（可选）" },
+  ],
+  "bank:credit": [
+    { key: "card", label: "卡号", id: true, main: true, tail: true },
+    { key: "expiry", label: "有效期", hint: "月/年，如 08/29" },
+    { key: "cvv", label: "安全码（CVV）", secret: true },
+    { key: "pin", label: "交易 / 查询密码", secret: true },
+    { key: "username", label: "网银账号（可选）" },
+    { key: "password", label: "网银密码（可选）", secret: true },
+  ],
+  apikey: [
+    { key: "url", label: "服务或网址（可选）" },
+    { key: "username", label: "账号（可选）", id: true },
+    { key: "password", label: "Key / Token", secret: true, main: true },
+  ],
+  server: [
+    { key: "url", label: "地址", hint: "主机名或 IP，可以带端口" },
+    { key: "username", label: "用户名", id: true },
+    { key: "password", label: "密码", secret: true, main: true, gen: true },
+  ],
+  other: [
+    { key: "url", label: "网址或地方（可选）" },
+    { key: "username", label: "账号（可选）", id: true },
+    { key: "password", label: "要保密的内容", secret: true, main: true },
+  ],
+};
+export const specOf = (kind: AnyKind, sub?: BankSub): Spec[] => SPECS[kind === "bank" ? `bank:${sub === "credit" ? "credit" : "mobile"}` : kind] ?? SPECS.other;
+/** 分组用的名字：银行会带上是手机银行还是信用卡 */
+export const groupOf = (f: Pick<Fields, "kind" | "sub">) => (f.kind === "bank" ? `银行 · ${f.sub === "credit" ? "信用卡" : "手机银行"}` : kindName(f.kind));
+/** 卡号平时的样子：只露后四位 */
+export const tailOf = (v: string) => "•••• " + v.replace(/\s+/g, "").slice(-4);
+/** 列表里「账号」那一格：这种条目规定的那一栏；没填就退而求其次，找一栏不用遮的 */
+export function identityOf(f: Fields): { spec: Spec; value: string } | null {
+  const specs = specOf(f.kind, f.sub);
+  const s = specs.find((x) => x.id && f[x.key]) ?? specs.find((x) => !x.secret && !x.main && x.key !== "url" && f[x.key]);
+  return s ? { spec: s, value: f[s.key]! } : null;
+}
+/** 最常要复制的那一栏（密码、key；信用卡是卡号） */
+export function mainOf(f: Fields): { spec: Spec; value: string } | null {
+  const specs = specOf(f.kind, f.sub);
+  const s = specs.find((x) => x.main && f[x.key]) ?? specs.find((x) => x.secret && f[x.key]);
+  return s ? { spec: s, value: f[s.key]! } : null;
+}
+
 /** AI 发来、等用户确认的取用请求。title 是主机上的标签（不可信），left 是还剩多少毫秒 */
 export interface VaultRequest { id: string; secretId: string; title: string; actor: string; reason: string; pub: string; left: number }
 /** 解开的一把钥匙：密码库密钥，和从它派生的校验密钥、「只进不出」的私钥 */

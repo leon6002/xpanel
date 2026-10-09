@@ -4,7 +4,7 @@ import { Lock, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { copyText, errText } from "../lib/api";
 import { useUi } from "../lib/store";
-import { kindName, openSecret, unlock, useVault, useVaultUi } from "../lib/vault";
+import { groupOf, identityOf, mainOf, openSecret, tailOf, unlock, useVault, useVaultUi } from "../lib/vault";
 import { bumpUsage, domainOf, recentEntries, searchVault, titleOf, type Entry } from "../lib/vaultSearch";
 import { cx } from "../lib/cx";
 import { KIND_ICON, MasterInput, useVaultState } from "./Vault";
@@ -59,9 +59,11 @@ function Palette({ close }: { close: () => void }) {
 
   const copy = async (e: Entry, what: "password" | "username") => {
     const f = e.f!;
-    const v = what === "username" ? f.username : f.kind === "raw" ? f.raw : f.password;
-    const label = what === "username" ? "用户名" : f.kind === "raw" ? "原文" : f.kind === "apikey" ? "key" : "密码";
-    if (!v) return say(`「${titleOf(e)}」没有${label}`);
+    // 回车复制这种条目最常用的那一栏（密码、key；信用卡是卡号），Tab 复制账号那一栏
+    const hit = f.kind === "raw" ? { spec: { label: "原文" }, value: f.raw ?? "" } : what === "username" ? identityOf(f) : mainOf(f);
+    const label = hit?.spec.label.replace(/（.*）$/, "") ?? (what === "username" ? "账号" : "密码");
+    const v = hit?.value;
+    if (!v) return say(`「${titleOf(e)}」没有填${label}`);
     if (!(await copyText(v))) return say("复制失败");
     bumpUsage(e.s.id);
     useVault.getState().touch();
@@ -149,7 +151,7 @@ function Palette({ close }: { close: () => void }) {
                     <Icon className={cx("size-[18px] shrink-0", f.kind === "raw" ? "text-accent" : "text-muted")} strokeWidth={1.8} />
                     <span className="flex min-w-0 grow flex-col">
                       <span className="truncate text-[14px] font-semibold">{titleOf(e)}</span>
-                      <span className="truncate font-mono text-xs text-muted">{f.kind === "raw" ? (f.raw ?? "").replace(/\s+/g, " ").slice(0, 70) : [f.username, domainOf(f.url)].filter(Boolean).join(" · ") || kindName(f.kind)}</span>
+                      <span className="truncate font-mono text-xs text-muted">{f.kind === "raw" ? (f.raw ?? "").replace(/\s+/g, " ").slice(0, 70) : [f.username || (f.card ? tailOf(f.card) : ""), domainOf(f.url), groupOf(f)].filter(Boolean).join(" · ")}</span>
                     </span>
                     {(f.tags ?? []).slice(0, 2).map((t) => (
                       <span key={t} className="shrink-0 text-xs text-faint">
@@ -162,8 +164,8 @@ function Palette({ close }: { close: () => void }) {
               {!results.length && <p className="px-3 py-3 text-[13px] text-faint">{q.trim() ? "没有对得上的" : entries.length ? "打几个字开始搜" : "密码库还是空的"}</p>}
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 bg-surface-2/60 px-5 py-2 text-[11.5px] text-muted">
-              <span>回车 复制密码</span>
-              <span>Tab 复制用户名</span>
+              <span>回车 复制密码（信用卡是卡号）</span>
+              <span>Tab 复制账号</span>
               <span>Ctrl+回车 打开这一条</span>
               <span>Esc 关闭</span>
             </div>

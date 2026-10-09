@@ -96,6 +96,9 @@ function fieldsOf(e: Entry): [string, number, boolean][] {
     [low((f?.tags ?? []).join(" ")), 6, true],
     [low((f?.extra ?? []).map((x) => x.label).join(" ")), 3, false],
     [low(f?.url), 3, false],
+    // 卡号：一般是搜后四位
+    [(f?.card || "").replace(/\D/g, ""), 5, false],
+    [f?.kind === "bank" ? (f.sub === "credit" ? "银行 信用卡" : "银行 手机银行") : "", 2, false],
     [low(f?.notes), 2, false],
     [low(f?.raw), 2, false],
   ];
