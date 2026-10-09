@@ -1,6 +1,7 @@
 use super::*;
 use crate::inbox::MessageQuery;
 use serde_json::json;
+use std::collections::HashMap;
 use xp_core::{NewItem, PriorityChange};
 
 fn tmp(name: &str) -> PathBuf {
@@ -323,7 +324,8 @@ fn backups_and_cold_copy() {
     )
     .unwrap();
     st.set_cold_backup_dir(Some(cold.clone()));
-    // 设置冷备份位置后马上补一份当天的
+    // 设置冷备份位置后马上（在后台）补一份当天的
+    st.wait_cold_copy();
     assert_eq!(
         cold.join("xpanel-backup/backups")
             .read_dir()
@@ -332,6 +334,7 @@ fn backups_and_cold_copy() {
         1
     );
     let p = st.backup_now("2000-01-01").unwrap();
+    st.wait_cold_copy();
     assert!(p.exists());
     // 备份是完整可打开的数据库
     let c = Connection::open(&p).unwrap();
@@ -346,9 +349,224 @@ fn backups_and_cold_copy() {
     // 冷备份盘不在也不报错
     st.set_cold_backup_dir(Some(d.join("not-mounted")));
     assert!(st.backup_now("2000-01-02").is_ok());
+    st.wait_cold_copy();
     assert!(st.put_asset("../x", b"").is_err());
     let _ = fs::remove_dir_all(d);
     let _ = fs::remove_dir_all(cold);
+}
+
+#[test]
+fn one_click_backup_to_cold() {
+    let d = tmp("snap");
+    let cold = tmp("snap-cold");
+    let st = Store::open(&d).unwrap();
+    // 没设置备份位置 / 盘没插：说清楚，不是暂时故障就不报 503
+    assert!(matches!(
+        st.backup_to_cold(false),
+        Err(StoreError::Invalid(_))
+    ));
+    st.set_cold_backup_dir(Some(d.join("not-mounted")));
+    assert!(matches!(
+        st.backup_to_cold(false),
+        Err(StoreError::Unavailable(_))
+    ));
+    assert_eq!(st.backup_status().unwrap()["available"], false);
+
+    st.set_cold_backup_dir(Some(cold.clone()));
+    st.wait_cold_copy();
+    st.put_asset("a-1.png", b"one").unwrap();
+    st.put_asset("b-2.pdf", b"two").unwrap();
+    for id in ["a", "b"] {
+        st.apply_op(
+            Op::Upsert {
+                item: todo(id, "x", 1.0),
+            },
+            ACTOR_UI,
+        )
+        .unwrap();
+    }
+    let root = cold.join("xpanel-backup");
+    // 模拟上次复制到一半：半截附件和残留的 .part
+    fs::create_dir_all(root.join("assets")).unwrap();
+    fs::write(root.join("assets/b-2.pdf"), b"t").unwrap();
+    fs::write(root.join("assets/.b-2.pdf.part"), b"t").unwrap();
+
+    let r = st.backup_to_cold(false).unwrap();
+    assert_eq!(r["manifest"]["items"], 2);
+    assert_eq!(r["manifest"]["assets"], 2);
+    assert_eq!(fs::read(root.join("assets/b-2.pdf")).unwrap(), b"two");
+    assert!(!root.join("assets/.b-2.pdf.part").exists());
+    let snap = root.join(r["manifest"]["file"].as_str().unwrap());
+    let n: i64 = Connection::open(&snap)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 2);
+    let s = st.backup_status().unwrap();
+    assert_eq!(s["available"], true);
+    assert_eq!(s["running"], false);
+    assert_eq!(s["last"]["file"], r["manifest"]["file"]);
+
+    // 再备份一次：附件都在了，不再复制
+    let r2 = st.backup_to_cold(false).unwrap();
+    assert_eq!(r2["copiedFiles"], 0);
+    let _ = fs::remove_dir_all(d);
+    let _ = fs::remove_dir_all(cold);
+}
+
+/// 两台电脑通过移动硬盘来回交接：笔记本备份 → 台式机合并、修改、备份 → 笔记本合并
+#[test]
+fn merge_between_two_computers() {
+    let (da, db, cold) = (tmp("merge-a"), tmp("merge-b"), tmp("merge-cold"));
+    let a = Store::open(&da).unwrap();
+    let b = Store::open(&db).unwrap();
+    a.set_replica_name("笔记本").unwrap();
+    b.set_replica_name("台式机").unwrap();
+    // 两个数据文件夹在测试里同时开着，自动复制错开，免得同时写同一个文件
+    a.set_cold_backup_dir(Some(cold.clone()));
+    a.wait_cold_copy();
+    b.set_cold_backup_dir(Some(cold.clone()));
+    b.wait_cold_copy();
+    let up = |st: &Store, item: Value| st.apply_op(Op::Upsert { item }, ACTOR_UI).unwrap();
+
+    // 笔记本：三条 + 一个附件，备份
+    for id in ["a1", "a2", "a3"] {
+        up(&a, todo(id, id, 10.0));
+    }
+    a.put_asset("pic-1.png", b"png").unwrap();
+    // 两边各自导入过同一个群（消息有重叠）
+    a.wechat_import(
+        &wechat_zip(WX1, &[("微信图片_1.jpg", b"JPEG1")]),
+        "a.zip",
+        "测试群",
+        "ui",
+    )
+    .unwrap();
+    b.wechat_import(
+        &wechat_zip(WX2, &[("微信图片_9.jpg", b"JPEG1")]),
+        "b.zip",
+        "测试群",
+        "ui",
+    )
+    .unwrap();
+    assert_eq!(a.backup_status().unwrap()["needsMerge"], false);
+    a.backup_to_cold(false).unwrap();
+
+    // 台式机：移动硬盘上有笔记本的备份，还没合并就备份会被拦下
+    assert_eq!(b.backup_status().unwrap()["needsMerge"], true);
+    assert_eq!(b.backup_to_cold(false).unwrap()["needsMerge"], true);
+    let p = b.merge_preview().unwrap();
+    assert_eq!(p["first"], true);
+    assert_eq!(p["counts"]["add"], 3);
+    assert_eq!(p["assets"]["missing"], 1);
+    assert_eq!(p["changes"][0]["originName"], "笔记本");
+    let file = p["latest"]["file"].as_str().unwrap().to_string();
+    let all: HashMap<String, String> = p["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["id"].as_str().unwrap().to_string(), "remote".to_string()))
+        .collect();
+    // 预览之后移动硬盘上的备份变了：不合并
+    assert!(matches!(
+        b.merge_apply("snapshots/xpanel-old.db", &all),
+        Err(StoreError::Invalid(_))
+    ));
+    let r = b.merge_apply(&file, &all).unwrap();
+    assert_eq!(r["applied"]["add"], 3);
+    assert_eq!(b.all_items().unwrap().len(), 3);
+    assert!(db.join("assets/pic-1.png").exists());
+    // 同一个群合成一个，重复的消息不会多出来（WX1 4 条 + WX2 里新的 1 条），也都能搜到
+    assert_eq!(b.list_chats().unwrap().len(), 1);
+    let count = |sql: &str| -> i64 { b.lock().query_row(sql, [], |r| r.get(0)).unwrap() };
+    assert_eq!(
+        count("SELECT COUNT(*) FROM messages WHERE deleted_at IS NULL"),
+        5
+    );
+    assert_eq!(count("SELECT COUNT(*) FROM messages_fts"), 5);
+    assert_eq!(count("SELECT COUNT(*) FROM bundles"), 2);
+    assert_eq!(b.backup_status().unwrap()["needsMerge"], false);
+    // 已经对齐了，再预览没有改动
+    assert_eq!(b.merge_preview().unwrap()["changes"], json!([]));
+
+    // 台式机：改 a1、删 a3、新建 b1，备份
+    up(&b, todo("a1", "台式机改的", 20.0));
+    b.delete("a3", ACTOR_UI).unwrap();
+    up(&b, todo("b1", "台式机新建", 20.0));
+    assert!(b.backup_to_cold(false).unwrap()["manifest"].is_object());
+
+    // 笔记本：同时也改了 a1（冲突）和 a2（只有这边改了）
+    up(&a, todo("a1", "笔记本改的", 30.0));
+    up(&a, todo("a2", "笔记本改 a2", 30.0));
+    assert_eq!(a.backup_status().unwrap()["needsMerge"], true);
+    let p = a.merge_preview().unwrap();
+    assert_eq!(p["first"], false);
+    let kinds: HashMap<String, String> = p["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["id"].as_str().unwrap().to_string(),
+                c["kind"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(kinds.len(), 3, "{kinds:?}"); // a2 只有本机改了，不算
+    assert_eq!(kinds["a1"], "conflict");
+    assert_eq!(kinds["a3"], "delete");
+    assert_eq!(kinds["b1"], "add");
+    let c1 = p["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "a1")
+        .unwrap();
+    assert_eq!(c1["choice"], "local"); // 笔记本这边较新
+    assert_eq!(c1["originName"], "台式机");
+    let choices: HashMap<String, String> = [("a1", "both"), ("a3", "remote"), ("b1", "remote")]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let file = p["latest"]["file"].as_str().unwrap().to_string();
+    let r = a.merge_apply(&file, &choices).unwrap();
+    assert_eq!(r["applied"]["both"], 1);
+    let titles: Vec<String> = a
+        .all_items()
+        .unwrap()
+        .iter()
+        .map(|i| i["title"].as_str().unwrap().to_string())
+        .collect();
+    assert!(titles.contains(&"笔记本改的".to_string()), "{titles:?}");
+    assert!(titles.contains(&"台式机改的（台式机的版本）".to_string()));
+    assert!(titles.contains(&"笔记本改 a2".to_string()));
+    assert!(titles.contains(&"台式机新建".to_string()));
+    assert!(a.get("a3").is_err());
+    // 合并前留了本机备份；合并后可以直接备份
+    assert!(fs::read_dir(da.join("backups"))
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().starts_with("premerge-")));
+    assert_eq!(a.backup_status().unwrap()["needsMerge"], false);
+    assert!(a.backup_to_cold(false).unwrap()["manifest"].is_object());
+    // 台式机再合并：只拿到笔记本这次的改动
+    let p = b.merge_preview().unwrap();
+    let ids: Vec<&str> = p["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.len(), 3, "{ids:?}"); // a1（笔记本的版本）、a2、复制出来的那条
+    assert!(p["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|c| c["kind"] != "conflict" && c["originName"] == "笔记本"));
+    drop((a, b));
+    for d in [da, db, cold] {
+        let _ = fs::remove_dir_all(d);
+    }
 }
 
 #[test]

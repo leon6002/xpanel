@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="wb-ui-version" content="15">
+<meta name="wb-ui-version" content="17">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>我的工作台</title>
 <script>try{var t=localStorage.getItem("wb-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
@@ -447,6 +447,31 @@ label.toggle{display:inline-flex;gap:6px;align-items:center;font-size:12.5px;col
 .imp-senders label{display:inline-flex;align-items:center;gap:6px;background:var(--surface-2);border-radius:999px;padding:3px 10px;font-size:12.5px;cursor:pointer}
 .imp-senders label{white-space:nowrap;color:var(--fg)}
 .imp-senders input{accent-color:var(--accent);width:auto;padding:0;border:none;margin:0}
+/* 备份和换电脑 */
+.bk-warn{color:var(--warn);background:var(--warn-soft);border-radius:8px;padding:6px 10px;margin:6px 0 0;font-size:12.5px}
+.modal p.bk-warn{color:var(--warn)}
+.bk-acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:13.5px;line-height:1.65;color:var(--muted)}
+.steps b{color:var(--fg);font-weight:600}
+.steps code,.modal p code{font-family:var(--mono);font-size:12px;background:var(--surface-2);border-radius:5px;padding:1px 5px;white-space:nowrap}
+.mg-body{display:flex;flex-direction:column;gap:12px}
+.mg-sum{display:flex;gap:6px;flex-wrap:wrap}
+.mg-sum span{background:var(--surface-2);border-radius:999px;padding:3px 10px;font-size:12.5px}
+.mg-list{display:flex;flex-direction:column;gap:10px}
+.mg-group{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.mg-gh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface-2);font-size:13px;font-weight:500}
+.mg-row{display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:13px;cursor:pointer}
+.mg-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mg-row .hint{flex:none;font-size:12px;color:var(--faint)}
+.mg-tn{flex:none;font-size:12px;color:var(--muted)}
+.mg-row input,.mg-gh input{accent-color:var(--accent);width:auto;margin:0;flex:none}
+.mg-row select{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:8px;padding:3px 6px;font-size:12.5px}
+.mg-k{flex:none;font-size:11.5px;border-radius:6px;padding:1px 6px}
+.mg-k.add{background:var(--accent-soft);color:var(--accent)}
+.mg-k.update{background:var(--note-soft);color:var(--note)}
+.mg-k.delete{background:var(--surface-2);color:var(--danger)}
+.mg-k.conflict{background:var(--warn-soft);color:var(--warn)}
+@media (max-width:560px){.mg-row{flex-wrap:wrap}.mg-row .t{flex-basis:100%;order:5}}
 .imp-stat{display:flex;gap:18px;flex-wrap:wrap;font-size:13px}
 .imp-stat b{font-family:var(--num);font-size:18px;display:block}
 @media (max-width:760px){.ibx{grid-template-columns:minmax(0,1fr)}.ibx-list{display:none}.ibx.listing .ibx-list{display:flex}.ibx.listing .ibx-main{display:none}}
@@ -714,8 +739,14 @@ const cv=t=>`--c:var(--${t.c});--soft:var(--${t.c}-soft)`;
 function toast(m){const t=$("#toast");t.textContent=m;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(()=>t.hidden=true,2200)}
 function ago(ts){if(!ts)return"";const d=(Date.now()-ts)/1000;if(d<60)return"刚刚";if(d<3600)return Math.floor(d/60)+" 分钟前";if(d<86400)return Math.floor(d/3600)+" 小时前";if(d<86400*30)return Math.floor(d/86400)+" 天前";const x=new Date(ts);return (x.getMonth()+1)+"月"+x.getDate()+"日"}
 const ASSET_PREFIX="https://asset.local/";
+// Windows 路径里的 \. \_ \* 会被 Markdown 当转义吃掉反斜杠：代码以外的路径把 \ 写成 \\（缩进代码行不动）
+const WIN_PATH=/(^|[^\w\\])([A-Za-z]:\\[^\s<>"'`|]*|\\\\[^\s\\<>"'`|]+\\[^\s<>"'`|]*)/g;
+function keepPaths(s){
+  return s.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/).map((seg,i)=>i%2?seg:
+    seg.split("\n").map(l=>/^( {4}|\t)/.test(l)?l:l.replace(WIN_PATH,(m,a,p)=>a+p.replace(/\\/g,"\\\\"))).join("\n")).join("");
+}
 function mdHTML(src){
-  const text=String(src||"").replace(/\]\(asset:/g,"]("+ASSET_PREFIX);
+  const text=keepPaths(String(src||"").replace(/\]\(asset:/g,"]("+ASSET_PREFIX));
   if(!window.marked||!window.DOMPurify)return `<p>${fmtBody(src)}</p>`;
   return DOMPurify.sanitize(marked.parse(text,{gfm:true,breaks:true}),{ADD_ATTR:["target"]});
 }
@@ -811,6 +842,135 @@ async function load(){
   catch(e){S.lastErr=errText(e);updateConn();return}
   // 导入的聊天走 /api/v1（离线时读不到就沿用上次的）
   await loadChats();if(S.tab==="inbox")renderInbox();renderHeader();
+  loadBackup();
+}
+/* ================= 备份和换电脑 =================
+   备份文件夹（比如移动硬盘）既是备份，也用来在电脑之间交接：
+   离开前「立即备份」，到另一台电脑「从移动硬盘合并」，合并完再备份一次。
+   状态只刷新 #bkInfo，不重画右栏（右栏里可能正在编辑规范） */
+function fmtBytes(n){n=+n||0;return n<1024?n+" B":n<1048576?(n/1024).toFixed(0)+" KB":n<1073741824?(n/1048576).toFixed(1)+" MB":(n/1073741824).toFixed(2)+" GB"}
+function fmtTime(ts){if(!ts)return"";const d=new Date(ts);return `${d.getMonth()+1}月${d.getDate()}日 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`}
+/** 备份是哪台电脑做的 */
+function backupWho(l){const b=S.backup||{};return l&&l.replicaId&&b.replica&&l.replicaId===b.replica.id?"这台电脑":((l&&l.replicaName)||"另一台电脑")}
+function backupInner(){
+  const b=S.backup;if(!b)return `<span class="hint">…</span>`;
+  const help=`<button class="btn ghost" data-act-g="backup-help">怎么用？</button>`;
+  if(!b.dir)return `还没设置备份文件夹<div class="bk-acts">${IS_APP&&S.cfg&&S.cfg.mode==="host"?`<button class="btn" data-act-g="settings">去设置</button>`:""}${help}</div>`;
+  const l=b.last,busy=S.backingUp||S.merging||b.running,off=busy||!b.available?"disabled":"";
+  const last=busy?`<span class="spin"></span> ${S.merging?"正在合并…":"正在备份…"}`
+    :!b.available?"插上移动硬盘后才能备份和合并"
+    :l?`最新备份：${esc(backupWho(l))} · ${esc(ago(l.at))} · ${l.items} 条 · ${l.assets} 个附件${l.assets?`（${fmtBytes(l.assetBytes)}）`:""}`:"移动硬盘上还没有备份";
+  const warn=b.needsMerge&&!busy&&b.available?`<div class="bk-warn">「${esc(backupWho(l))}」的这份备份还没合并到这台电脑，先合并再备份</div>`:"";
+  return `<code>${esc(b.dir)}</code>${b.available?"":"（没插上）"}<br><span class="hint">${last}</span>${warn}
+    <div class="bk-acts"><button class="btn ${b.needsMerge?"":"primary"}" data-act-g="backup" ${off}>${ico("disk")}立即备份</button>${l?`<button class="btn ${b.needsMerge?"primary":""}" data-act-g="merge" ${off}>从移动硬盘合并</button>`:""}${help}</div>`;
+}
+function paintBackup(){const el=$("#bkInfo");if(el)el.innerHTML=backupInner()}
+async function loadBackup(){
+  if(IS_APP&&!(S.cfg&&S.cfg.mode))return;
+  try{S.backup=await v1("GET","/backup")}catch(e){S.backup=null}
+  paintBackup();
+}
+async function backupNow(force){
+  if(S.backingUp)return;
+  S.backingUp=true;paintBackup();
+  try{
+    const r=await v1("POST","/backup",force?{force:true}:null);
+    if(r.needsMerge){confirmMergeFirst(r.latest);return}
+    toast(`已备份到移动硬盘：${r.manifest.items} 条${r.copiedFiles?`，新复制 ${r.copiedFiles} 个附件（${fmtBytes(r.copiedBytes)}）`:"，附件没有新增"}`);
+  }catch(e){toast("备份失败："+errText(e))}
+  finally{S.backingUp=false;await loadBackup()}
+}
+/** 移动硬盘上有另一台电脑的新备份、这台还没合并：备份前先问 */
+function confirmMergeFirst(latest){
+  const who=esc(backupWho(latest));
+  $("#modalRoot").innerHTML=`<div class="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cfTitle">
+    <h2 id="cfTitle">先合并，再备份</h2>
+    <p>移动硬盘上的最新备份是「${who}」在 ${esc(fmtTime(latest.at))} 做的（${latest.items} 条），这台电脑还没合并过它。</p>
+    <p>现在直接备份，最新备份就变成这台电脑的数据，「${who}」那边的改动不会出现在里面；以后在别的电脑上合并时也拿不到它们。</p>
+    <div class="row"><button class="btn primary" id="cfMerge">先合并（推荐）</button><button class="btn" id="cfForce">仍然备份</button><span style="flex:1"></span><button class="btn ghost" id="cfCancel">取消</button></div>
+  </div></div>`;
+  $("#cfMerge").onclick=()=>openMerge();
+  $("#cfForce").onclick=()=>{closeModal();backupNow(true)};
+  $("#cfCancel").onclick=closeModal;
+}
+function openBackupHelp(){
+  $("#modalRoot").innerHTML=`<div class="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="bhTitle">
+    <h2 id="bhTitle">备份和换电脑</h2>
+    <p>每台电脑的数据存在自己的数据文件夹里，不插移动硬盘也能用。移动硬盘用来备份，也用来把数据带到另一台电脑。</p>
+    <ol class="steps">
+      <li><b>第一次：设置备份文件夹。</b>在「设置」里把备份文件夹填成移动硬盘，比如 <code>E:\\</code>。每台电脑都这样设置。</li>
+      <li><b>离开这台电脑前：插上移动硬盘，点「立即备份」。</b>最新的数据和新增的附件会存到移动硬盘的 <code>xpanel-backup</code> 文件夹。</li>
+      <li><b>到另一台电脑：插上移动硬盘，点「从移动硬盘合并」。</b>会列出在别的电脑上改过的条目，按是哪台电脑改的分组。勾选要合并的，确认就行；两边改了同一条时，可以选用哪边的，或者两份都留。</li>
+      <li><b>在这台电脑用完，再点「立即备份」。</b>移动硬盘上就是两边合在一起的最新数据，回到原来的电脑时再合并一次就接上了。</li>
+    </ol>
+    <p><b>放心的地方</b></p>
+    <ul class="steps">
+      <li>还没合并就点备份时，会先提醒你合并，免得另一台电脑的改动被盖掉。</li>
+      <li>合并前会先把这台电脑的数据备份一份（数据文件夹 <code>backups</code> 里 <code>premerge</code> 开头的文件），合错了能找回来。</li>
+      <li>移动硬盘上保留最近 6 次备份的数据库；附件每个只存一份，不会重复占空间。</li>
+      <li>每天还会自动备份一次到数据文件夹的 <code>backups</code> 里；插着移动硬盘时也会复制一份过去。</li>
+      <li>复制到一半拔掉移动硬盘不会留下坏文件，下次备份会补上。</li>
+    </ul>
+    <div class="row"><button class="btn primary" id="bhOk">知道了</button>${IS_APP&&S.cfg&&S.cfg.mode==="host"?`<button class="btn" id="bhSet">去设置</button>`:""}</div>
+  </div></div>`;
+  $("#bhOk").onclick=closeModal;
+  $("#bhSet")&&($("#bhSet").onclick=()=>openSettings());
+}
+const MG_KIND={add:"新增",update:"修改",delete:"删除",conflict:"冲突"};
+/** 从移动硬盘合并：预览（按是哪台电脑改的分组，可勾选）→ 合并 → 建议再备份一次 */
+async function openMerge(){
+  const root=$("#modalRoot");
+  root.innerHTML=`<div class="overlay"><div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="mgTitle">
+    <h2 id="mgTitle">从移动硬盘合并</h2><div id="mgBody" class="mg-body"><p><span class="spin"></span> 正在读取移动硬盘上的备份…</p></div></div></div>`;
+  const body=$("#mgBody");
+  const fail=m=>{body.innerHTML=`<p class="err">${esc(m)}</p><div class="row"><button class="btn" id="mgClose">关闭</button></div>`;$("#mgClose").onclick=closeModal};
+  let p;try{p=await v1("GET","/backup/merge")}catch(e){fail(errText(e));return}
+  const l=p.latest,cs=p.changes||[],a=p.assets||{};
+  const groups=new Map();
+  for(const c of cs){const g=c.originIsMe?"这台电脑（以前改的）":c.originName||"更早的数据（没有记录是哪台电脑）";if(!groups.has(g))groups.set(g,[]);groups.get(g).push(c)}
+  const row=(c,i)=>{
+    const t=T[c.type],tn=t?t.name:"条目",title=c.title||c.localTitle||"（无标题）";
+    const pick=c.kind==="conflict"
+      ?`<select data-mgsel="${i}" aria-label="用哪边的"><option value="local" ${c.choice==="local"?"selected":""}>用这台电脑的</option><option value="remote" ${c.choice==="remote"?"selected":""}>用移动硬盘的</option>${c.remoteDeleted?"":`<option value="both">两份都留</option>`}</select>`
+      :`<input type="checkbox" data-mgchk="${i}" checked aria-label="合并这条">`;
+    const when=c.kind==="conflict"?`这台 ${esc(ago(c.localAt))}${c.localDeleted?"删了":"改了"} · 那边 ${esc(ago(c.remoteAt))}${c.remoteDeleted?"删了":"改了"}`:esc(ago(c.remoteAt));
+    const tip=c.localTitle&&c.localTitle!==c.title?` title="这台电脑上是：${esc(c.localTitle)}"`:"";
+    return `<label class="mg-row">${pick}<span class="mg-k ${c.kind}">${MG_KIND[c.kind]}</span><span class="mg-tn">${esc(tn)}</span><span class="t"${tip}>${esc(title)}</span><span class="hint">${when}</span></label>`;
+  };
+  const counts=Object.entries(p.counts||{}).filter(([,n])=>n).map(([k,n])=>`<span>${MG_KIND[k]} ${n}</span>`).join("");
+  let idx=0;const order=[];
+  const groupsHTML=[...groups].map(([g,list])=>`<div class="mg-group"><div class="mg-gh">${list.some(c=>c.kind!=="conflict")?`<input type="checkbox" data-mggrp checked aria-label="全选">`:""}<span>在「${esc(g)}」上改的</span><span class="hint">${list.length} 条</span></div>${list.map(c=>{order.push(c);return row(c,idx++)}).join("")}</div>`).join("");
+  body.innerHTML=`<p>移动硬盘上的最新备份：<b>${esc(backupWho(l))}</b> 在 ${esc(fmtTime(l.at))} 做的，共 ${l.items} 条。</p>
+    ${p.first&&(p.counts||{}).conflict?`<p class="bk-warn">这台电脑第一次合并：两边都有、内容又不一样的条目都算冲突，默认用较新的那份，请看一下。</p>`:""}
+    ${cs.length?`<div class="mg-sum">${counts}${a.missing?`<span>附件 ${a.missing} 个（${fmtBytes(a.bytes)}）</span>`:""}</div>
+      <p class="hint">勾选的改成移动硬盘上的样子，不勾的保留这台电脑上的；冲突的在右边选。这台电脑新加的东西都会保留。</p>
+      <div class="mg-list">${groupsHTML}</div>`
+    :`<p>两边的条目已经一致${a.missing?`，只需要从移动硬盘复制 ${a.missing} 个附件（${fmtBytes(a.bytes)}）`:""}。点「完成」记下这次同步。</p>`}
+    <p class="hint">合并前会自动备份这台电脑的数据（数据文件夹 backups 里 premerge 开头的文件）。</p>
+    <div class="err" id="mgErr"></div>
+    <div class="row"><button class="btn primary" id="mgGo">${cs.length?"合并所选":"完成"}</button><button class="btn ghost" id="mgCancel">取消</button></div>`;
+  $("#mgCancel").onclick=closeModal;
+  body.querySelectorAll("[data-mggrp]").forEach(g=>g.onchange=()=>g.closest(".mg-group").querySelectorAll("[data-mgchk]").forEach(x=>x.checked=g.checked));
+  $("#mgGo").onclick=async()=>{
+    const choices={};
+    body.querySelectorAll("[data-mgchk]").forEach(x=>{if(x.checked)choices[order[+x.dataset.mgchk].id]="remote"});
+    body.querySelectorAll("[data-mgsel]").forEach(x=>{if(x.value!=="local")choices[order[+x.dataset.mgsel].id]=x.value});
+    const btn=$("#mgGo");btn.disabled=true;btn.textContent=a.missing?"正在合并…（要复制附件，稍等）":"正在合并…";$("#mgErr").textContent="";
+    S.merging=true;paintBackup();
+    let r;
+    try{r=await v1("POST","/backup/merge",{file:l.file,choices})}
+    catch(e){$("#mgErr").textContent=errText(e);btn.disabled=false;btn.textContent="重试";return}
+    finally{S.merging=false;loadBackup()}
+    const n=r.applied||{},parts=[["add","新增"],["update","修改"],["delete","删除"],["conflict","按移动硬盘改"],["both","两份都留"]].filter(([k])=>n[k]).map(([k,t])=>`${t} ${n[k]} 条`);
+    const o=r.other||{},extra=[o.messages?`聊天消息 ${o.messages} 条`:"",o.chats?`聊天 ${o.chats} 个`:"",o.categories?`分类 ${o.categories} 个`:"",o.devices?`设备 ${o.devices} 台`:"",r.copiedFiles?`附件 ${r.copiedFiles} 个（${fmtBytes(r.copiedBytes)}）`:""].filter(Boolean);
+    body.innerHTML=`<p><b>合并好了。</b>${parts.join("，")||"条目没有变化"}${r.kept?`；保留这台电脑的 ${r.kept} 条`:""}。</p>
+      ${extra.length?`<p>另外补上了：${extra.join("，")}。</p>`:""}
+      <p>下一步：在这台电脑用完后点「立即备份」，移动硬盘上就是合并后的最新数据，回到另一台电脑时再合并一次就接上了。</p>
+      <div class="row"><button class="btn primary" id="mgBackup">${ico("disk")}现在就备份</button><button class="btn ghost" id="mgDone">稍后</button></div>`;
+    $("#mgBackup").onclick=()=>{closeModal();backupNow(false)};
+    $("#mgDone").onclick=closeModal;
+    await load();
+  };
 }
 let polling=false;
 async function poll(){
@@ -999,9 +1159,9 @@ function renderRail(){
     conn=`<section class="panel" style="--c:var(--accent);--soft:var(--accent-soft)"><div class="sec-h"><span class="badge">${ico("server")}</span><h2>连接</h2><span class="grow"></span><button class="add" data-act-g="settings" title="设置" aria-label="设置">${ico("gear")}</button></div>
       <dl class="kv">${c.mode==="host"?`<dt>模式</dt><dd>本机存储（主机）</dd><dt>数据</dt><dd><code>${esc(c.dataDir)}</code></dd>
         <dt>局域网</dt><dd>${S.lan&&S.lan.running?S.lan.urls.map(u=>`<code>${esc(u)}</code>`).join("<br>"):"未开放"}</dd>`
-      :`<dt>模式</dt><dd>连接到主机</dd><dt>主机</dt><dd><code>${esc(c.serverUrl)}</code></dd>`}</dl></section>`;
+      :`<dt>模式</dt><dd>连接到主机</dd><dt>主机</dt><dd><code>${esc(c.serverUrl)}</code></dd>`}<dt>备份</dt><dd id="bkInfo">${backupInner()}</dd></dl></section>`;
   }else if(!IS_APP){
-    conn=`<section class="panel"><p class="hint" style="margin:0">网页版：数据在主机上。网址可以直接打开，本地路径点「打开」会复制到剪贴板。</p><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act-g="export">导出 JSON</button></div></section>`;
+    conn=`<section class="panel"><p class="hint" style="margin:0">网页版：数据在主机上。网址可以直接打开，本地路径点「打开」会复制到剪贴板。</p><dl class="kv" style="margin-top:10px"><dt>备份</dt><dd id="bkInfo">${backupInner()}</dd></dl><div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act-g="export">导出 JSON</button></div></section>`;
   }
   $("#railBody").innerHTML=`<section class="panel" style="${cv(t)}" aria-label="${t.name}">
       <div class="sec-h"><span class="badge">${ico("rule")}</span><h2>${t.name}</h2><span class="n">${list.length}</span><span class="grow"></span><button class="add" data-add="rule" title="新建" aria-label="新建规范">${ico("plus")}</button></div>
@@ -1337,7 +1497,7 @@ document.addEventListener("click",async e=>{
   const a=e.target.closest("a[href]");
   if(a&&IS_APP&&/^https?:/i.test(a.getAttribute("href"))){e.preventDefault();openTarget(a.getAttribute("href"));return}
   const g=e.target.closest("[data-act-g]");
-  if(g){const k=g.dataset.actG;if(k==="retry")load();if(k==="settings")openSettings();if(k==="export")exportJson();return}
+  if(g){const k=g.dataset.actG;if(k==="retry")load();if(k==="settings")openSettings();if(k==="export")exportJson();if(k==="backup")backupNow(false);if(k==="merge")openMerge();if(k==="backup-help")openBackupHelp();return}
   if(!e.target.closest(".main #lanes,.main #focus,.main #hosts,#rail,#ibxStream .ed"))return;
   const addB=e.target.closest("[data-add]");
   if(addB){S.addingTo=addB.dataset.add;S.editing=null;forceRender();document.querySelector(`[data-ed="new:${S.addingTo}"] .e-title`)?.focus();return}
@@ -1615,7 +1775,7 @@ function openSettings(first){
     <div class="choices" role="radiogroup">
       <div class="choice" role="radio" tabindex="0" data-mode="host"><h3>这台电脑存数据（主机）</h3><p>数据写在下面的文件夹里，每天自动备份一份到 backups。</p>
         <label class="field">数据文件夹<input id="fDir" value="${esc(c.dataDir)}" placeholder="例如 D:\\xpanel"></label>
-        <label class="field">冷备份文件夹（可选，比如 8TB 盘；每天复制一份备份和新附件过去）<input id="fCold" value="${esc(c.coldBackupDir||"")}" placeholder="留空 = 不做冷备份"></label>
+        <label class="field">备份文件夹（可选，填移动硬盘，比如 E:\\。离开前点右栏「立即备份」，到另一台电脑点「从移动硬盘合并」）<input id="fCold" value="${esc(c.coldBackupDir||"")}" placeholder="留空 = 不备份到别处"></label>
         <label class="toggle"><input type="checkbox" id="fLan" ${c.lanEnabled?"checked":""}> 在局域网开放（其他电脑和浏览器访问要用）</label>
         <label class="field">端口<input id="fPort" value="${c.port||8765}" inputmode="numeric" style="width:120px"></label></div>
       <div class="choice" role="radio" tabindex="0" data-mode="client"><h3>连接到主机</h3><p>这台电脑不存数据。连不上时照常能看、能记，恢复后自动上传。</p>
@@ -1684,6 +1844,8 @@ try{S.ibx=localStorage.getItem("wb-ibx")||"me"}catch(e){S.ibx="me"}
 const ibxIn=$("#ibxIn");
 const isMe=s=>(S.me||[]).includes(s);
 const INBOX_AUTO=/^(截图|附件) \d+-\d+ \d\d:\d\d$/;
+// 标题是自动起的（截图 / 附件），或是太长截出来的「前 40 字…」（全文在正文里），显示和合并时都不用再带标题
+const ibxTitle=it=>{const t=it.title||"",b=it.body||"";if(!b)return t;if(INBOX_AUTO.test(t))return "";return t.endsWith("…")&&b.startsWith(t.slice(0,-1))?"":t};
 const hm=d=>`${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 function dayLabel(d){
   if(d===dateStr(new Date()))return "今天";if(d===addDays(-1))return "昨天";
@@ -1729,8 +1891,8 @@ function ibxMeta(it){
 const TRIAGE=["todo","issue","idea","note","link"];
 function ibxItemHTML(it){
   if(S.editing===it.id)return `<div style="align-self:stretch">${editorHTML(it)}</div>`;
-  const d=new Date(it.createdAt||0);const showTitle=!(INBOX_AUTO.test(it.title||"")&&it.body);
-  const body=`${showTitle?`<div class="t1">${fmtBody(it.title)}</div>`:""}${it.body?`<div class="md">${mdHTML(it.body)}</div>`:""}`;
+  const d=new Date(it.createdAt||0);const title=ibxTitle(it);
+  const body=`${title?`<div class="t1">${fmtBody(title)}</div>`:""}${it.body?`<div class="md">${mdHTML(it.body)}</div>`:""}`;
   const tools=TRIAGE.map(k=>`<button style="${cv(T[k])}" data-tri="${k}" title="归到「${T[k].name}」">${ico(k)}${T[k].short||T[k].name}</button>`).join("")
     +`<span class="sep"></span><button data-ibxact="edit" title="改内容，或设置分类、标签、优先级后再归类">${ico("edit")}归类…</button><button data-ibxact="append" title="追加到某篇笔记的末尾">${ico("note")}追加到笔记</button><button data-ibxact="side" title="在右侧打开">${ico("side")}</button><button data-ibxact="copy" title="复制文字">${ico("copy")}</button><button data-ibxact="del" title="删除">${ico("trash")}</button>`;
   return `<div class="msg me ${S.ibxSel.has(it.id)?"sel":""}" data-iid="${esc(it.id)}"><span class="ck" data-ck>✓</span><div class="col"><div class="bub">${body}</div><div class="meta">${hm(d)}${ibxMeta(it)}</div></div><div class="tools">${tools}</div></div>`;
@@ -1875,7 +2037,7 @@ async function bulkInbox(k){
   if(k==="none"){S.ibxSel.clear();renderInbox();return}
   if(k==="del"){S.ibxSel.clear();for(const it of sel)await removeItem(it.id).catch(()=>{});toast(`已删除 ${sel.length} 条`);return}
   if(k==="merge"){
-    const first=sel[0];const parts=sel.map((it,i)=>{const t=INBOX_AUTO.test(it.title||"")&&it.body?"":it.title;return i===0?(it.body||""):[t,it.body].filter(Boolean).join("\n")}).filter(Boolean);
+    const first=sel[0];const parts=sel.map((it,i)=>{const t=ibxTitle(it);return i===0?(it.body||""):[t,it.body].filter(Boolean).join("\n")}).filter(Boolean);
     const tags=[...new Set(sel.flatMap(i=>i.tags||[]))];
     S.ibxSel.clear();
     await patch(first,{type:"note",title:INBOX_AUTO.test(first.title||"")?"整理的记录 "+nowLabel():first.title,body:parts.join("\n\n"),tags}).catch(()=>{});
@@ -2315,7 +2477,7 @@ function openAppendToNote(it){
   $("#apQ").oninput=e=>{q=e.target.value.trim();draw()};
   $("#apCancel").onclick=closeModal;
   $("#apList").onclick=async e=>{const b=e.target.closest("[data-ap]");if(!b)return;const n=S.items.find(x=>x.id===b.dataset.ap);if(!n)return;
-    const title=INBOX_AUTO.test(it.title||"")&&it.body?"":it.title;
+    const title=ibxTitle(it);
     const add=[title,it.body].filter(Boolean).join("\n\n");
     closeModal();
     try{await patch(n,{body:[(n.body||"").trimEnd(),add].filter(Boolean).join("\n\n")});await removeItem(it.id);

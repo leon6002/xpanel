@@ -110,6 +110,11 @@ pub fn today_local() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
 
+/// 本地时间 YYYY-MM-DD-HHMMSS（文件名用，按字母排序就是按时间排序）
+pub fn stamp_local() -> String {
+    Local::now().format("%Y-%m-%d-%H%M%S").to_string()
+}
+
 pub use chrono::NaiveDate;
 
 pub fn today_date() -> NaiveDate {

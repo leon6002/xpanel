@@ -8,6 +8,9 @@
   接口文档手写在 `openapi.rs`，改接口时同步改，测试会检查路由都在。
 - 设备：`xp-core/src/device.rs`（字段规则、心跳合并）+ `xp-store/src/devices.rs`（表、改名同步条目、从旧条目生成）。
   桌面版 `src-tauri/src/device.rs` 每分钟发心跳；界面通过 `api_call` 命令调 `/api/v1`（主机模式在本进程处理，连接模式转发）。
+- 备份和换电脑：`xp-store/src/backup.rs`（每日备份、备份文件夹 `xpanel-backup/`、一键备份 + `latest.json`）+ `xp-store/src/sync.rs`
+  （每个数据文件夹一个 `replica_id`，条目 `origin` 列记在哪改的；同步点 `sync/base.db`；本机 / 移动硬盘 / 同步点三方对比合并）。
+  接口 `/api/v1/backup`、`/api/v1/backup/merge`；界面右栏「备份」+ 合并窗口 + 「怎么用？」说明。
 - 分类和标签：`xp-core/src/category.rs`（路径规则）+ `xp-store/src/categories.rs`（空分类表、改名/移动/删除同步到条目）。
 - 收件箱：随手发的是 `type=inbox` 的普通条目（界面 `ui/index.html` 的「收件箱」一节）。
   微信聊天记录：`xp-core/src/wechat.rs`（TXT 格式解析、附件引用、Markdown）+ `xp-store/src/inbox.rs`（chats / bundles / messages 表，

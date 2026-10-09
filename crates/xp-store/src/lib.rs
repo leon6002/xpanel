@@ -3,7 +3,7 @@
 //! - 条目整条 JSON 存在 `data` 列（和 v1 一样是自由 JSON），常用字段另外拆成列方便查询
 //! - 删除是软删除（`deleted_at`），同步和撤销都靠它
 //! - 每次写入 `rev` 加 1，界面和其他设备据此判断要不要刷新
-//! - 每天第一次写入前备份一次；设置了冷备份位置时再复制一份过去
+//! - 每天第一次写入前备份一次；设置了冷备份位置时再复制一份过去，也可以随时一键备份过去
 //! - 第一次打开旧数据文件夹时自动导入 `workbench.json`，原文件改名保留
 
 mod assets;
@@ -13,6 +13,7 @@ mod devices;
 mod inbox;
 mod keys;
 mod schema;
+mod sync;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Map, Value};
@@ -20,7 +21,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use xp_core::{
     apply_patch, id_of, now_ms, plan_reprioritize, sort_items, stamp_done, str_of, updated_at,
@@ -78,6 +79,10 @@ pub struct Store {
     dir: PathBuf,
     conn: Mutex<Connection>,
     cold_dir: Mutex<Option<PathBuf>>,
+    /// 往冷备份复制时拿着，自动和手动备份不会同时写同一个地方
+    cold_busy: Arc<Mutex<()>>,
+    /// 后台的冷备份复制（附件可能很大，不能卡住写入）
+    cold_job: Mutex<Option<std::thread::JoinHandle<()>>>,
     backed_up_day: Mutex<String>,
     events: broadcast::Sender<u64>,
 }
@@ -142,9 +147,12 @@ impl Store {
             dir,
             conn: Mutex::new(conn),
             cold_dir: Mutex::new(None),
+            cold_busy: Arc::new(Mutex::new(())),
+            cold_job: Mutex::new(None),
             backed_up_day: Mutex::new(String::new()),
             events,
         };
+        st.init_replica()?;
         st.import_v1()?;
         st.seed_devices()?;
         st.register_assets();
@@ -156,8 +164,8 @@ impl Store {
         &self.dir
     }
 
-    /// 冷备份位置（比如 8TB 盘）；None 表示不做冷备份
-    /// 设置后马上补一次当天的冷备份（打开时的备份早于这里的设置）
+    /// 冷备份位置（比如移动硬盘）；None 表示不做冷备份
+    /// 设置后马上在后台补一次当天的冷备份（打开时的备份早于这里的设置）
     pub fn set_cold_backup_dir(&self, dir: Option<PathBuf>) {
         let dir = dir.filter(|d| !d.as_os_str().is_empty());
         let changed = {
@@ -668,12 +676,13 @@ fn write_row(tx: &Connection, item: &Value, deleted_at: Option<f64>) -> Result<(
     let id = id_of(item).ok_or_else(|| invalid("条目缺少 id"))?;
     let b = |k: &str| item.get(k).and_then(|x| x.as_bool()).unwrap_or(false) as i64;
     let priority = Some(str_of(item, "priority")).filter(|s| !s.is_empty());
+    // origin：这次修改发生在哪个数据文件夹（合并时用来分辨来源）
     tx.execute(
-        "INSERT INTO items (id, type, title, body, done, pinned, priority, device, created_at, updated_at, deleted_at, data)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        "INSERT INTO items (id, type, title, body, done, pinned, priority, device, created_at, updated_at, deleted_at, data, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, COALESCE((SELECT value FROM meta WHERE key = 'replica_id'), ''))
          ON CONFLICT(id) DO UPDATE SET type = excluded.type, title = excluded.title, body = excluded.body, done = excluded.done,
            pinned = excluded.pinned, priority = excluded.priority, device = excluded.device, created_at = excluded.created_at,
-           updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, data = excluded.data",
+           updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, data = excluded.data, origin = excluded.origin",
         params![
             id,
             str_of(item, "type"),

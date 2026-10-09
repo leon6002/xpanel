@@ -99,6 +99,10 @@ impl AppState {
         }
         let s = Arc::new(Store::open(&cfg.data_dir).map_err(|e| e.to_string())?);
         s.set_cold_backup_dir(cfg.cold_backup_dir.clone().map(PathBuf::from));
+        // 合并时显示「在哪台电脑改的」：用这台电脑在设备表里的名字
+        if let Ok(d) = s.get_device(&cfg.device_id) {
+            let _ = s.set_replica_name(d["name"].as_str().unwrap_or(""));
+        }
         *cur = Some(s.clone());
         Ok(s)
     }
