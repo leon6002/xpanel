@@ -66,6 +66,8 @@
   - `src/lib/api.ts` 是唯一的传输层：桌面版走 Tauri 命令（读写条目仍用 `get_state`/`apply_op`，保留连接模式的离线队列），浏览器走 HTTP。
   - `src/lib/data.ts`：TanStack Query 缓存全部条目，写入先改本地再提交；`src/lib/store.ts`：zustand 界面状态。
   - 颜色只用 `src/index.css` 里的设计变量（`bg-surface`、`text-muted`、`bg-accent-soft`…），浅色/深色各一套，不在组件里写色值。
+- 图标：`[x]`（Markdown 里勾掉的待办）。源文件 `src-tauri/icons/icon.svg`，改了之后跑 `python3 scripts/make-icons.py` 重新生成各个尺寸（任务栏、安装包、macOS）；
+  界面里的是 `web/src/components/ui.tsx` 的 `Logo`，网页标签页的在 `web/index.html`，三处是同一个图形。
 - `ui/index.html`：旧界面（单文件原生 JS），挂在 `/old/`，只修严重问题，新功能只做在 `web/`。
 
 ## 约定

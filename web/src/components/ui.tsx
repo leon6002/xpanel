@@ -83,6 +83,18 @@ export function Pri({ p }: { p?: string }) {
   return <span className={cx("mr-1.5 inline-block rounded px-1.5 align-[1px] text-[11px] font-bold leading-[17px]", PRI_TONE[p])}>{p}</span>;
 }
 
+/** xpanel 的标志：[x]，Markdown 里勾掉的待办。和桌面图标（src-tauri/icons/icon.svg）是同一个图形；
+    底色跟着界面的墨色走（深色界面下是浅底），x 用点缀色 */
+export function Logo({ size = 30, className }: { size?: number; className?: string }) {
+  return (
+    <svg viewBox="0 0 96 96" width={size} height={size} role="img" aria-label="xpanel" className={cx("shrink-0", className)}>
+      <rect width="96" height="96" rx="26" fill="var(--ink)" />
+      <path d="M35 27H26V69H35M61 27H70V69H61" fill="none" stroke="var(--on-ink)" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M40 40L56 56M56 40L40 56" fill="none" stroke="var(--logo-x)" strokeWidth="8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /* ---- 表单 ---- */
 export const inputCls =
   "h-9 w-full min-w-0 rounded-[10px] bg-surface-2 px-3 text-[13.5px] text-fg outline-none transition-colors placeholder:text-faint hover:bg-surface-3/60 focus:bg-surface-3/60";

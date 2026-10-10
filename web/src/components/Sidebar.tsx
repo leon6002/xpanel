@@ -8,6 +8,7 @@ import { devOnline } from "../lib/logic";
 import { useUi, type View } from "../lib/store";
 import { VAULT_KEY, fetchVault } from "../lib/vault";
 import { cx } from "../lib/cx";
+import { Logo } from "./ui";
 import { openPalette } from "./Palette";
 import { openDevices } from "../dialogs/Devices";
 import { openSettings } from "../dialogs/Settings";
@@ -60,9 +61,7 @@ export function Sidebar() {
 
   return (
     <nav aria-label="主导航" className="flex w-12 shrink-0 flex-col items-center gap-3 py-1">
-      <span className="grid size-[30px] place-items-center rounded-[9px] bg-ink text-[15px] font-bold text-on-ink" title="xpanel">
-        x
-      </span>
+      <Logo size={32} />
       <button onClick={openPalette} title="搜全部：事项、笔记、消息、入口、密码库（Ctrl+K）" aria-label="搜索全部" className={cx(railBtn, "bg-surface-2 text-muted hover:bg-surface-3 hover:text-fg")}>
         <Search />
       </button>
