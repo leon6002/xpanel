@@ -5,6 +5,7 @@ import { copyText, desk, errText, isApp, openTarget, v1 } from "../lib/api";
 import { patchItem, qc, useConfig, useTemplates, useThisDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { buildPrompt, hasImages, localDirOf, noteTitle } from "../lib/logic";
+import { dirOf, projectOf, projectsOf } from "../lib/projects";
 import { ls, useUi } from "../lib/store";
 import type { Item, State, Template } from "../lib/types";
 import { myWorkspace, recordWorkspace } from "../lib/ws";
@@ -43,7 +44,8 @@ function AgentDialog({ it, promptText, close }: { it: Item; promptText?: string;
   const [proj, setProj] = useState(real && !promptText && (!!ws || it.type === "note" || hasImages(it)));
   const [prompt, setPrompt] = useState("");
   const edited = useRef(false);
-  const [cwd, setCwd] = useState(localDirOf(it) || cfg?.agentCwd || "");
+  // 默认在所属项目的文件夹里干活
+  const [cwd, setCwd] = useState(() => localDirOf(it) || dirOf(projectOf(it, projectsOf(qc.getQueryData<State>(["state"])?.items ?? [])), me) || cfg?.agentCwd || "");
   const [name, setName] = useState("");
   const [root, setRoot] = useState("");
   const [tplId, setTplId] = useState("general");

@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { copyText, desk, errText, isApp, newId } from "../lib/api";
 import { addItem, patchItem, qc, useAppState, useConfig, useThisDevice } from "../lib/data";
+import { dirOf, projectAsRelated, projectOf, projectsOf } from "../lib/projects";
 import { assetRefs, buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
 import { addLink, relatedOf } from "../lib/links";
 import { ls, useUi } from "../lib/store";
@@ -70,9 +71,10 @@ export async function postComment(opts: { itemId: string; text: string; sel?: Om
       pend((l) => [...l, p]);
       try {
         // 关联的条目（岗位、简历、题库…）一起给 AI，里面的图片和附件也一起放进工作目录
-        const rel = relatedOf(qc.getQueryData<State>(["state"])?.items ?? [], it).slice(0, 20);
+        const everything = qc.getQueryData<State>(["state"])?.items ?? [];
+        const rel = [...projectAsRelated(it, everything), ...relatedOf(everything, it).slice(0, 20)];
         const files = [...new Set([it, ...rel.map((r) => r.item)].flatMap((x) => assetRefs(x.body)))];
-        const r = await desk.askAi(a, ws ? ws.path : "", buildAskPrompt(it, thread || {}, question, prev, rel), files, it.id);
+        const r = await desk.askAi(a, ws ? ws.path : dirOf(projectOf(it, projectsOf(everything)), opts.me), buildAskPrompt(it, thread || {}, question, prev, rel), files, it.id);
         const answer = String(r.text || "").trim();
         const usage = r.usage ? { usage: r.usage } : {};
         await saveThread(itemId, (list) => {

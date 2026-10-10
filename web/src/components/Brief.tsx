@@ -13,6 +13,7 @@ import { Dialog, openDialog } from "../lib/dialog";
 import { buildContextZip, saveFile } from "../lib/exportContext";
 import { addLink, relatedOf } from "../lib/links";
 import { ago, buildPrompt, noteTitle } from "../lib/logic";
+import { dirOf, projectAsRelated, projectOf, projectsOf } from "../lib/projects";
 import { assetRefs } from "../lib/qa";
 import { ls, useUi } from "../lib/store";
 import type { Agent, Item, State } from "../lib/types";
@@ -37,9 +38,15 @@ const saveBrief = (it: Item, brief: Brief | null) => (brief ? patchItem(it, { br
 
 /** 给 AI 的材料：这一条、关联的条目、它们里面的附件 */
 function material(it: Item) {
-  const rel = relatedOf(allItems(), it).slice(0, 20);
+  // 所属的项目排在最前面：它的说明和文件夹是这件事的背景
+  const rel = [...projectAsRelated(it, allItems()), ...relatedOf(allItems(), it).slice(0, 20)];
   const files = [...new Set([it, ...rel.map((r) => r.item)].flatMap((x) => assetRefs(x.body)))];
   return { rel, files };
+}
+
+/** AI 在哪个文件夹里干活：这一条展开成的项目目录，没有就用所属项目在这台电脑上的文件夹 */
+function cwdOf(it: Item, me: { id: string; hostname: string }) {
+  return myWorkspace(it, me)?.path || dirOf(projectOf(it, projectsOf(allItems())), me);
 }
 
 /** 叫 AI 走一轮：提问，或者出计划。force = 别问了直接出计划 */
@@ -50,8 +57,7 @@ async function runRound(itemId: string, agent: Agent, me: { id: string; hostname
   setErr(itemId, "");
   try {
     const { rel, files } = material(it);
-    const ws = myWorkspace(it, me);
-    const r = await desk.askAi(agent, ws ? ws.path : "", buildBriefPrompt(it, briefOf(it), rel, force), files, it.id);
+    const r = await desk.askAi(agent, cwdOf(it, me), buildBriefPrompt(it, briefOf(it), rel, force), files, it.id);
     const cur = itemOf(itemId);
     if (!cur) return;
     const next = applyReply(briefOf(cur), agent.name, parseBrief(r.text));
@@ -74,8 +80,7 @@ async function runWork(itemId: string, agent: Agent, me: { id: string; hostname:
   setErr(itemId, "");
   try {
     const { rel, files } = material(it);
-    const ws = myWorkspace(it, me);
-    const r = await desk.askAi(agent, ws ? ws.path : "", buildWorkPrompt(it, b, rel), files, it.id);
+    const r = await desk.askAi(agent, cwdOf(it, me), buildWorkPrompt(it, b, rel), files, it.id);
     await saveResult(itemId, r.text);
   } catch (e) {
     setErr(itemId, errText(e));

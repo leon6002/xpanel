@@ -14,6 +14,7 @@ import { cx } from "../lib/cx";
 import { putAsset } from "../lib/api";
 import { openAgent } from "../dialogs/Agent";
 import { BriefPanel } from "./Brief";
+import { ProjectPick } from "./Projects";
 import { Md } from "./Markdown";
 import { CommentsSection, flash } from "./Comments";
 import { Breadcrumb, ChildNotes, openMove, type OpenFn } from "./Tree";
@@ -38,6 +39,7 @@ export function MetaChips({ it, withType = true }: { it: Item; withType?: boolea
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {withType && <Chip tone="accent">{typeName(it.type)}</Chip>}
+      <ProjectPick it={it} />
       {it.category && (
         <Chip onClick={() => ui.setCat(it.category!)} title="只看这个分类">
           <Folder /> {it.category.replace(/\//g, " / ")}
@@ -332,6 +334,7 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
         aria-label="标题"
       />
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+        <ProjectPick it={x} />
         <Prop icon={Folder} title="分类（可用 / 分层）">
           <input
             list="xp-cats"

@@ -2,12 +2,13 @@
    编辑不常驻，要改时弹出来。加解密在 lib/vault.ts，主机只有密文。
    三种状态：还没设主密码 → 设置；锁着 → 输主密码；解开 → 列表。十分钟不碰自动锁上，刷新页面也会锁上。 */
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Landmark, Lock, Mail, NotebookPen, Pencil, Pin, Plus, Search, Server, StickyNote, Trash2, X } from "lucide-react";
+import { Box, ChevronDown, Copy, Dices, Eye, EyeOff, Globe, KeyRound, KeySquare, Landmark, Lock, Mail, NotebookPen, Pencil, Pin, Plus, Search, Server, StickyNote, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, newId } from "../lib/api";
 import { qc } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { ago } from "../lib/logic";
+import { NO_PROJECT, secretProject } from "../lib/projects";
 import { PLATFORMS, composeTitle, detectPlatform, emailOf, isMailbox, platformById, platformOf, shortTitle, type Platform } from "../lib/platforms";
 import { useUi } from "../lib/store";
 import {
@@ -50,6 +51,7 @@ import { parseSecret } from "../lib/vaultParse";
 import { bumpUsage, domainOf, searchVault, titleOf, type Entry } from "../lib/vaultSearch";
 import { cx } from "../lib/cx";
 import { LetterMark, PlatformLogo } from "./PlatformLogo";
+import { useProjects } from "./Projects";
 import { Button, Chip, ErrorText, Field, IconButton, Segmented, Toggle, inputCls, textareaCls } from "./ui";
 
 const say = (t: string) => useUi.getState().say(t);
@@ -452,6 +454,9 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
   const [more, setMore] = useState(false);
   // 是不是邮箱账号：undefined = 没动过，自己认
   const [mail, setMail] = useState<boolean | undefined>(init?.mail);
+  // 属于哪个项目："" = 没选，按关键词自己认
+  const projects = useProjects();
+  const [proj, setProj] = useState(init?.project ?? "");
   const [title, setTitle] = useState(init?.title ?? "");
   const [f, setF] = useState<Partial<Fields>>(init ?? {});
   const [tags, setTags] = useState((init?.tags ?? []).join(" "));
@@ -498,6 +503,7 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
       kind,
       sub: kind === "bank" ? bsub : undefined,
       mail: kind === "login" && mail !== undefined && mail !== mailAuto ? mail : undefined,
+      project: proj || undefined,
       platform: plat === null ? (detectPlatform({ title: base, url: f.url }, bank) ? "none" : undefined) : P?.id,
       label: use || undefined,
       notes: f.notes?.trim() || undefined,
@@ -618,6 +624,19 @@ function Editor({ old, init, raw, close }: { old: SecretRec | null; init: Fields
           加一栏（比如端口、数据库名、私钥、恢复码、账单日）
         </Button>
       </div>
+      {projects.length > 0 && (
+        <Field label="项目" hint="比如客户给开的 GitLab、SharePoint 账号，归到那个项目下面，在项目里就能看到">
+          <select className={inputCls} value={proj} onChange={(e) => setProj(e.target.value)} aria-label="项目">
+            <option value="">{(() => { const g = secretProject({ title, label, tags: tagList, url: f.url, notes: f.notes }, projects); return g ? `自动（按关键词认成了「${g.name}」）` : "自动（按关键词认，现在没认出来）"; })()}</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+            <option value={NO_PROJECT}>不属于任何项目</option>
+          </select>
+        </Field>
+      )}
       <Field
         label="标签（空格分开）"
         hint={
@@ -832,6 +851,11 @@ export function Vault() {
   const [filter, setFilter] = useState<Filter>("all");
   const [tag, setTag] = useState<string | null>(null);
   const [plat, setPlat] = useState<string | null>(null);
+  // 项目的范围和别的页面是同一个：在首页选了某个项目，这里也只看它的账号
+  const projects = useProjects();
+  const proj = useUi((s) => s.proj);
+  const setProj = useUi((s) => s.setProj);
+  const projOf = (e: Entry) => secretProject(e.f, projects)?.id;
 
   const secrets = data?.secrets ?? [];
   // 解开的内容只留在内存里，锁上就没了
@@ -857,7 +881,7 @@ export function Vault() {
     return p && (loginCount.get(p.id) ?? 0) >= 2 ? p : undefined;
   };
   const mailCount = entries.filter((e) => isMailbox(e.f)).length;
-  const pool = entries.filter((e) => (filter === "all" || (filter === "mail" ? isMailbox(e.f) : kindOf(e) === filter)) && (!tag || e.f?.tags?.includes(tag)) && (!plat || platformOf(e.f)?.id === plat));
+  const pool = entries.filter((e) => (filter === "all" || (filter === "mail" ? isMailbox(e.f) : kindOf(e) === filter)) && (!tag || e.f?.tags?.includes(tag)) && (!plat || platformOf(e.f)?.id === plat) && (!proj || (proj === NO_PROJECT ? !projOf(e) : projOf(e) === proj)));
   const searching = !!q.trim();
   const shown = searchVault(pool, q);
   // 搜索时按相关程度排成一列；平时按类别分组：待整理、置顶，然后一类一组（银行分手机银行和信用卡）
@@ -926,7 +950,7 @@ export function Vault() {
         </Button>
       </div>
       <div className="flex flex-wrap gap-1.5 px-1">
-        <button aria-pressed={filter === "all" && !tag && !plat} onClick={() => (setFilter("all"), setTag(null), setPlat(null))} className={chip(filter === "all" && !tag && !plat)}>
+        <button aria-pressed={filter === "all" && !tag && !plat && !proj} onClick={() => (setFilter("all"), setTag(null), setPlat(null), setProj(null))} className={chip(filter === "all" && !tag && !plat && !proj)}>
           全部
         </button>
         {rawCount > 0 && (
@@ -945,6 +969,15 @@ export function Vault() {
             邮箱 <span className="text-faint">{mailCount}</span>
           </button>
         )}
+        {projects
+          .map((p) => [p, entries.filter((e) => projOf(e) === p.id).length] as const)
+          .filter(([p, n]) => n > 0 || proj === p.id)
+          .map(([p, n]) => (
+            <button key={"j:" + p.id} aria-pressed={proj === p.id} onClick={() => setProj(proj === p.id ? null : p.id)} className={cx(chip(proj === p.id), "flex items-center gap-1.5")} title="这个项目的账号">
+              <Box className="size-3.5" />
+              {p.name} <span className="text-faint">{n}</span>
+            </button>
+          ))}
         {platChips.map(([id, n]) => {
           const p = platformById(id)!;
           return (

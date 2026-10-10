@@ -139,6 +139,9 @@ export function patchItem(it: Item, ch: Partial<Item>, opts: { expect?: Partial<
 export async function addItem(p: Partial<Item> & { type: Item["type"]; title: string }) {
   const now = Date.now();
   const item: Item = { tags: [], device: "", done: false, pinned: false, body: "", ...p, id: newId(), createdAt: now, updatedAt: now };
+  // 正在只看某个项目时新建的，直接归到这个项目
+  const proj = useUi.getState().proj;
+  if (proj && proj !== "none" && item.type !== "project" && item.project == null) item.project = proj;
   await saveItem(item);
   return item;
 }

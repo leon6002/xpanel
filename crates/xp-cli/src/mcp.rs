@@ -62,7 +62,7 @@ fn with(mut base: Map<String, Value>, extra: Value) -> Value {
 fn item_fields() -> Value {
     json!({
         "title": {"type":"string","description":"标题（必填）"},
-        "type": {"type":"string","enum":["todo","issue","idea","note","link","rule","inbox"],"description":"默认 todo"},
+        "type": {"type":"string","enum":["todo","issue","idea","note","link","rule","inbox","project"],"description":"默认 todo"},
         "body": {"type":"string","description":"正文，Markdown"},
         "priority": {"type":"string","enum":["P0","P1","P2","P3"]},
         "due": {"type":"string","description":"截止日期 YYYY-MM-DD"},

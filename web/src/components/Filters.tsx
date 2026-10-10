@@ -8,6 +8,8 @@ import { allCats, allTags, devOnline, inCat, parentCat, viewOf } from "../lib/lo
 import { useUi } from "../lib/store";
 import { cx } from "../lib/cx";
 import { openCatMgr } from "../dialogs/Categories";
+import { NO_PROJECT } from "../lib/projects";
+import { openProject, useProjects } from "./Projects";
 
 const row = "flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] outline-none data-[highlighted]:bg-surface-2";
 const head = "px-2.5 pt-2 pb-1 text-xs text-muted";
@@ -29,7 +31,9 @@ export function Filters() {
     walk("");
     return out;
   }, [cats]);
+  const projects = useProjects();
   const active = [
+    ui.proj && { key: "proj", text: ui.proj === NO_PROJECT ? "没归项目的" : (projects.find((p) => p.id === ui.proj)?.name ?? "项目"), clear: () => ui.setProj(null) },
     ui.cat && { key: "cat", text: ui.cat === "none" ? "未分类" : ui.cat.split("/").pop()!, clear: () => ui.setCat(null) },
     ui.tag && { key: "tag", text: "#" + ui.tag, clear: () => ui.setTag(null) },
     ui.dev && { key: "dev", text: ui.dev, clear: () => ui.setDev(null) },
@@ -46,6 +50,26 @@ export function Filters() {
         </DM.Trigger>
         <DM.Portal>
           <DM.Content align="start" sideOffset={6} className="scroll-quiet z-50 max-h-[70vh] w-64 overflow-y-auto rounded-xl bg-surface p-1 shadow-3">
+            {projects.length > 0 && (
+              <>
+                <div className={head}>项目</div>
+                {projects
+                  .filter((p) => p.status !== "done" || p.id === ui.proj)
+                  .map((p) => (
+                    <DM.Item key={p.id} className={cx(row, ui.proj === p.id ? "bg-surface-3 font-medium text-fg" : "text-fg-2")} onSelect={() => ui.setProj(ui.proj === p.id ? null : p.id)}>
+                      <span className="grow truncate">{p.name}</span>
+                    </DM.Item>
+                  ))}
+                <DM.Item className={cx(row, ui.proj === NO_PROJECT ? "bg-surface-3 font-medium text-fg" : "text-muted")} onSelect={() => ui.setProj(ui.proj === NO_PROJECT ? null : NO_PROJECT)}>
+                  没归项目的
+                </DM.Item>
+              </>
+            )}
+            {!projects.length && (
+              <DM.Item className={cx(row, "text-muted")} onSelect={() => openProject()}>
+                建一个项目…
+              </DM.Item>
+            )}
             <div className={head}>分类</div>
             <DM.Item className={cx(row, !ui.cat && "font-medium text-fg")} onSelect={() => ui.setCat(null)}>
               全部

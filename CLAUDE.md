@@ -23,6 +23,12 @@
   （`src-tauri/src/agent.rs` 的 `ask`，提示词走标准输入，claude → `claude -p`、codex → `codex exec -`）。界面在 `web/src/components/Comments.tsx`。
   存在条目的 `qa`（`{id, quote, prefix, suffix, at, resolved?, turns:[{q,a,at,by}]}`：q 是人写的、a 是 AI 的回答、by 是哪个 AI），
   按原话 + 前后文定位；全文索引包含评论内容；MCP 的 `xpanel_add_qa` 写的也是这个字段。
+- 项目：和分类是两个维度（分类 = 这是什么东西，项目 = 这是为哪件事做的）。项目本身是一条 `type = "project"` 的条目
+  （`title` 名称、`body` 说明、`keywords`、`status: active|paused|done`、`dirs: [{deviceId, hostname, path}]` 各台电脑上的文件夹），所以和别的条目一样同步。
+  别的条目用 `project` 写项目的 id（`"none"` = 明说不属于）；没写的按关键词算出来（标题、标签、分类，再看正文），不落库——见 `web/src/lib/projects.ts` 的 `projectOf`。
+  密码库的条目同理（`project` 在密文里，`secretProject`）。界面 `web/src/components/Projects.tsx`（首页顶上的项目栏、条目上的项目标签、新建 / 编辑）。
+  `ui.proj` 是全局的范围：首页、各页面的列表、密码库都跟着它；这时新建的条目直接归这个项目。交给 AI 时所属项目当成一条关联材料带上，默认在项目文件夹里干活。
+  列条目的地方记得排除 `type = "project"`。
 - 交给 AI 之前先讨论：条目的 `brief`（`{agent, status: asking|ready|done, rounds:[{at, note, questions:[{id,q,why,options,a}]}], plan, feedback, resultId}`）。
   逻辑在 `web/src/lib/brief.ts`（提示词、解析 AI 回的 JSON、整理成 Markdown），界面在 `web/src/components/Brief.tsx`（这一条下面的讨论面板、「交给 AI」先选怎么交）。
   桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来。
@@ -65,7 +71,7 @@
 - 界面同时跑在两种环境：桌面版（`window.__TAURI__` 存在，走 `invoke`）和浏览器（走 `/api/*`）。新功能两边都要考虑。
 - 改旧界面（`ui/index.html`）时把 `<meta name="wb-ui-version">` 加 1。
 - 条目是自由 JSON（`id/type/title/body/tags/category/device/done/pinned/createdAt/updatedAt/priority/due/rank/doneAt/createdBy/agentLog`，
-  以及 `parentId`、`links`、`qa`、`workspaces`、`agentProgress`），按 `id` 合并。界面改字段用 `patchItem`（patch 操作），不要整条 upsert 覆盖已有条目。
+  以及 `parentId`、`links`、`qa`、`workspaces`、`agentProgress`、`project`、`brief`），按 `id` 合并。界面改字段用 `patchItem`（patch 操作），不要整条 upsert 覆盖已有条目。
 - 错误分四类（`StoreError`）：`Invalid` → 400（客户端不重试）、`NotFound` → 404、`Conflict` → 409（别处刚改过，让用户选）、
   `Unavailable` → 503（客户端留着稍后重试）。别把请求本身的问题报成 503。
 - 界面设计规则（用户定的，详见 `docs/development.md`）：不用线条和边框分区，层次只靠底色；主按钮墨色、不用蓝色，点缀色赭石只用在很少的地方；

@@ -2,7 +2,7 @@
    条目和密码库在本机搜（lib/search.ts、lib/vaultSearch.ts，容错、按相关程度排）；聊天记录太多，交给主机的全文索引。
    回车打开那一条（入口是直接打开网址，密码库是复制密码），Ctrl+回车在右侧面板里看、不离开当前页面。 */
 import { useQuery } from "@tanstack/react-query";
-import { BookMarked, CircleAlert, FileText, Inbox, KeyRound, Lightbulb, Link2, Lock, MessageSquare, Search, SquareCheck } from "lucide-react";
+import { BookMarked, Box, CircleAlert, FileText, Inbox, KeyRound, Lightbulb, Link2, Lock, MessageSquare, Search, SquareCheck } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import { copyText, errText, openTarget, v1 } from "../lib/api";
@@ -53,9 +53,9 @@ const SCOPES: [Scope, string][] = [
   ["vault", "密码"],
 ];
 type Row = { k: "item"; id: string; score: number; hit: ItemHit } | { k: "secret"; id: string; score: number; e: Entry } | { k: "msg"; id: string; score: number; m: Msg } | { k: "unlock"; id: string; score: number };
-const scopeOf = (r: Row): Scope => (r.k === "item" ? (viewOf(r.hit.item) as Scope) : r.k === "msg" ? "inbox" : "vault");
+const scopeOf = (r: Row): Scope => (r.k === "item" ? ((viewOf(r.hit.item) ?? "all") as Scope) : r.k === "msg" ? "inbox" : "vault");
 
-const TYPE_ICON: Record<ItemType, typeof Inbox> = { todo: SquareCheck, issue: CircleAlert, idea: Lightbulb, note: FileText, link: Link2, rule: BookMarked, inbox: Inbox };
+const TYPE_ICON: Record<ItemType, typeof Inbox> = { todo: SquareCheck, issue: CircleAlert, idea: Lightbulb, note: FileText, link: Link2, rule: BookMarked, inbox: Inbox, project: Box };
 
 /** 把对上的词标出来 */
 function Marked({ text, toks }: { text: string; toks: string[] }) {
@@ -117,7 +117,7 @@ function Panel({ close }: { close: () => void }) {
       // 还没打字：要紧的事项、最近改过的、密码库里常用的
       const focus = items.filter((i) => viewOf(i) === "work" && !i.done && (i.pinned || i.priority === "P0" || i.priority === "P1")).sort(byPriority).slice(0, 4);
       const recent = items
-        .filter((i) => !focus.includes(i) && !i.done && i.type !== "inbox")
+        .filter((i) => !focus.includes(i) && !i.done && i.type !== "inbox" && i.type !== "project")
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 6);
       const used = recentEntries(entries, 3);
@@ -162,10 +162,16 @@ function Panel({ close }: { close: () => void }) {
   /* ---- 打开 ---- */
   const goItem = (it: Item, peek: boolean) => {
     const ui = useUi.getState();
+    // 项目：回首页只看这个项目
+    if (it.type === "project") {
+      ui.setProj(it.id);
+      ui.setView("home");
+      return close();
+    }
     // 收件箱里随手发的没有单独的阅读页：在右侧面板里看
     if (peek || it.type === "inbox") ui.openPeek(it.id);
     else {
-      useUi.setState({ cat: null, tag: null, q: "", dev: null });
+      useUi.setState({ cat: null, tag: null, q: "", dev: null, proj: null });
       ui.setView(viewOf(it));
       useUi.getState().select(it.id);
     }

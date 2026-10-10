@@ -1,5 +1,5 @@
 /** 条目：自由 JSON，常用字段在这里列出，其他字段原样保留 */
-export type ItemType = "todo" | "issue" | "idea" | "note" | "link" | "rule" | "inbox";
+export type ItemType = "todo" | "issue" | "idea" | "note" | "link" | "rule" | "inbox" | "project";
 export type Priority = "P0" | "P1" | "P2" | "P3";
 
 /** AI 回答一次用了多少 token（桌面版从 claude / codex 的输出里读；拿不到就没有） */
@@ -30,6 +30,8 @@ export interface Item {
   agentProgress?: Progress[];
   agentLog?: { agent: string; at: number }[];
   workspaces?: Workspace[];
+  /** 属于哪个项目（项目条目的 id；"none" = 不属于任何项目；没写就按关键词认，见 lib/projects.ts） */
+  project?: string;
   /** 交给 AI 之前的讨论：它问的问题、你的回答、计划（见 lib/brief.ts） */
   brief?: unknown;
   /** 父笔记（笔记、规范可以分层） */
@@ -75,7 +77,7 @@ export const TYPES: { k: ItemType; name: string; short?: string; check?: string;
   { k: "link", name: "入口" },
   { k: "rule", name: "规范与工作流", short: "规范" },
 ];
-export const typeName = (t: ItemType) => (t === "inbox" ? "收件箱" : TYPES.find((x) => x.k === t)?.name ?? t);
+export const typeName = (t: ItemType) => (t === "inbox" ? "收件箱" : t === "project" ? "项目" : TYPES.find((x) => x.k === t)?.name ?? t);
 export const isCheckable = (t: ItemType) => !!TYPES.find((x) => x.k === t)?.check;
 
 /* ---- 外置硬盘同步（/api/v1/backup） ---- */

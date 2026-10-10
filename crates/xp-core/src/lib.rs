@@ -32,6 +32,8 @@ pub const ITEM_TYPES: &[(&str, &str, bool)] = &[
     ("rule", "规范与工作流", false),
     // 随手发进来、还没归类的（收件箱）
     ("inbox", "收件箱", false),
+    // 项目本身也是一条（名称、说明、关键词、各台电脑上的文件夹）；别的条目用 project 字段指向它
+    ("project", "项目", false),
 ];
 
 pub const PRIORITIES: &[&str] = &["P0", "P1", "P2", "P3"];

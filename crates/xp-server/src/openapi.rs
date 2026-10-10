@@ -97,7 +97,7 @@ pub fn spec() -> Value {
                     "description": "条目。除下列字段外还可以有任意自定义字段，会原样保存。",
                     "properties": {
                         "id": { "type": "string" },
-                        "type": { "type": "string", "enum": ["todo", "issue", "idea", "note", "link", "rule", "inbox"], "description": "inbox 是随手发进收件箱、还没归类的" },
+                        "type": { "type": "string", "enum": ["todo", "issue", "idea", "note", "link", "rule", "inbox", "project"], "description": "inbox 是随手发进收件箱、还没归类的；project 是一个项目（别的条目用 project 字段写它的 id 归到它下面）" },
                         "title": { "type": "string" },
                         "body": { "type": "string", "description": "Markdown 正文" },
                         "tags": { "type": "array", "items": { "type": "string" } },

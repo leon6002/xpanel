@@ -5,6 +5,7 @@ import { strToU8, zipSync } from "fflate";
 import { assetSrc, invoke } from "./api";
 import { briefDigest, briefOf } from "./brief";
 import { relatedOf } from "./links";
+import { projectAsRelated } from "./projects";
 import { entryTarget, noteTitle } from "./logic";
 import type { Item } from "./types";
 import { typeName } from "./types";
@@ -39,6 +40,7 @@ function itemMd(it: Item, prefix: string, seen: Map<string, string>, label?: str
     it.priority && `优先级：${it.priority}`,
     it.due && `截止：${it.due}`,
     it.type === "link" && entryTarget(it) && `地址：${entryTarget(it)}`,
+    it.type === "project" && Array.isArray(it.dirs) && (it.dirs as { path?: string; hostname?: string }[]).length > 0 && `项目文件夹：${(it.dirs as { path?: string; hostname?: string }[]).map((d) => `${d.path}${d.hostname ? `（${d.hostname}）` : ""}`).join("；")}`,
     it.done && `状态：已完成`,
     `最后修改：${stamp(it.updatedAt)}`,
   ].filter(Boolean);
@@ -73,7 +75,7 @@ async function bytesOf(name: string): Promise<Uint8Array | null> {
 
 /** 打包。返回压缩包的内容、建议的文件名，和里面有什么（给界面提示用） */
 export async function buildContextZip(it: Item, all: Item[]) {
-  const related = relatedOf(all, it).slice(0, 40);
+  const related = [...projectAsRelated(it, all).map((r) => ({ ...r, dir: "out" as const })), ...relatedOf(all, it).slice(0, 40)];
   const seen = new Map<string, string>();
   const out: Record<string, Uint8Array> = {};
   const index: string[] = [];

@@ -38,6 +38,8 @@ interface Ui {
   cat: string | null; // 分类筛选；"none" = 未分类
   tag: string | null;
   dev: string | null; // 按设备筛选
+  /** 只看这个项目的（项目的 id；"none" = 没归项目的）。首页和各页面的列表都跟着它 */
+  proj: string | null;
   q: string;
   /** 右侧浮出的阅读面板（在任何页面都能打开任意一条） */
   peek: { id: string; mode: "read" | "edit" } | null;
@@ -54,6 +56,7 @@ interface Ui {
   setTag: (t: string | null) => void;
   setQ: (q: string) => void;
   setDev: (d: string | null) => void;
+  setProj: (p: string | null) => void;
   openPeek: (id: string, mode?: "read" | "edit") => void;
   closePeek: () => void;
   cycleTheme: () => void;
@@ -82,6 +85,7 @@ export const useUi = create<Ui>((set, get) => ({
   cat: null,
   tag: null,
   dev: null,
+  proj: null,
   q: "",
   peek: null,
   peekFull: false,
@@ -103,6 +107,7 @@ export const useUi = create<Ui>((set, get) => ({
   setTag: (tag) => set({ tag }),
   setQ: (q) => set({ q }),
   setDev: (dev) => set({ dev }),
+  setProj: (proj) => set({ proj }),
   openPeek: (id, mode = "read") => set({ peek: { id, mode }, peekFull: false }),
   closePeek: () => set({ peek: null, peekFull: false }),
   cycleTheme: () => {

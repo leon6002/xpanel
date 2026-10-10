@@ -181,6 +181,11 @@ export function contextLines(it: Item, related: { item: Item; label?: string }[]
       budget -= text.length;
       L.push(``, `### ${r.label ? "【" + r.label + "】" : ""}${x.title || "(无标题)"}（${typeName(x.type)}）`);
       if (target) L.push(`地址：${target}`);
+      if (x.type === "project") {
+        const dirs = (Array.isArray(x.dirs) ? (x.dirs as { hostname?: string; path?: string }[]) : []).filter((d) => d?.path);
+        if (dirs.length) L.push(`项目文件夹：${dirs.map((d) => `${d.path}${d.hostname ? `（${d.hostname}）` : ""}`).join("；")}`);
+        if (!text.trim()) L.push(`（这个项目还没有写说明）`);
+      }
       if (text.trim()) L.push("```markdown", text, "```");
     }
   }

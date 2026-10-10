@@ -31,12 +31,16 @@ import { Thumb } from "./Markdown";
 import { rootDropProps, SubRows, useNoteDnd } from "./Tree";
 import { buildTree, useOpenNodes } from "../lib/tree";
 import { linksOf } from "../lib/links";
+import { NO_PROJECT, projectOf } from "../lib/projects";
 import { Filters } from "./Filters";
+import { useProjects } from "./Projects";
 import { Button, Chip, Pri } from "./ui";
 
 export function useFilter() {
-  const { cat, tag, q, dev } = useUi();
+  const { cat, tag, q, dev, proj } = useUi();
+  const projects = useProjects();
   return (it: Item) => {
+    if (proj && (proj === NO_PROJECT ? !!projectOf(it, projects) : projectOf(it, projects)?.id !== proj)) return false;
     if (cat === "none" ? !!it.category : cat && !inCat(it.category, cat)) return false;
     if (tag && !(it.tags || []).includes(tag)) return false;
     if (dev && it.device && it.device !== dev) return false;
@@ -218,7 +222,7 @@ export function ListPane() {
   const ui = useUi();
   const match = useFilter();
   const sel = ui.selected[ui.view];
-  const filtering = !!(ui.q || ui.tag || ui.dev || ui.cat);
+  const filtering = !!(ui.q || ui.tag || ui.dev || ui.cat || ui.proj);
 
   // 选中的是子笔记（比如从阅读区的路径点过来）：把上面几层展开
   useEffect(() => {
@@ -356,7 +360,7 @@ export function ListPane() {
       ),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, devices, ui.view, ui.cat, ui.tag, ui.q, ui.dev, sel]);
+  }, [items, devices, ui.view, ui.cat, ui.tag, ui.q, ui.dev, ui.proj, sel]);
 
   // 按分类、标签筛选时这个页面里一条都没有，但别的页面里有：说出来在哪，点一下过去。
   // 免得看到分类里明明有东西、这里却是空的，以为内容丢了
@@ -369,7 +373,7 @@ export function ListPane() {
     }
     return by.get(ui.view as Exclude<View, "vault">) ? [] : [...by];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, ui.view, ui.cat, ui.tag, ui.q, ui.dev]);
+  }, [items, ui.view, ui.cat, ui.tag, ui.q, ui.dev, ui.proj]);
 
   async function create() {
     if (ui.view === "notes") {
