@@ -1,6 +1,6 @@
 /* 首页：打开先看到的一整页。不用先选「事项」还是「笔记」，各种内容按要紧程度自动排好，能直接处理：
    勾完成、把收件箱里的消息转成事项或笔记、点开任何一条在右侧面板里看和改、点入口直接打开。
-   完整的列表（批量整理、按分类筛选）还在各自的页面。 */
+   完整的列表（批量整理、按分类筛选）还在各自的页面。各块的位置和大小可以自己拖（HomeGrid）。 */
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Bot, Check, FileText, Inbox as InboxIcon, KeyRound, Link2, MessageSquare, Pin, Plus, Search, SquareCheck } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
@@ -18,6 +18,8 @@ import { NO_PROJECT, projectOf, secretProject } from "../lib/projects";
 import { openPalette } from "./Palette";
 import { ProjectBar, useProjects } from "./Projects";
 import { EntryIcon } from "./Vault";
+import type { Slot } from "../lib/grid";
+import { HomeGrid, type Tile } from "./HomeGrid";
 import { Chip, Pri } from "./ui";
 
 function greet() {
@@ -47,19 +49,18 @@ const urgency = (it: Item) => {
   return d?.tone === "late" ? 0 : d?.tone === "soon" ? 1 : it.pinned ? 2 : it.priority === "P0" ? 3 : it.priority === "P1" ? 4 : 9;
 };
 
-function Card({ title, hint, action, children, className }: { title: string; hint?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
-  return (
-    <section aria-label={title} className={cx("flex min-w-0 flex-col gap-1 rounded-[18px] bg-surface p-3", className)}>
-      <h2 className="flex items-center gap-2 px-2 pt-0.5 pb-1 text-[13px] font-semibold text-fg">
-        {title}
-        {hint && <span className="text-xs font-normal text-muted">{hint}</span>}
-        <span className="grow" />
-        {action}
-      </h2>
-      {children}
-    </section>
-  );
+/** 首页的一块。这里只是写下标题、说明、右上角的按钮和内容，摆在哪、多大由 HomeGrid 管（可以自己拖） */
+function Card(_: { id: string; title: string; hint?: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return null;
 }
+/** 默认的摆法：左边宽一点放要做的和等处理的，右边放笔记、账号、入口。y 只表示先后，高度跟着内容走 */
+const LAYOUT: Slot[] = [
+  { id: "work", x: 0, y: 0, w: 7, h: null },
+  { id: "waiting", x: 0, y: 1, w: 7, h: null },
+  { id: "notes", x: 7, y: 0, w: 5, h: null },
+  { id: "accounts", x: 7, y: 1, w: 5, h: null },
+  { id: "links", x: 7, y: 2, w: 5, h: null },
+];
 const more = "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted hover:bg-surface-2 hover:text-fg [&_svg]:size-3.5";
 const rowCls = "group flex min-h-[36px] items-center gap-2.5 rounded-xl px-2 hover:bg-surface-2";
 const Empty = ({ children }: { children: ReactNode }) => <p className="px-2 py-3 text-[13px] text-faint">{children}</p>;
@@ -202,6 +203,215 @@ export function Home() {
   };
   const waiting = inbox.length + unread + rawCount + ai.length + briefs.length;
 
+  const cards = [
+    <Card
+      id="work"
+      key="work"
+      title="现在该做的"
+      hint={work.length ? `${grouped ? "要紧的在最前，其余按项目分" : "逾期、快到期、置顶、P0 / P1 排在前面"} · 共 ${work.length} 条没做完` : undefined}
+      action={
+        <>
+          <button className={more} onClick={() => ui.focusCapture("todo")} title="记一条事项">
+            <Plus /> 记一条
+          </button>
+          <button className={more} onClick={() => go("work")}>
+            全部事项 <ArrowRight />
+          </button>
+        </>
+      }
+    >
+      {top.map((it) => (
+        <TaskLine key={it.id} it={it} tag={grouped ? projects.find((p) => p.id === owner.get(it.id))?.name : undefined} />
+      ))}
+      {groups.map((g) => (
+        <div key={g.id} className="flex flex-col">
+          <button className="flex items-center gap-2 px-2 pt-2 pb-0.5 text-left text-xs font-semibold text-muted hover:text-fg" onClick={() => ui.setProj(g.id)} title="只看这个项目">
+            {g.name}
+            <span className="font-normal text-faint">{g.list.length}</span>
+          </button>
+          {(all ? g.list : g.list.slice(0, 4)).map((it) => (
+            <TaskLine key={it.id} it={it} />
+          ))}
+          {!all && g.list.length > 4 && (
+            <button className={cx(more, "self-start")} onClick={() => ui.setProj(g.id)}>
+              还有 {g.list.length - 4} 条
+            </button>
+          )}
+        </div>
+      ))}
+      {!work.length && <Empty>没有没做完的事项。右下角的加号，或者按 / 记一条。</Empty>}
+      {rest.length > 0 && (
+        <>
+          {all && rest.slice(0, 40).map((it) => <TaskLine key={it.id} it={it} />)}
+          <button className={cx(more, "self-start")} onClick={() => setAll(!all)}>
+            {all ? "收起不急的" : `还有 ${rest.length} 条不急的`}
+          </button>
+        </>
+      )}
+    </Card>,
+    <Card
+      id="waiting"
+      key="waiting"
+      title="等你处理"
+      hint={waiting ? undefined : "都处理完了"}
+      action={
+        <>
+          {unread > 0 && (
+            <button className={more} onClick={() => go("inbox")}>
+              <MessageSquare /> 聊天未读 {unread}
+            </button>
+          )}
+          {rawCount > 0 && (
+            <button className={more} onClick={() => go("vault")}>
+              <KeyRound /> 密码待整理 {rawCount}
+            </button>
+          )}
+          <button className={more} onClick={() => go("inbox")}>
+            收件箱 {inbox.length || ""} <ArrowRight />
+          </button>
+        </>
+      }
+    >
+      {briefs.map(({ it, b }) => (
+        <button key={"brief" + it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
+          <Bot className="size-[17px] shrink-0 text-accent" strokeWidth={1.8} />
+          <Chip tone="accent">{b!.status === "ready" ? "出了计划，等你确认" : `等你回答 ${openQuestions(b).length} 个问题`}</Chip>
+          <span className="min-w-0 grow truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
+          <span className="shrink-0 text-xs text-faint">{b!.agent}</span>
+        </button>
+      ))}
+      {ai.map(({ it, p }) => (
+        <button key={"ai" + it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
+          <Bot className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
+          <Chip tone={p!.status === "blocked" ? "danger" : "accent"}>AI {p!.status === "blocked" ? "卡住了" : "做完了"}</Chip>
+          <span className="min-w-0 shrink-0 truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
+          <span className="min-w-0 grow truncate text-xs text-muted">{plain(p!.text)}</span>
+          <span className="shrink-0 text-xs text-faint">{ago(p!.at)}</span>
+        </button>
+      ))}
+      {inbox.slice(0, 6).map((it) => (
+        <div key={it.id} className={rowCls} data-item-id={it.id}>
+          <InboxIcon className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
+          <button onClick={() => ui.openPeek(it.id)} className="min-w-0 grow truncate py-1.5 text-left text-sm text-fg" title="点开看">
+            {plain(it.body || it.title)}
+          </button>
+          <span className="shrink-0 text-xs text-faint group-hover:hidden">{ago(it.createdAt)}</span>
+          <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
+            <button className="flex h-7 items-center gap-1 rounded-md bg-surface px-2 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5" onClick={() => patchItem(it, { type: "todo" }).then(() => ui.say("转成了事项"))}>
+              <SquareCheck /> 事项
+            </button>
+            <button className="flex h-7 items-center gap-1 rounded-md bg-surface px-2 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5" onClick={() => patchItem(it, { type: "note" }).then(() => ui.say("转成了笔记"))}>
+              <FileText /> 笔记
+            </button>
+          </span>
+        </div>
+      ))}
+      {inbox.length > 6 && (
+        <button className={cx(more, "self-start")} onClick={() => go("inbox")}>
+          收件箱里还有 {inbox.length - 6} 条
+        </button>
+      )}
+      {!ai.length && !inbox.length && !briefs.length && <Empty>收件箱是空的，也没有 AI 等你回话。</Empty>}
+    </Card>,
+    <Card
+      id="notes"
+      key="notes"
+      title="接着写"
+      hint="置顶的和最近改过的笔记"
+      action={
+        <button className={more} onClick={() => go("notes")}>
+          全部笔记 <ArrowRight />
+        </button>
+      }
+    >
+      {notes.map((it) => (
+        <button key={it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")} title="点开看和改">
+          <FileText className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
+          {it.pinned && <Pin className="size-3.5 shrink-0 text-accent" />}
+          <span className="min-w-0 grow truncate text-sm text-fg">{noteTitle(it)}</span>
+          {it.category && <span className="max-w-[110px] shrink-0 truncate text-xs text-faint">{it.category.split("/").pop()}</span>}
+          <span className="shrink-0 text-xs text-faint">{ago(it.updatedAt)}</span>
+        </button>
+      ))}
+      {!notes.length && <Empty>还没有笔记。</Empty>}
+    </Card>,
+    inProject && !!vault?.keys.length && (
+      <Card
+        id="accounts"
+        key="accounts"
+        title="这个项目的账号"
+        hint={vks ? (accounts.length ? "点一下复制密码" : undefined) : undefined}
+        action={
+          <button className={more} onClick={() => go("vault")}>
+            密码库 <ArrowRight />
+          </button>
+        }
+      >
+        {!vks ? (
+          <Empty>密码库锁着。解锁后这里列出归到这个项目的账号。</Empty>
+        ) : accounts.length ? (
+          accounts.map((e) => (
+            <div key={e.s.id} className={rowCls}>
+              <EntryIcon e={e} />
+              <button className="flex min-w-0 grow items-baseline gap-2 py-1.5 text-left" onClick={() => copyAccount(e)} title="点一下复制密码">
+                <span className="truncate text-sm text-fg">{titleOf(e)}</span>
+                <span className="truncate font-mono text-xs text-muted">{identityOf(e.f!)?.value}</span>
+              </button>
+              <button
+                className="hidden h-7 shrink-0 items-center rounded-md bg-surface px-2 text-xs text-fg-2 group-hover:flex hover:bg-surface-3 hover:text-fg"
+                onClick={() => {
+                  useVaultUi.getState().setSel(e.s.id);
+                  go("vault");
+                }}
+              >
+                看全部
+              </button>
+            </div>
+          ))
+        ) : (
+          <Empty>还没有归到这个项目的账号。在密码库里编辑一条，选上这个项目；名称里带项目关键词的会自动归过来。</Empty>
+        )}
+      </Card>
+    ),
+    <Card
+      id="links"
+      key="links"
+      title="常用入口"
+      hint="置顶的和常点的在前面"
+      action={
+        <button className={more} onClick={() => go("links")}>
+          全部入口 <ArrowRight />
+        </button>
+      }
+    >
+      <div className="flex flex-wrap gap-1.5 px-1.5 pb-1">
+        {links.map((it) => {
+          const t = entryTarget(it);
+          return (
+            <button
+              key={it.id}
+              data-item-id={it.id}
+              title={t || "还没填网址或路径"}
+              onClick={async () => {
+                if (!t) return ui.openPeek(it.id);
+                bumpLink(it.id);
+                const how = await openTarget(t);
+                ui.say(how === "copied" ? "已复制：" + t : "已打开：" + it.title);
+              }}
+              className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 text-[13px] text-fg-2 hover:bg-surface-3 hover:text-fg"
+            >
+              {it.pinned ? <Pin className="size-3.5 shrink-0 text-accent" /> : <Link2 className="size-3.5 shrink-0 text-muted" />}
+              <span className="truncate">{it.title}</span>
+            </button>
+          );
+        })}
+      </div>
+      {!links.length && <Empty>还没有入口。常用的网址、文件夹、远程地址可以记成入口。</Empty>}
+    </Card>,
+  ];
+  const tiles: Tile[] = cards.flatMap((c) => (c ? [{ id: c.props.id, title: c.props.title, hint: c.props.hint, action: c.props.action, body: c.props.children }] : []));
+
+
   return (
     <main aria-label="首页" className="scroll-quiet flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto pb-20">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1">
@@ -216,206 +426,7 @@ export function Home() {
         </button>
       </div>
       <ProjectBar counts={openCount} loose={loose} />
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <Card
-            title="现在该做的"
-            hint={work.length ? `${grouped ? "要紧的在最前，其余按项目分" : "逾期、快到期、置顶、P0 / P1 排在前面"} · 共 ${work.length} 条没做完` : undefined}
-            action={
-              <>
-                <button className={more} onClick={() => ui.focusCapture("todo")} title="记一条事项">
-                  <Plus /> 记一条
-                </button>
-                <button className={more} onClick={() => go("work")}>
-                  全部事项 <ArrowRight />
-                </button>
-              </>
-            }
-          >
-            {top.map((it) => (
-              <TaskLine key={it.id} it={it} tag={grouped ? projects.find((p) => p.id === owner.get(it.id))?.name : undefined} />
-            ))}
-            {groups.map((g) => (
-              <div key={g.id} className="flex flex-col">
-                <button className="flex items-center gap-2 px-2 pt-2 pb-0.5 text-left text-xs font-semibold text-muted hover:text-fg" onClick={() => ui.setProj(g.id)} title="只看这个项目">
-                  {g.name}
-                  <span className="font-normal text-faint">{g.list.length}</span>
-                </button>
-                {(all ? g.list : g.list.slice(0, 4)).map((it) => (
-                  <TaskLine key={it.id} it={it} />
-                ))}
-                {!all && g.list.length > 4 && (
-                  <button className={cx(more, "self-start")} onClick={() => ui.setProj(g.id)}>
-                    还有 {g.list.length - 4} 条
-                  </button>
-                )}
-              </div>
-            ))}
-            {!work.length && <Empty>没有没做完的事项。右下角的加号，或者按 / 记一条。</Empty>}
-            {rest.length > 0 && (
-              <>
-                {all && rest.slice(0, 40).map((it) => <TaskLine key={it.id} it={it} />)}
-                <button className={cx(more, "self-start")} onClick={() => setAll(!all)}>
-                  {all ? "收起不急的" : `还有 ${rest.length} 条不急的`}
-                </button>
-              </>
-            )}
-          </Card>
-          <Card
-            title="等你处理"
-            hint={waiting ? undefined : "都处理完了"}
-            action={
-              <>
-                {unread > 0 && (
-                  <button className={more} onClick={() => go("inbox")}>
-                    <MessageSquare /> 聊天未读 {unread}
-                  </button>
-                )}
-                {rawCount > 0 && (
-                  <button className={more} onClick={() => go("vault")}>
-                    <KeyRound /> 密码待整理 {rawCount}
-                  </button>
-                )}
-                <button className={more} onClick={() => go("inbox")}>
-                  收件箱 {inbox.length || ""} <ArrowRight />
-                </button>
-              </>
-            }
-          >
-            {briefs.map(({ it, b }) => (
-              <button key={"brief" + it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
-                <Bot className="size-[17px] shrink-0 text-accent" strokeWidth={1.8} />
-                <Chip tone="accent">{b!.status === "ready" ? "出了计划，等你确认" : `等你回答 ${openQuestions(b).length} 个问题`}</Chip>
-                <span className="min-w-0 grow truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
-                <span className="shrink-0 text-xs text-faint">{b!.agent}</span>
-              </button>
-            ))}
-            {ai.map(({ it, p }) => (
-              <button key={"ai" + it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
-                <Bot className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
-                <Chip tone={p!.status === "blocked" ? "danger" : "accent"}>AI {p!.status === "blocked" ? "卡住了" : "做完了"}</Chip>
-                <span className="min-w-0 shrink-0 truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
-                <span className="min-w-0 grow truncate text-xs text-muted">{plain(p!.text)}</span>
-                <span className="shrink-0 text-xs text-faint">{ago(p!.at)}</span>
-              </button>
-            ))}
-            {inbox.slice(0, 6).map((it) => (
-              <div key={it.id} className={rowCls} data-item-id={it.id}>
-                <InboxIcon className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
-                <button onClick={() => ui.openPeek(it.id)} className="min-w-0 grow truncate py-1.5 text-left text-sm text-fg" title="点开看">
-                  {plain(it.body || it.title)}
-                </button>
-                <span className="shrink-0 text-xs text-faint group-hover:hidden">{ago(it.createdAt)}</span>
-                <span className="hidden shrink-0 items-center gap-1 group-hover:flex">
-                  <button className="flex h-7 items-center gap-1 rounded-md bg-surface px-2 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5" onClick={() => patchItem(it, { type: "todo" }).then(() => ui.say("转成了事项"))}>
-                    <SquareCheck /> 事项
-                  </button>
-                  <button className="flex h-7 items-center gap-1 rounded-md bg-surface px-2 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5" onClick={() => patchItem(it, { type: "note" }).then(() => ui.say("转成了笔记"))}>
-                    <FileText /> 笔记
-                  </button>
-                </span>
-              </div>
-            ))}
-            {inbox.length > 6 && (
-              <button className={cx(more, "self-start")} onClick={() => go("inbox")}>
-                收件箱里还有 {inbox.length - 6} 条
-              </button>
-            )}
-            {!ai.length && !inbox.length && !briefs.length && <Empty>收件箱是空的，也没有 AI 等你回话。</Empty>}
-          </Card>
-        </div>
-        <div className="flex min-w-0 flex-col gap-3">
-          <Card
-            title="接着写"
-            hint="置顶的和最近改过的笔记"
-            action={
-              <button className={more} onClick={() => go("notes")}>
-                全部笔记 <ArrowRight />
-              </button>
-            }
-          >
-            {notes.map((it) => (
-              <button key={it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")} title="点开看和改">
-                <FileText className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
-                {it.pinned && <Pin className="size-3.5 shrink-0 text-accent" />}
-                <span className="min-w-0 grow truncate text-sm text-fg">{noteTitle(it)}</span>
-                {it.category && <span className="max-w-[110px] shrink-0 truncate text-xs text-faint">{it.category.split("/").pop()}</span>}
-                <span className="shrink-0 text-xs text-faint">{ago(it.updatedAt)}</span>
-              </button>
-            ))}
-            {!notes.length && <Empty>还没有笔记。</Empty>}
-          </Card>
-          {inProject && !!vault?.keys.length && (
-            <Card
-              title="这个项目的账号"
-              hint={vks ? (accounts.length ? "点一下复制密码" : undefined) : undefined}
-              action={
-                <button className={more} onClick={() => go("vault")}>
-                  密码库 <ArrowRight />
-                </button>
-              }
-            >
-              {!vks ? (
-                <Empty>密码库锁着。解锁后这里列出归到这个项目的账号。</Empty>
-              ) : accounts.length ? (
-                accounts.map((e) => (
-                  <div key={e.s.id} className={rowCls}>
-                    <EntryIcon e={e} />
-                    <button className="flex min-w-0 grow items-baseline gap-2 py-1.5 text-left" onClick={() => copyAccount(e)} title="点一下复制密码">
-                      <span className="truncate text-sm text-fg">{titleOf(e)}</span>
-                      <span className="truncate font-mono text-xs text-muted">{identityOf(e.f!)?.value}</span>
-                    </button>
-                    <button
-                      className="hidden h-7 shrink-0 items-center rounded-md bg-surface px-2 text-xs text-fg-2 group-hover:flex hover:bg-surface-3 hover:text-fg"
-                      onClick={() => {
-                        useVaultUi.getState().setSel(e.s.id);
-                        go("vault");
-                      }}
-                    >
-                      看全部
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <Empty>还没有归到这个项目的账号。在密码库里编辑一条，选上这个项目；名称里带项目关键词的会自动归过来。</Empty>
-              )}
-            </Card>
-          )}
-          <Card
-            title="常用入口"
-            hint="置顶的和常点的在前面"
-            action={
-              <button className={more} onClick={() => go("links")}>
-                全部入口 <ArrowRight />
-              </button>
-            }
-          >
-            <div className="flex flex-wrap gap-1.5 px-1.5 pb-1">
-              {links.map((it) => {
-                const t = entryTarget(it);
-                return (
-                  <button
-                    key={it.id}
-                    data-item-id={it.id}
-                    title={t || "还没填网址或路径"}
-                    onClick={async () => {
-                      if (!t) return ui.openPeek(it.id);
-                      bumpLink(it.id);
-                      const how = await openTarget(t);
-                      ui.say(how === "copied" ? "已复制：" + t : "已打开：" + it.title);
-                    }}
-                    className="flex h-8 max-w-[220px] items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 text-[13px] text-fg-2 hover:bg-surface-3 hover:text-fg"
-                  >
-                    {it.pinned ? <Pin className="size-3.5 shrink-0 text-accent" /> : <Link2 className="size-3.5 shrink-0 text-muted" />}
-                    <span className="truncate">{it.title}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {!links.length && <Empty>还没有入口。常用的网址、文件夹、远程地址可以记成入口。</Empty>}
-          </Card>
-        </div>
-      </div>
+      <HomeGrid tiles={tiles} defaults={LAYOUT} storeKey="wb-home-layout" />
     </main>
   );
 }
