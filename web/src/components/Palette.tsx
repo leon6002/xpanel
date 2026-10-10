@@ -16,6 +16,7 @@ import { typeName } from "../lib/types";
 import { groupOf, identityOf, mainOf, openSecret, tailOf, unlock, useVault, useVaultUi } from "../lib/vault";
 import { bumpUsage, domainOf, recentEntries, scoreVault, titleOf, type Entry } from "../lib/vaultSearch";
 import { cx } from "../lib/cx";
+import { bumpLink } from "./Home";
 import { EntryIcon, MasterInput, useVaultState } from "./Vault";
 import { ErrorText, Pri } from "./ui";
 
@@ -187,6 +188,7 @@ function Panel({ close }: { close: () => void }) {
       const it = r.hit.item;
       const target = it.type === "link" ? entryTarget(it) : null;
       if (target && !alt) {
+        bumpLink(it.id);
         const how = await openTarget(target);
         say(how === "copied" ? "已复制：" + target : "已打开：" + it.title);
         return close();

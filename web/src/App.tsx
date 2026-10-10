@@ -1,7 +1,8 @@
-/* 界面骨架：左侧导航 · 中间列表 · 右边阅读（收件箱是会话列表 + 消息流），右下角快速记录，右侧浮出面板 */
+/* 界面骨架：左侧窄栏 · 首页（一整页的总览）或 中间列表 + 右边阅读（收件箱是会话列表 + 消息流），右下角快速记录，右侧浮出面板 */
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Capture } from "./components/Capture";
+import { Home } from "./components/Home";
 import { Banner, QaFloat, useClaimPrompt, useGlobalInput } from "./components/Global";
 import { InboxList, InboxMain } from "./components/Inbox";
 import { ListPane } from "./components/ListPane";
@@ -60,13 +61,15 @@ function Shell() {
     );
 
   return (
-    <div className="flex h-full min-w-0 gap-6 p-4">
+    <div className="flex h-full min-w-0 gap-4 p-4">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         <Banner />
         <div className="flex min-h-0 min-w-0 flex-1 gap-5">
           {isLoading && !data ? (
             <div className="grid grow place-items-center text-sm text-muted">加载中…</div>
+          ) : view === "home" ? (
+            <Home />
           ) : view === "inbox" ? (
             <>
               <InboxList />

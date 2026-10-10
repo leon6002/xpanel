@@ -3,7 +3,7 @@ import { create } from "zustand";
 import { setWindowTheme } from "./api";
 import type { ItemType } from "./types";
 
-export type View = "inbox" | "work" | "notes" | "links" | "rules" | "vault";
+export type View = "home" | "inbox" | "work" | "notes" | "links" | "rules" | "vault";
 export type Theme = "system" | "light" | "dark";
 
 const ls = {
@@ -76,7 +76,8 @@ export function holdToast(hold: boolean) {
 }
 
 export const useUi = create<Ui>((set, get) => ({
-  view: (ls.get("wb-next-view") as View) || "notes",
+  // 每次打开先到首页
+  view: "home",
   selected: {},
   cat: null,
   tag: null,
@@ -86,7 +87,7 @@ export const useUi = create<Ui>((set, get) => ({
   peekFull: false,
   qaPending: {},
   theme: (ls.get("wb-theme") as Theme) || "system",
-  capType: (({ notes: "note", links: "link", rules: "rule" } as Record<string, ItemType>)[ls.get("wb-next-view") || ""] ?? "todo"),
+  capType: "todo",
   mode: (ls.get("wb-notemode") as "read" | "edit" | "split") || "read",
   toast: null,
   setView: (view) => {
