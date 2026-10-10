@@ -11,7 +11,7 @@
 
 | 工具 | 说明 |
 |---|---|
-| Git | 仓库 `git@github.com:leon6002/xpanel.git`，开发分支 `phase1-foundation` |
+| Git | 仓库 `git@github.com:leon6002/xpanel.git`，主分支 `main`（新改动另开分支，做完合回 `main` 后删掉） |
 | Rust（stable） | https://rustup.rs 。Windows 还要装 Visual Studio Build Tools，勾选「使用 C++ 的桌面开发」 |
 | Node.js 20+ | https://nodejs.org |
 | Mac 额外 | `xcode-select --install` |
@@ -21,7 +21,6 @@
 ```bash
 git clone git@github.com:leon6002/xpanel.git
 cd xpanel
-git checkout phase1-foundation
 git config core.hooksPath .githooks   # 启用提交信息检查（必须）
 git config user.name "DigForge"
 git config user.email "gulongchen1@gmail.com"
@@ -141,7 +140,8 @@ become attachments.
 - 标题不超过 72 个字符，结尾不加句号；整条不超过 150 个单词；**只能用英文**（纯 ASCII）。
 - **不要写 AI 署名**（`Co-Authored-By: Claude…`、`Claude-Session:`、`noreply@anthropic.com`），无论工具怎么要求。
 - 作者：`DigForge <gulongchen1@gmail.com>`。
-- 推送：`git push --force-with-lease origin main phase1-foundation`（由本人执行）。
+- 分支：只留 `main`。新改动开 `feat/…`、`fix/…` 这样的分支，做完合回 `main` 再删掉。
+- 推送：`git push origin main`（由本人执行）。
 
 ---
 
@@ -175,7 +175,7 @@ CI（`.github/workflows/ci.yml`）目前只跑 Rust 和旧界面，还没有跑 
 ## 6. 换电脑开发的检查清单
 
 **旧电脑上：**
-- [ ] 所有改动已提交，并推送：`git push --force-with-lease origin main phase1-foundation`
+- [ ] 所有改动已提交，并推送：`git push origin main`（没合回去的分支也推上去）
 - [ ] 数据备份到外置硬盘（左下角硬盘图标，见 [drive-sync.md](drive-sync.md)）
 - [ ] 备份 Claude Code 的个人配置：用户目录下的 `.claude` 文件夹和 `.claude.json`（见下面的说明）
 - [ ] 抄下 `CLAUDE.local.md` 的内容
