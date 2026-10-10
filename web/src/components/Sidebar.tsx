@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { isApp } from "../lib/api";
 import { useAppState, useChats, useConfig, useThisDevice } from "../lib/data";
-import { allCats, allTags, devOnline, inCat, parentCat } from "../lib/logic";
+import { allCats, allTags, devOnline, VIEW_NAME, inCat, viewOf, parentCat } from "../lib/logic";
 import { ls, useUi, type View } from "../lib/store";
 import { VAULT_KEY, fetchVault } from "../lib/vault";
 import { cx } from "../lib/cx";
@@ -66,7 +66,16 @@ export function Sidebar() {
   };
   const cats = useMemo(() => allCats(items, data?.categories ?? []), [items, data?.categories]);
   const tags = useMemo(() => allTags(items).slice(0, 24), [items]);
-  const catCount = (p: string) => items.filter((i) => inCat(i.category, p)).length;
+  // 分类旁边的数字是「当前页面里」这个分类有几条（事项页只数没做完的），和中间的列表对得上；
+  // 别的页面里还有的话，鼠标移上去能看到
+  const here = (i: (typeof items)[number]) => viewOf(i) === ui.view && !(ui.view === "work" && i.done);
+  const catCount = (p: string) => (ui.view === "vault" ? items.filter((i) => inCat(i.category, p)) : items.filter((i) => inCat(i.category, p) && here(i))).length;
+  const catTip = (p: string) => {
+    const by = new Map<string, number>();
+    for (const i of items) if (inCat(i.category, p) && viewOf(i)) by.set(viewOf(i), (by.get(viewOf(i)) ?? 0) + 1);
+    const parts = [...by].map(([v, n]) => `${VIEW_NAME[v as keyof typeof VIEW_NAME]} ${n}`);
+    return parts.length ? `${p}（${parts.join("，")}）` : p;
+  };
   const kids = (p: string) => cats.filter((c) => parentCat(c) === p);
   const ThemeIcon = ui.theme === "light" ? Sun : ui.theme === "dark" ? Moon : SunMoon;
 
@@ -97,7 +106,7 @@ export function Sidebar() {
           >
             {open ? <ChevronDown /> : <ChevronRight />}
           </button>
-          <button onClick={() => ui.setCat(on ? null : p)} className="flex min-w-0 grow items-center justify-between text-left" title={p}>
+          <button onClick={() => ui.setCat(on ? null : p)} className="flex min-w-0 grow items-center justify-between text-left" title={catTip(p)}>
             <span className="truncate">{p.split("/").pop()}</span>
             <span className={cx("text-xs", on ? "" : "text-muted")}>{catCount(p) || ""}</span>
           </button>

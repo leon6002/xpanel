@@ -146,6 +146,9 @@ export function parseCapture(raw: string, type: ItemType, devices: Device[]) {
 
 /* ---- 分类：/ 分层 ---- */
 export const normCat = (s: string) => String(s || "").split(/[/\\]/).map((x) => x.trim()).filter(Boolean).slice(0, 5).join("/");
+/** 这一条显示在哪个页面（事项、笔记…） */
+export const viewOf = (it: Item) => (({ todo: "work", issue: "work", idea: "work", note: "notes", link: "links", rule: "rules", inbox: "inbox" }) as Record<string, "work" | "notes" | "links" | "rules" | "inbox">)[it.type];
+export const VIEW_NAME = { inbox: "收件箱", work: "事项", notes: "笔记", links: "入口", rules: "规范", vault: "密码库" } as const;
 export const inCat = (c: string | undefined, p: string) => !!c && (c === p || c.startsWith(p + "/"));
 export function allCats(items: Item[], extra: string[] = []) {
   const set = new Set<string>();

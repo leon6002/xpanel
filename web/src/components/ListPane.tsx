@@ -21,8 +21,8 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
 }
 const fullText = (it: Item) => [it.title, it.body].filter(Boolean).join("\n\n");
 import { addItem, patchItem, useAppState, useDevices } from "../lib/data";
-import { ago, byPriority, byRecent, deviceByHost, devOnline, dueInfo, entryTarget, hostOf, imageRefs, inCat, noteTitle, plain, type HostKind } from "../lib/logic";
-import { useUi } from "../lib/store";
+import { ago, byPriority, byRecent, deviceByHost, devOnline, dueInfo, entryTarget, hostOf, imageRefs, inCat, noteTitle, plain, viewOf, VIEW_NAME, type HostKind } from "../lib/logic";
+import { useUi, type View } from "../lib/store";
 import type { Item } from "../lib/types";
 import { TYPES } from "../lib/types";
 import { useMyWorkspace } from "../lib/ws";
@@ -376,6 +376,19 @@ export function ListPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, devices, ui.view, ui.cat, ui.tag, ui.q, ui.dev, sel]);
 
+  // 按分类、标签筛选时这个页面里一条都没有，但别的页面里有：说出来在哪，点一下过去。
+  // 免得看到分类里明明有东西、这里却是空的，以为内容丢了
+  const elsewhere = useMemo(() => {
+    if (!filtering || ui.view === "vault") return [];
+    const by = new Map<View, number>();
+    for (const i of items) {
+      const v = viewOf(i);
+      if (v && match(i)) by.set(v, (by.get(v) ?? 0) + 1);
+    }
+    return by.get(ui.view as Exclude<View, "vault">) ? [] : [...by];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, ui.view, ui.cat, ui.tag, ui.q, ui.dev]);
+
   async function create() {
     if (ui.view === "notes") {
       const it = await addItem({ type: "note", title: "", body: "", ...(ui.cat && ui.cat !== "none" ? { category: ui.cat } : {}), tags: ui.tag ? [ui.tag] : [] }).catch(() => null);
@@ -408,6 +421,18 @@ export function ListPane() {
         </Button>
       </div>
       <div className="scroll-quiet -mx-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
+        {elsewhere.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-xl bg-surface-2 px-3.5 py-3 text-[13px] text-fg-2">
+            <span>「{VIEW_NAME[ui.view]}」里没有符合的，内容在别的页面：</span>
+            <span className="flex flex-wrap gap-1.5">
+              {elsewhere.map(([v, n]) => (
+                <button key={v} onClick={() => ui.setView(v)} className="rounded-lg bg-surface px-2.5 py-1 font-medium text-fg hover:bg-surface-3">
+                  {VIEW_NAME[v]} {n} 条 →
+                </button>
+              ))}
+            </span>
+          </div>
+        )}
         {body.node}
       </div>
     </section>
