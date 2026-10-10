@@ -30,6 +30,8 @@ export interface Item {
   agentProgress?: Progress[];
   agentLog?: { agent: string; at: number }[];
   workspaces?: Workspace[];
+  /** 交给 AI 之前的讨论：它问的问题、你的回答、计划（见 lib/brief.ts） */
+  brief?: unknown;
   /** 父笔记（笔记、规范可以分层） */
   parentId?: string;
   /** 关联的其他条目（见 lib/links.ts） */

@@ -164,18 +164,13 @@ function forAi(body: string) {
 }
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "\n…（后面省略）" : s);
 
-export function buildAskPrompt(
-  it: Item,
-  ctx: { quote?: string; prefix?: string; suffix?: string },
-  question: string,
-  prev?: { q: string; a: string }[],
-  related: { item: Item; label?: string }[] = [],
-) {
-  const kind = typeName(it.type);
+/** 一条和它关联的条目，写成给 AI 看的材料（正文、关联的内容、附件在哪） */
+export function contextLines(it: Item, related: { item: Item; label?: string }[] = [], ctx: { quote?: string; prefix?: string; suffix?: string } = {}) {
   const body = forAi(String(it.body || ""));
-  const L = [`你在帮我处理工作台里的一条「${kind}」，回答我关于它的问题。`, ``, `标题：${it.title || "(无标题)"}`];
+  const L = [`标题：${it.title || "(无标题)"}`];
+  if (it.category) L.push(`分类：${it.category}`);
   if (ctx.quote) L.push(``, `我选中的原文：`, ...ctx.quote.split("\n").map((l) => "> " + l), ``, `（前后文：…${ctx.prefix || ""}【${ctx.quote}】${ctx.suffix || ""}…）`);
-  L.push(``, `正文：`, "```markdown", cut(body, 12000), "```");
+  L.push(``, `正文：`, "```markdown", cut(body, 12000) || "（没有写正文）", "```");
   if (related.length) {
     L.push(``, `和它关联的 ${related.length} 条（标签说明了它们和这条的关系）：`);
     let budget = 40000;
@@ -191,6 +186,17 @@ export function buildAskPrompt(
   }
   if (/\[(图片|附件)[^\]]*：\.xpanel\//.test(L.join("\n")))
     L.push(``, `上面提到的图片和附件（比如简历 PDF）已经放在当前工作目录的 ${ASK_FILES}/ 下，标着路径。问题和它们有关时，先用读文件的工具打开看清内容再回答，不要说看不到。`);
+  return L;
+}
+
+export function buildAskPrompt(
+  it: Item,
+  ctx: { quote?: string; prefix?: string; suffix?: string },
+  question: string,
+  prev?: { q: string; a: string }[],
+  related: { item: Item; label?: string }[] = [],
+) {
+  const L = [`你在帮我处理工作台里的一条「${typeName(it.type)}」，回答我关于它的问题。`, ``, ...contextLines(it, related, ctx)];
   if (prev && prev.length) {
     L.push(``, `之前的对话：`);
     prev.forEach((t) => L.push(`问：${t.q}`, `答：${t.a}`, ``));

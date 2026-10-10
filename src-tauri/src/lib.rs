@@ -383,6 +383,53 @@ async fn put_asset(s: St<'_>, name: String, data: String) -> Result<String, Stri
     .await
 }
 
+/// 把界面生成的文件（比如导出的上下文压缩包）存到「下载」文件夹，返回存到了哪。重名的在后面加序号，不覆盖
+#[tauri::command]
+async fn save_download(app: AppHandle, name: String, data: String) -> Result<String, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().home_dir())
+        .map_err(|e| format!("找不到下载文件夹：{e}"))?;
+    blocking(move || {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data.as_bytes())
+            .map_err(|e| e.to_string())?;
+        // 文件名里只留安全的字符，不让它带路径
+        let clean: String = name
+            .chars()
+            .map(|c| {
+                if c.is_control() || "\\/:*?\"<>|".contains(c) {
+                    '_'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let clean = clean.trim().trim_matches('.').to_string();
+        let clean = if clean.is_empty() {
+            "xpanel-export".to_string()
+        } else {
+            clean
+        };
+        let (stem, ext) = match clean.rsplit_once('.') {
+            Some((a, b)) if !a.is_empty() => (a.to_string(), format!(".{b}")),
+            _ => (clean.clone(), String::new()),
+        };
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let mut path = dir.join(&clean);
+        let mut n = 2;
+        while path.exists() {
+            path = dir.join(format!("{stem} ({n}){ext}"));
+            n += 1;
+        }
+        std::fs::write(&path, bytes).map_err(|e| format!("保存失败：{e}"))?;
+        Ok(path.to_string_lossy().to_string())
+    })
+    .await
+}
+
 /// 读一个附件的内容：主机模式读本地数据库，连接模式向主机要
 fn asset_bytes(st: &AppState, name: &str) -> Result<Vec<u8>, String> {
     match st.cfg().mode.as_str() {
@@ -589,6 +636,7 @@ pub fn run() {
             set_this_device,
             api_call,
             ask_ai,
+            save_download,
             set_sync_dir,
             workspace::workspace_defaults,
             workspace::workspace_check,

@@ -23,6 +23,10 @@
   （`src-tauri/src/agent.rs` 的 `ask`，提示词走标准输入，claude → `claude -p`、codex → `codex exec -`）。界面在 `web/src/components/Comments.tsx`。
   存在条目的 `qa`（`{id, quote, prefix, suffix, at, resolved?, turns:[{q,a,at,by}]}`：q 是人写的、a 是 AI 的回答、by 是哪个 AI），
   按原话 + 前后文定位；全文索引包含评论内容；MCP 的 `xpanel_add_qa` 写的也是这个字段。
+- 交给 AI 之前先讨论：条目的 `brief`（`{agent, status: asking|ready|done, rounds:[{at, note, questions:[{id,q,why,options,a}]}], plan, feedback, resultId}`）。
+  逻辑在 `web/src/lib/brief.ts`（提示词、解析 AI 回的 JSON、整理成 Markdown），界面在 `web/src/components/Brief.tsx`（这一条下面的讨论面板、「交给 AI」先选怎么交）。
+  桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来。
+  导出上下文：`web/src/lib/exportContext.ts` 在界面里打一个 zip（README、task.md、discussion.md、comments.md、related/、files/），桌面版用 `save_download` 存到「下载」文件夹。
 - 关联：条目的 `links: [{id, label?}]`（发起方存，另一边显示「关联了这条」）；正文里 `[标题](xpanel:item/ID)` 是引用（编辑器里输入 `[[`）。
   界面 `web/src/lib/links.ts` + `web/src/components/Related.tsx`。评论里 @AI 时关联条目的内容和附件一起给 AI；AI 的回答可以「存为笔记」并以「产出」关联回来。
 - 多台电脑同时改：界面改字段用 `patch` 操作（`xp-core` 的 `Op::Patch`，只发改动的字段，在主机的最新内容上合并）；

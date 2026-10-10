@@ -13,6 +13,7 @@ import { useMyWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
 import { putAsset } from "../lib/api";
 import { openAgent } from "../dialogs/Agent";
+import { BriefPanel } from "./Brief";
 import { Md } from "./Markdown";
 import { CommentsSection, flash } from "./Comments";
 import { Breadcrumb, ChildNotes, openMove, type OpenFn } from "./Tree";
@@ -124,6 +125,7 @@ function ReadBody({ it, onEdit, open }: { it: Item; onEdit: () => void; open: Op
         </div>
         <ProgressList it={it} />
       </article>
+      <BriefPanel it={it} />
       {it.type !== "inbox" && <RelatedSection it={it} />}
       {canNest(it) && <ChildNotes it={it} open={open} />}
       <CommentsSection it={it} lost={lost} root={root} />
@@ -451,6 +453,7 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
           </Suspense>
           {x.type !== "link" && (
             <div className="pb-40 pl-12" data-qa-skip>
+              <BriefPanel it={x} />
               <RelatedSection it={x} />
               <CommentsSection it={x} lost={noLost} root={edRoot} />
             </div>

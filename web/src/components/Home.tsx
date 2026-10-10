@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Bot, Check, FileText, Inbox as InboxIcon, KeyRound, Link2, MessageSquare, Pin, Plus, Search, SquareCheck } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { openTarget } from "../lib/api";
+import { briefOf, openQuestions } from "../lib/brief";
 import { patchItem, useAppState, useChats } from "../lib/data";
 import { ago, byPriority, byRecent, dueInfo, entryTarget, noteTitle, plain, viewOf } from "../lib/logic";
 import { ls, useUi, type View } from "../lib/store";
@@ -119,6 +120,16 @@ export function Home() {
       .sort((a, b) => Number(b.p!.status === "blocked") - Number(a.p!.status === "blocked") || b.p!.at - a.p!.at)
       .slice(0, 5);
   }, [items]);
+  // 和 AI 讨论到一半的：它在等你回答，或者出了计划等你点开始
+  const briefs = useMemo(
+    () =>
+      items
+        .map((it) => ({ it, b: briefOf(it) }))
+        .filter((x) => x.b && (x.b.status === "ready" || (x.b.status === "asking" && x.b.rounds.length > 0)))
+        .sort((a, b) => b.it.updatedAt - a.it.updatedAt)
+        .slice(0, 6),
+    [items],
+  );
   const notes = useMemo(
     () =>
       items
@@ -139,7 +150,7 @@ export function Home() {
     useUi.setState({ cat: null, tag: null, q: "", dev: null });
     ui.setView(v);
   };
-  const waiting = inbox.length + unread + rawCount + ai.length;
+  const waiting = inbox.length + unread + rawCount + ai.length + briefs.length;
 
   return (
     <main aria-label="首页" className="scroll-quiet flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto pb-20">
@@ -204,6 +215,14 @@ export function Home() {
               </>
             }
           >
+            {briefs.map(({ it, b }) => (
+              <button key={"brief" + it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
+                <Bot className="size-[17px] shrink-0 text-accent" strokeWidth={1.8} />
+                <Chip tone="accent">{b!.status === "ready" ? "出了计划，等你确认" : `等你回答 ${openQuestions(b).length} 个问题`}</Chip>
+                <span className="min-w-0 grow truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
+                <span className="shrink-0 text-xs text-faint">{b!.agent}</span>
+              </button>
+            ))}
             {ai.map(({ it, p }) => (
               <button key={"ai" + it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
                 <Bot className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
@@ -235,7 +254,7 @@ export function Home() {
                 收件箱里还有 {inbox.length - 6} 条
               </button>
             )}
-            {!ai.length && !inbox.length && <Empty>收件箱是空的，也没有 AI 等你回话。</Empty>}
+            {!ai.length && !inbox.length && !briefs.length && <Empty>收件箱是空的，也没有 AI 等你回话。</Empty>}
           </Card>
         </div>
         <div className="flex min-w-0 flex-col gap-3">

@@ -13,8 +13,15 @@ import { Button, ErrorText, Field, Pick, Toggle, inputCls, textareaCls } from ".
 const say = (t: string) => useUi.getState().say(t);
 const FALLBACK: Template = { id: "general", name: "通用", goal: "", prompt: "请先读 .xpanel/TASK.md 和 .xpanel/note.md。", resume: "" };
 
-/** 浏览器里没法启动本机 AI：直接复制提示词 */
+/** 点「交给 AI」：先选怎么交——先和我讨论（components/Brief.tsx），还是直接开工（下面这个窗口） */
 export function openAgent(it: Item, promptText?: string) {
+  const real = !!qc.getQueryData<State>(["state"])?.items.some((x) => x.id === it.id);
+  if (promptText || !real) return openAgentDirect(it, promptText);
+  import("../components/Brief").then((m) => m.openHandoff(it, () => openAgentDirect(it)));
+}
+
+/** 直接开工。浏览器里没法启动本机 AI：直接复制提示词 */
+export function openAgentDirect(it: Item, promptText?: string) {
   if (!isApp) {
     copyText(promptText || buildPrompt(it)).then((ok) => say(ok ? "已复制提示词，粘贴到任意 AI 即可" : "复制失败"));
     return;
