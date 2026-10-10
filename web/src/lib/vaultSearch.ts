@@ -3,6 +3,7 @@
    - 打一部分、漏几个字母（gthb → GitHub）、错一个字母（githup）都能搜到
    - 名称、域名最重要，其次用户名、标签，再次自定义栏的名字、备注和待整理的原文；不搜密码本身
    - 常用的、最近用过的、置顶的排前面 */
+import { scoreFields, tokensOf, type SearchField } from "./search";
 import { ls } from "./store";
 import { isMailbox, platformOf } from "./platforms";
 import type { Fields, SecretRec } from "./vault";
@@ -45,49 +46,7 @@ export function bumpUsage(id: string) {
   ls.set(KEY, JSON.stringify(usage));
 }
 
-/* ---- 匹配 ---- */
-/** q 的字母按顺序都出现在 s 里（中间可以隔几个）：返回 0–1 的分，隔得越开越低；对不上返回 0 */
-function subseq(q: string, s: string) {
-  let i = 0,
-    first = -1,
-    last = -1;
-  for (let j = 0; j < s.length && i < q.length; j++) {
-    if (s[j] === q[i]) {
-      if (first < 0) first = j;
-      last = j;
-      i++;
-    }
-  }
-  if (i < q.length) return 0;
-  const span = last - first + 1;
-  return span > q.length * 3 ? 0 : q.length / span;
-}
-/** 只差一个字母（多一个、少一个、错一个、相邻两个打反了） */
-function near(a: string, b: string) {
-  if (Math.abs(a.length - b.length) > 1) return false;
-  let i = 0;
-  while (i < a.length && i < b.length && a[i] === b[i]) i++;
-  const ra = a.slice(i),
-    rb = b.slice(i);
-  return ra.slice(1) === rb.slice(1) || ra.slice(1) === rb || ra === rb.slice(1) || (ra.length > 1 && rb.length > 1 && ra[0] === rb[1] && ra[1] === rb[0] && ra.slice(2) === rb.slice(2));
-}
-const words = (s: string) => s.split(/[^a-z0-9一-鿿]+/).filter(Boolean);
-
-/** 一个词对一栏的分：完全一样 > 开头 > 包含 > 字母按顺序出现 > 差一个字母 */
-function hit(tok: string, field: string, fuzzy: boolean) {
-  if (!field) return 0;
-  if (field === tok) return 3;
-  if (field.startsWith(tok)) return 2.2;
-  const at = field.indexOf(tok);
-  if (at >= 0) return /[^a-z0-9]/.test(field[at - 1] ?? " ") ? 1.9 : 1.5;
-  if (!fuzzy || tok.length < 2 || /[一-鿿]/.test(tok)) return 0;
-  const sub = subseq(tok, field);
-  if (sub) return 0.4 + 0.5 * sub;
-  if (tok.length >= 4 && words(field).some((w) => near(tok, w.slice(0, tok.length + 1)) || near(tok, w))) return 0.5;
-  return 0;
-}
-
-function fieldsOf(e: Entry): [string, number, boolean][] {
+function fieldsOf(e: Entry): SearchField[] {
   const f = e.f;
   const low = (s?: string) => (s || "").toLowerCase();
   const p = platformOf(f);
@@ -110,33 +69,23 @@ function fieldsOf(e: Entry): [string, number, boolean][] {
   ];
 }
 
-/** 搜索：返回对得上的，最相关的在前。q 为空时返回全部（按 sortEntries 的顺序） */
-export function searchVault(entries: Entry[], q: string): Entry[] {
-  const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
-  if (!toks.length) return sortEntries(entries);
+/** 搜索：返回对得上的和分数，最相关的在前 */
+export function scoreVault(entries: Entry[], q: string): { e: Entry; score: number }[] {
+  const toks = tokensOf(q);
   const u = getUsage();
   const now = Date.now();
-  const scored: [number, Entry][] = [];
+  const scored: { e: Entry; score: number }[] = [];
   for (const e of entries) {
-    const fs = fieldsOf(e);
-    let total = 0;
-    let ok = true;
-    for (const t of toks) {
-      let best = 0;
-      for (const [text, w, fuzzy] of fs) best = Math.max(best, hit(t, text, fuzzy) * w);
-      if (!best) {
-        ok = false;
-        break;
-      }
-      total += best;
-    }
-    if (!ok) continue;
+    let total = scoreFields(toks, fieldsOf(e));
+    if (!total) continue;
     const use = u[e.s.id];
     total += (use ? Math.log2(use.n + 1) + (now - use.at < 7 * 864e5 ? 1.5 : 0) : 0) + (e.f?.pinned ? 1 : 0);
-    scored.push([total, e]);
+    scored.push({ e, score: total });
   }
-  return scored.sort((a, b) => b[0] - a[0] || titleOf(a[1]).localeCompare(titleOf(b[1]))).map((x) => x[1]);
+  return scored.sort((a, b) => b.score - a.score || titleOf(a.e).localeCompare(titleOf(b.e)));
 }
+/** 搜索：返回对得上的，最相关的在前。q 为空时返回全部（按 sortEntries 的顺序） */
+export const searchVault = (entries: Entry[], q: string): Entry[] => (tokensOf(q).length ? scoreVault(entries, q).map((x) => x.e) : sortEntries(entries));
 
 /** 不搜索时的顺序：同一个平台、同一个网站（域名）的排在一起，然后按名称 */
 export function sortEntries(entries: Entry[]): Entry[] {

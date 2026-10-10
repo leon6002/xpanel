@@ -903,7 +903,7 @@ export function Vault() {
         <label className="flex h-[38px] min-w-[220px] grow basis-[320px] items-center gap-2 rounded-xl bg-surface-2 px-3.5 text-muted max-w-[560px]">
           <Search className="size-4" />
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜名称、网址、用户名、卡号后四位、标签…" aria-label="搜索密码库" className="min-w-0 grow bg-transparent text-fg outline-none placeholder:text-faint" />
-          <kbd className="shrink-0 rounded-md bg-surface-3 px-1.5 text-[11px] text-muted" title="在任何页面按 Ctrl+K 都能搜密码库">
+          <kbd className="shrink-0 rounded-md bg-surface-3 px-1.5 text-[11px] text-muted" title="在任何页面按 Ctrl+K 搜全部（包括密码库）">
             Ctrl K
           </kbd>
         </label>

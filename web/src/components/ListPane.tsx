@@ -1,5 +1,5 @@
 /* 中间的列表：事项（焦点 + 三栏）、笔记、入口（按所在机器分组）、规范 */
-import { Check, ChevronRight, Copy, Link2, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Search, Server, Star } from "lucide-react";
+import { Check, ChevronRight, Copy, Link2, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Server, Star } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { copyText, openTarget } from "../lib/api";
 
@@ -45,24 +45,6 @@ export function useFilter() {
     }
     return true;
   };
-}
-
-function SearchBox() {
-  const { q, setQ } = useUi();
-  return (
-    <label className="flex h-[42px] shrink-0 items-center gap-2 rounded-xl bg-surface-2 px-3.5 text-muted">
-      <Search className="size-4" />
-      <input
-        id="xp-search"
-        type="search"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="搜索全部内容"
-        aria-label="搜索"
-        className="min-w-0 grow bg-transparent text-fg outline-none placeholder:text-faint"
-      />
-    </label>
-  );
 }
 
 function ItemMeta({ it }: { it: Item }) {
@@ -403,7 +385,6 @@ export function ListPane() {
 
   return (
     <section aria-label="列表" className="flex w-[340px] shrink-0 flex-col gap-3.5 max-[1200px]:w-[290px]">
-      <SearchBox />
       <div className="flex items-center gap-2 px-1">
         <h1 className="truncate text-[19px] font-bold">{title}</h1>
         <span className="text-[13px] whitespace-nowrap text-muted">

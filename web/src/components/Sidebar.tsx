@@ -1,5 +1,5 @@
 /* 左侧：导航、分类树、标签、设备、连接状态和外观 */
-import { BookMarked, KeyRound, ChevronDown, ChevronRight, FileText, HardDrive, Inbox, Link2, Moon, Plus, Settings2, SquareCheck, Sun, SunMoon, Tags, MonitorSmartphone } from "lucide-react";
+import { Search, BookMarked, KeyRound, ChevronDown, ChevronRight, FileText, HardDrive, Inbox, Link2, Moon, Plus, Settings2, SquareCheck, Sun, SunMoon, Tags, MonitorSmartphone } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { isApp } from "../lib/api";
@@ -8,6 +8,7 @@ import { allCats, allTags, devOnline, VIEW_NAME, inCat, viewOf, parentCat } from
 import { ls, useUi, type View } from "../lib/store";
 import { VAULT_KEY, fetchVault } from "../lib/vault";
 import { cx } from "../lib/cx";
+import { openPalette } from "./Palette";
 import { openCatMgr } from "../dialogs/Categories";
 import { openDevices } from "../dialogs/Devices";
 import { openSettings } from "../dialogs/Settings";
@@ -125,6 +126,17 @@ export function Sidebar() {
         </div>
         <span className="text-xs text-muted max-[1200px]:hidden">{greet()}</span>
       </div>
+
+      <button
+        onClick={openPalette}
+        title="搜全部：事项、笔记、消息、入口、密码库（Ctrl+K）"
+        aria-label="搜索全部"
+        className="mx-1 flex h-9 items-center gap-2 rounded-xl bg-surface-2 px-3 text-left text-[13px] text-muted hover:bg-surface-3 max-[1200px]:mx-auto max-[1200px]:size-9 max-[1200px]:justify-center max-[1200px]:px-0"
+      >
+        <Search className="size-4 shrink-0" />
+        <span className="grow max-[1200px]:hidden">搜全部</span>
+        <kbd className="rounded-md bg-surface-3 px-1.5 font-mono text-[11px] max-[1200px]:hidden">Ctrl K</kbd>
+      </button>
 
       <div className="flex flex-col gap-1">
         {NAV.map(({ k, name, icon: Icon }) => (

@@ -38,7 +38,7 @@
   因为局域网的明文 HTTP 页面没有 `crypto.subtle`）和 `web/src/components/Vault.tsx`（整页 + AI 取用的确认弹窗 `VaultRequests`）
   + MCP `xp-cli/src/vault.rs`（`xpanel_vault_list` 只有名称；`xpanel_vault_get` 要用户点允许，内容用临时 X25519 公钥加密后经主机转交）。
   随手记：快速记录选「密码」/ 收件箱里的提醒 / 消息工具栏的「密码库」→ `dropSecret`（用钥匙的公钥加密，锁着也能存，`kind = raw` 待整理）→ 之后在密码库里「整理」
-  （`lib/vaultParse.ts` 拆各栏）；转入的收件箱消息用 `scrub_item` 真的抹掉。搜索在本机做：`lib/vaultSearch.ts` + `components/VaultPalette.tsx`（Ctrl+K）。
+  （`lib/vaultParse.ts` 拆各栏）；转入的收件箱消息用 `scrub_item` 真的抹掉。搜索在本机做：`lib/vaultSearch.ts`，入口是全局搜索 `components/Palette.tsx`（Ctrl+K）。
   种类和各栏定义在 `lib/vault.ts` 的 `SPECS`（银行分手机银行 / 信用卡，`sub` 在密文里）；平台预设和 logo 在 `lib/platformData.ts` / `lib/platforms.ts`（`platform`、`label` 在密文里，同平台两个以上账号排成一组）；页面是一整屏的密集列表，点格子复制、点名称展开，编辑是弹窗不常驻。
   规矩：主密码和明文不发给主机、不进日志和操作记录；密码库的内容不要接进条目、搜索、导出、@AI 上下文、项目目录；
   写操作都要过 `check_mac`（只有解锁了的界面算得出校验值）；界面解开后只认密文里的名称，不认主机上的 `title` 列。说明和安全边界见 `docs/vault.md`，改之前先看。
@@ -49,6 +49,8 @@
   - `src/components/`：Sidebar、ListPane、Reader（含右侧浮出面板 Peek）、Inbox、Capture、Global（横幅、选中文字后的评论浮窗、全局粘贴/拖放、快捷键）、
     BlockEditor（所见即所得的块编辑器，TipTap；扩展和 Markdown 读写在 `lib/editor.ts`，正文仍存 Markdown）、Comments、Tree
   - `src/dialogs/`：交给 AI（含任务模板）、设置、设备、分类和标签、微信导入 / 聊天设置 / 追加到笔记
+  - 全局搜索：`components/Palette.tsx`（Ctrl+K / 侧栏「搜全部」）。条目和密码库在本机搜、共用 `lib/search.ts` 的打分（容错、多个词、按栏加权），
+    聊天记录走主机的 `/inbox/messages?q=`。加了新的内容类型要接进来。
   - `src/lib/qa.ts`：评论定位（rehype 插件给原文加 `<mark>`）；`lib/ws.ts`：项目目录同步；`lib/drafts.ts`：输入框草稿和待发送附件
   - `src/lib/api.ts` 是唯一的传输层：桌面版走 Tauri 命令（读写条目仍用 `get_state`/`apply_op`，保留连接模式的离线队列），浏览器走 HTTP。
   - `src/lib/data.ts`：TanStack Query 缓存全部条目，写入先改本地再提交；`src/lib/store.ts`：zustand 界面状态。
