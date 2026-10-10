@@ -94,7 +94,7 @@ function NoteCard({ it, on, kids = 0, crumb, sel }: { it: Item; on: boolean; kid
   const imgs = imageRefs(it.body);
   const snippet = plain((it.body || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "")).slice(0, 90);
   return (
-    <div {...dnd.props} className={cx("group relative rounded-xl transition-colors", dnd.over ? "bg-accent-soft" : on ? "bg-surface-3" : "hover:bg-surface-2")}>
+    <div {...dnd.props} data-item-id={it.id} className={cx("group relative rounded-xl transition-colors", dnd.over ? "bg-accent-soft" : on ? "bg-surface-3" : "hover:bg-surface-2")}>
       <CopyBtn text={fullText(it)} className="absolute top-2.5 right-2.5 z-10" />
       <button onClick={() => select(it.id)} aria-current={on || undefined} className="flex w-full flex-col gap-1.5 rounded-xl px-3.5 py-3 text-left">
         {crumb && <span className="-mb-1 truncate text-[11.5px] text-faint">{crumb} /</span>}
@@ -131,6 +131,7 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
   const check = TYPES.find((t) => t.k === it.type)?.check;
   return (
     <div
+      data-item-id={it.id}
       className={cx(
         "group relative flex items-start gap-2.5 rounded-xl px-3 py-2.5 transition-colors",
         on ? "bg-surface-3" : "hover:bg-surface-2",
@@ -181,7 +182,7 @@ function LinkRow({ it, on }: { it: Item; on: boolean }) {
   const ui = useUi();
   const t = entryTarget(it);
   return (
-    <div className={cx("group flex items-center gap-2 rounded-xl px-3.5 py-2.5 transition-colors", on ? "bg-surface-3" : "hover:bg-surface-2")}>
+    <div data-item-id={it.id} className={cx("group flex items-center gap-2 rounded-xl px-3.5 py-2.5 transition-colors", on ? "bg-surface-3" : "hover:bg-surface-2")}>
       <button onClick={() => ui.select(it.id)} className="flex min-w-0 grow flex-col text-left">
         <span className="truncate text-[14px] font-semibold">
           {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}

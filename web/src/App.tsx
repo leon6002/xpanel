@@ -11,6 +11,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { Vault, VaultRequests } from "./components/Vault";
 import { Palette } from "./components/Palette";
+import { ItemMenu } from "./components/ItemMenu";
 import { DebugPanel } from "./components/Debug";
 import { SettingsForm } from "./dialogs/Settings";
 import { isApp } from "./lib/api";
@@ -91,6 +92,7 @@ function Shell() {
       <DialogHost />
       <VaultRequests enabled={!isApp || !!cfg.data?.config.mode} />
       <Palette enabled={!isApp || !!cfg.data?.config.mode} />
+      <ItemMenu />
       <Toast />
       <DebugPanel />
       {dropping && (

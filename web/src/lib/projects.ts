@@ -42,6 +42,19 @@ function has(text: string, kw: string) {
   return false;
 }
 
+/** 名称里能单独拿来认的部分：ESP8266 → 8266，SmartLamp → smart、lamp。
+    只取够长的（4 个字符以上），太泛的词（demo、test…）不算，免得到处都对得上 */
+const GENERIC = new Set(["demo", "test", "tests", "project", "main", "code", "work", "docs", "note", "notes", "tool", "tools", "core", "base", "data", "server", "client", "service", "platform", "system"]);
+export function nameParts(name: string): string[] {
+  const parts = name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((w) => (/^\d+$/.test(w) ? w.length >= 4 : w.length >= 4) && !GENERIC.has(w.toLowerCase()));
+  return parts.length > 1 || (parts[0] && parts[0].toLowerCase() !== name.toLowerCase()) ? parts.map((w) => w.toLowerCase()) : [];
+}
+
 /** 从几段文字里认项目：前面的文字优先（标题比正文可信），同一段里取对上的最长的关键词 */
 export function detectProject(texts: (string | undefined)[], projects: Project[]): Project | undefined {
   for (const raw of texts) {
@@ -51,7 +64,7 @@ export function detectProject(texts: (string | undefined)[], projects: Project[]
     let len = 0;
     for (const p of projects) {
       if (p.status === "done") continue;
-      for (const k of [p.name, ...p.keywords]) {
+      for (const k of [p.name, ...nameParts(p.name), ...p.keywords]) {
         if (k.length > len && has(t, k)) {
           best = p;
           len = k.length;

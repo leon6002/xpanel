@@ -232,6 +232,7 @@ function SubRow({ it, depth, sel, seen }: { it: Item; depth: number; sel?: strin
     <>
       <div
         {...dnd.props}
+        data-item-id={it.id}
         onClick={() => select(it.id)}
         aria-current={on || undefined}
         className={cx(

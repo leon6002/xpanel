@@ -68,7 +68,7 @@ function TaskLine({ it, tag }: { it: Item; tag?: string }) {
   const open = useUi((s) => s.openPeek);
   const di = dueInfo(it);
   return (
-    <div className={rowCls}>
+    <div className={rowCls} data-item-id={it.id}>
       <button
         role="checkbox"
         aria-checked={!!it.done}
@@ -283,7 +283,7 @@ export function Home() {
             }
           >
             {briefs.map(({ it, b }) => (
-              <button key={"brief" + it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
+              <button key={"brief" + it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
                 <Bot className="size-[17px] shrink-0 text-accent" strokeWidth={1.8} />
                 <Chip tone="accent">{b!.status === "ready" ? "出了计划，等你确认" : `等你回答 ${openQuestions(b).length} 个问题`}</Chip>
                 <span className="min-w-0 grow truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
@@ -291,7 +291,7 @@ export function Home() {
               </button>
             ))}
             {ai.map(({ it, p }) => (
-              <button key={"ai" + it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
+              <button key={"ai" + it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")}>
                 <Bot className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
                 <Chip tone={p!.status === "blocked" ? "danger" : "accent"}>AI {p!.status === "blocked" ? "卡住了" : "做完了"}</Chip>
                 <span className="min-w-0 shrink-0 truncate text-sm font-medium text-fg">{noteTitle(it)}</span>
@@ -300,7 +300,7 @@ export function Home() {
               </button>
             ))}
             {inbox.slice(0, 6).map((it) => (
-              <div key={it.id} className={rowCls}>
+              <div key={it.id} className={rowCls} data-item-id={it.id}>
                 <InboxIcon className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
                 <button onClick={() => ui.openPeek(it.id)} className="min-w-0 grow truncate py-1.5 text-left text-sm text-fg" title="点开看">
                   {plain(it.body || it.title)}
@@ -335,7 +335,7 @@ export function Home() {
             }
           >
             {notes.map((it) => (
-              <button key={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")} title="点开看和改">
+              <button key={it.id} data-item-id={it.id} onClick={() => ui.openPeek(it.id)} className={cx(rowCls, "text-left")} title="点开看和改">
                 <FileText className="size-[17px] shrink-0 text-muted" strokeWidth={1.8} />
                 {it.pinned && <Pin className="size-3.5 shrink-0 text-accent" />}
                 <span className="min-w-0 grow truncate text-sm text-fg">{noteTitle(it)}</span>
@@ -396,6 +396,7 @@ export function Home() {
                 return (
                   <button
                     key={it.id}
+                    data-item-id={it.id}
                     title={t || "还没填网址或路径"}
                     onClick={async () => {
                       if (!t) return ui.openPeek(it.id);

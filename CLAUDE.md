@@ -29,6 +29,7 @@
   密码库的条目同理（`project` 在密文里，`secretProject`）。界面 `web/src/components/Projects.tsx`（首页顶上的项目栏、条目上的项目标签、新建 / 编辑）。
   `ui.proj` 是全局的范围：首页、各页面的列表、密码库都跟着它；这时新建的条目直接归这个项目。交给 AI 时所属项目当成一条关联材料带上，默认在项目文件夹里干活。
   列条目的地方记得排除 `type = "project"`。
+  右键菜单：`web/src/components/ItemMenu.tsx`，整个页面统一接右键；条目的那一行加 `data-item-id` 就有菜单（归到项目、完成、置顶、优先级、截止、分类、转成、交给 AI、删除）。
 - 交给 AI 之前先讨论：条目的 `brief`（`{agent, status: asking|ready|done, rounds:[{at, note, questions:[{id,q,why,options,a}]}], plan, feedback, resultId}`）。
   逻辑在 `web/src/lib/brief.ts`（提示词、解析 AI 回的 JSON、整理成 Markdown），界面在 `web/src/components/Brief.tsx`（这一条下面的讨论面板、「交给 AI」先选怎么交）。
   桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来。

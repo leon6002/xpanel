@@ -8,7 +8,7 @@ import { useMemo, useState } from "react";
 import { errText, isApp, openTarget } from "../lib/api";
 import { addItem, patchItem, removeItem, useAppState, useThisDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
-import { NO_PROJECT, STATUS_NAME, dirOf, projectOf, projectPinned, projectsOf, withDir, type Project, type ProjectStatus } from "../lib/projects";
+import { NO_PROJECT, STATUS_NAME, dirOf, nameParts, projectOf, projectPinned, projectsOf, withDir, type Project, type ProjectStatus } from "../lib/projects";
 import { useUi } from "../lib/store";
 import type { Item } from "../lib/types";
 import { cx } from "../lib/cx";
@@ -101,6 +101,7 @@ function ProjectDialog({ p, preset, close }: { p?: Project; preset?: { name?: st
         hint={
           <>
             标题、标签、分类或正文里出现了项目名称或这些词的，自动归到这个项目，不用一条条选；认错了可以在那一条上改。
+            {nameParts(name.trim()).length > 0 && <span className="ml-1">名称里的「{nameParts(name.trim()).join("」「")}」已经算关键词了，不用再填。</span>}
             {name.trim() && <b className="ml-1 font-medium text-fg-2">按现在填的，会认进来 {hits} 条。</b>}
           </>
         }
@@ -183,7 +184,7 @@ export function ProjectBar({ counts, loose }: { counts: Map<string, number>; loo
         {projects
           .filter((p) => p.status !== "done" || p.id === proj)
           .map((p) => (
-            <button key={p.id} aria-pressed={proj === p.id} className={chip(proj === p.id)} onClick={() => setProj(proj === p.id ? null : p.id)} title={p.status === "active" ? undefined : STATUS_NAME[p.status]}>
+            <button key={p.id} data-item-id={p.id} aria-pressed={proj === p.id} className={chip(proj === p.id)} onClick={() => setProj(proj === p.id ? null : p.id)} title={p.status === "active" ? undefined : STATUS_NAME[p.status]}>
               <Box className="size-3.5" />
               {p.name}
               {!!counts.get(p.id) && <span className={proj === p.id ? "opacity-70" : "text-faint"}>{counts.get(p.id)}</span>}

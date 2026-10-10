@@ -213,6 +213,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
       </button>
       <div className="flex max-w-[78%] min-w-0 flex-col items-end gap-1">
         <div
+          data-item-id={it.id}
           className={cx("bub rounded-[16px] rounded-br-[6px] px-3.5 py-2.5 text-[14px] break-words", sel ? "bg-ink text-on-ink [&_.prose-x]:text-on-ink" : "bg-accent-soft text-fg")}
           onClick={(e) => selecting && !(e.target as HTMLElement).closest("a,img") && toggle()}
         >
