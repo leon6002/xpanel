@@ -20,7 +20,7 @@ import { myWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
 import { canAsk } from "./Comments";
 import { Md } from "./Markdown";
-import { Button, Chip, ConfirmButton, ErrorText, Pick, textareaCls } from "./ui";
+import { Button, Chip, ConfirmButton, Pick, textareaCls } from "./ui";
 
 const say = (t: string, action?: { label: string; run: () => void }) => useUi.getState().say(t, action);
 const itemOf = (id: string) => qc.getQueryData<State>(["state"])?.items.find((x) => x.id === id);
@@ -291,16 +291,18 @@ export function BriefPanel({ it }: { it: Item }) {
 
   return (
     <section aria-label="和 AI 讨论" className="flex flex-col gap-3 rounded-2xl bg-surface-2 p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Bot className="size-[18px] text-accent" strokeWidth={1.8} />
-        <h3 className="text-[14px] font-semibold">和 {b.agent === MANUAL ? "AI" : b.agent} 讨论怎么做</h3>
-        <Chip tone={busy ? "plain" : b.status === "done" ? "plain" : "accent"}>{head}</Chip>
+      <div className="flex items-center gap-2">
+        <Bot className="size-[18px] shrink-0 text-accent" strokeWidth={1.8} />
+        <h3 className="min-w-0 truncate text-[14px] font-semibold">和 {b.agent === MANUAL ? "AI" : b.agent} 讨论</h3>
+        <Chip tone={busy ? "plain" : b.status === "done" ? "plain" : "accent"} className="min-w-0 shrink truncate">
+          {head}
+        </Chip>
         <span className="grow" />
         <Button tone="ghost" className="h-7 px-2 text-xs" onClick={() => exportContext(it.id)} title="这一条、讨论、关联的条目和附件打成一个压缩包">
           <FileDown className="size-3.5" />
-          导出上下文
+          导出
         </Button>
-        <ConfirmButton tone="ghost" className="h-7 px-2 text-xs" confirm="再点一次：删掉这次讨论" onConfirm={() => saveBrief(itemOf(it.id) ?? it, null)}>
+        <ConfirmButton tone="ghost" className="h-7 px-2 text-xs" confirm="再点一次删掉" onConfirm={() => saveBrief(itemOf(it.id) ?? it, null)}>
           <X className="size-3.5" />
           结束
         </ConfirmButton>
@@ -438,7 +440,7 @@ export function BriefPanel({ it }: { it: Item }) {
           </Button>
         </div>
       )}
-      <ErrorText>{err}</ErrorText>
+      {err && <div className="rounded-lg bg-danger-soft px-3 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-danger">{err}</div>}
     </section>
   );
 }

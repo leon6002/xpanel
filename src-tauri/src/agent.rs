@@ -355,6 +355,110 @@ fn parse_codex(out: &str) -> (Option<String>, Option<Usage>) {
     (text, usage)
 }
 
+/// AI 命令行常装在哪些文件夹。桌面程序拿到的 PATH 常常不全（装完没重启、macOS 上从图标启动的程序只有系统自带的 PATH），
+/// 终端里能用的命令这里可能找不到，所以把这些常见位置也算上。只返回存在的文件夹
+pub fn tool_dirs(env: &dyn Fn(&str) -> Option<String>) -> Vec<std::path::PathBuf> {
+    use std::path::PathBuf;
+    let mut out: Vec<PathBuf> = vec![];
+    let mut add = |base: Option<String>, rest: &str| {
+        if let Some(b) = base.filter(|b| !b.trim().is_empty()) {
+            let d = if rest.is_empty() {
+                PathBuf::from(b)
+            } else {
+                PathBuf::from(b).join(rest)
+            };
+            if d.is_dir() && !out.contains(&d) {
+                out.push(d);
+            }
+        }
+    };
+    let home = env("USERPROFILE").or_else(|| env("HOME"));
+    // Claude Code 的安装程序、旧的本地安装
+    add(home.clone(), ".local/bin");
+    add(home.clone(), ".claude/local");
+    // npm、pnpm、bun、volta、scoop、winget 装的全局命令
+    add(env("APPDATA"), "npm");
+    add(env("LOCALAPPDATA"), "pnpm");
+    add(env("PNPM_HOME"), "");
+    add(home.clone(), ".bun/bin");
+    add(home.clone(), ".volta/bin");
+    add(home.clone(), "scoop/shims");
+    add(env("LOCALAPPDATA"), "Microsoft/WinGet/Links");
+    add(env("NVM_SYMLINK"), "");
+    add(env("ProgramFiles"), "nodejs");
+    add(home.clone(), ".npm-global/bin");
+    add(home, ".cargo/bin");
+    if !cfg!(windows) {
+        for d in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            add(Some(d.into()), "");
+        }
+    }
+    out
+}
+
+/// 在这些文件夹里找一个命令（Windows 上按 .exe / .cmd / .bat / .ps1 以外的可执行后缀都试一遍）
+pub fn find_program(
+    name: &str,
+    dirs: &[std::path::PathBuf],
+    exts: &[&str],
+) -> Option<std::path::PathBuf> {
+    for d in dirs {
+        for e in exts {
+            let f = d.join(format!("{name}{e}"));
+            if f.is_file() {
+                return Some(f);
+            }
+        }
+    }
+    None
+}
+
+/// 命令行的第一个词（程序名）；带路径的、带引号的原样返回，由调用方判断
+fn program_of(cmdline: &str) -> &str {
+    let t = cmdline.trim_start();
+    if let Some(rest) = t.strip_prefix('"') {
+        return rest.split('"').next().unwrap_or("");
+    }
+    t.split_whitespace().next().unwrap_or("")
+}
+
+/// 跑命令之前：把常见的安装位置补进 PATH，返回新的 PATH；程序名（不带路径的）哪里都找不到就报清楚的错
+fn prepare_path(cmdline: &str) -> Result<Option<std::ffi::OsString>, String> {
+    let env = |k: &str| std::env::var(k).ok();
+    let current: Vec<std::path::PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    let extra: Vec<std::path::PathBuf> = tool_dirs(&env)
+        .into_iter()
+        .filter(|d| !current.contains(d))
+        .collect();
+    let prog = program_of(cmdline);
+    let bare = !prog.is_empty() && !prog.contains(['/', '\\', ':']);
+    if bare {
+        let exts: &[&str] = if cfg!(windows) {
+            &[".exe", ".cmd", ".bat", ".com", ""]
+        } else {
+            &[""]
+        };
+        let mut all = current.clone();
+        all.extend(extra.iter().cloned());
+        if find_program(prog, &all, exts).is_none() {
+            let how = if cfg!(windows) { "where" } else { "which" };
+            return Err(format!(
+                "这台电脑上没找到「{prog}」这个命令。\n1. 先确认装了：打开终端运行 {prog} --version。没装的话先装上，并在终端里登录一次。\n2. 装了还是找不到：在终端运行 {how} {prog}，把得到的完整路径填到「设置」里这个 AI 的「问答命令」，比如 C:\\Users\\你\\.local\\bin\\{prog}.exe -p；改完再试。"
+            ));
+        }
+    }
+    if extra.is_empty() {
+        return Ok(None);
+    }
+    let mut all = current;
+    all.extend(extra);
+    std::env::join_paths(all)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 /// 跑一次非交互的 AI 命令：提示词从标准输入传进去，返回标准输出。最多等 timeout 秒。
 pub fn ask(
     a: &Agent,
@@ -371,6 +475,7 @@ pub fn ask(
             a.name
         )
     })?;
+    let path = prepare_path(&cmdline)?;
     let (cmdline, stats) = with_stats(&with_images(&cmdline, images));
     let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
@@ -381,6 +486,9 @@ pub fn ask(
         c.arg("-c").arg(&cmdline);
         c
     };
+    if let Some(p) = path {
+        c.env("PATH", p);
+    }
     let dir = std::path::Path::new(cwd.trim());
     if !cwd.trim().is_empty() && dir.is_dir() {
         c.current_dir(dir);
@@ -432,9 +540,13 @@ pub fn ask(
     let out = String::from_utf8_lossy(&to.join().unwrap_or_default())
         .trim()
         .to_string();
-    let err = String::from_utf8_lossy(&te.join().unwrap_or_default())
-        .trim()
-        .to_string();
+    // Windows 上 cmd 自己报的错（比如命令不存在）是系统的编码，不是 UTF-8：硬显示出来是一串乱码，换成一句看得懂的
+    let err = match String::from_utf8(te.join().unwrap_or_default()) {
+        Ok(t) => t.trim().to_string(),
+        Err(_) => format!(
+            "「{cmdline}」没跑起来，系统给的错误信息显示不出来。多半是命令不存在或者写错了，到「设置」里检查这个 AI 的命令"
+        ),
+    };
     if !status.success() || out.is_empty() {
         let tail: String = err
             .chars()
@@ -484,6 +596,47 @@ pub fn ask(
 #[cfg(test)]
 mod ask_tests {
     use super::*;
+
+    #[test]
+    fn finds_tools_outside_path() {
+        let home = std::env::temp_dir().join(format!("xpanel-tools-{}", now_nanos()));
+        let bin = home.join(".local").join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        fs::write(bin.join("claude.exe"), b"").unwrap();
+        fs::create_dir_all(home.join("npm")).unwrap();
+        fs::write(home.join("npm").join("codex.cmd"), b"").unwrap();
+        let h = home.to_string_lossy().to_string();
+        let env = |k: &str| match k {
+            "USERPROFILE" | "APPDATA" => Some(h.clone()),
+            _ => None,
+        };
+        let dirs = tool_dirs(&env);
+        assert!(dirs.contains(&bin) && dirs.contains(&home.join("npm")));
+        let exts = [".exe", ".cmd", ""];
+        assert_eq!(
+            find_program("claude", &dirs, &exts),
+            Some(bin.join("claude.exe"))
+        );
+        assert_eq!(
+            find_program("codex", &dirs, &exts),
+            Some(home.join("npm").join("codex.cmd"))
+        );
+        assert_eq!(find_program("nope", &dirs, &exts), None);
+        assert_eq!(program_of("claude -p --output-format json"), "claude");
+        assert_eq!(
+            program_of("\"C:\\Program Files\\x\\claude.exe\" -p"),
+            "C:\\Program Files\\x\\claude.exe"
+        );
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn missing_tool_gives_a_clear_error() {
+        let e = prepare_path("xpanel-no-such-tool-xyz -p").unwrap_err();
+        assert!(e.contains("没找到「xpanel-no-such-tool-xyz」") && e.contains("问答命令"));
+        // 带路径的不提前判断，交给系统去跑
+        assert!(prepare_path("/no/such/dir/tool -p").is_ok());
+    }
 
     #[test]
     fn infers_commands() {
