@@ -39,12 +39,18 @@ const history = (b: Brief | undefined) => {
 };
 
 /** 讨论阶段的提示词。force：别再问了，直接给计划 */
+/** 桌面版叫本机的 Claude Code 时会把 xpanel 的 MCP 一起接上（src-tauri 的 with_mcp）；别的 AI、手动复制提示词时不一定有，所以写成「有就用」 */
+const TOOLS = `关于工作台（xpanel）本身：你的工具里如果有名字以 mcp__xpanel__ 开头的，就能直接读写工作台——查条目（xpanel_list_items、xpanel_get_item）、新建事项 / 笔记 / 入口（xpanel_create_items）、改条目（xpanel_update_item）。`;
+
 export function buildBriefPrompt(it: Item, b: Brief | undefined, related: Rel, force = false) {
   const L = [
     `你在帮我做工作台里的一件事（一条「${typeName(it.type)}」）。现在是「先讨论」阶段：不要开始做，不要改任何文件，只弄清楚我要什么。`,
     ``,
     ...contextLines(it, related),
     ...history(b),
+    ``,
+    TOOLS,
+    `所以「怎么写进工作台」不用问我，也不要去找工作台的配置文件。讨论阶段只许用这些工具查，不要新建或修改。开工后你最后的回答会自动存成一篇笔记并关联到这条，所以计划里的笔记不用工具建，别的条目（入口、事项）才用工具建。没有这些工具时，在计划里写明哪些条目要我自己加。`,
     ``,
   ];
   if (force) L.push(`不要再提问了。按现在知道的给出计划，拿不准的地方在计划里写明你打算怎么处理。`);
@@ -78,6 +84,10 @@ export function buildWorkPrompt(it: Item, b: Brief, related: Rel) {
     `- 直接输出成品，Markdown 格式，第一行是一级标题（# 开头）当笔记的标题。不要写「好的」「以下是」这类开场白，也不要再提问。`,
     `- 计划里说要放到某个文件夹的，你现在改不了文件：照样把内容写在这篇笔记里，并在最后用一小节「接下来」说明要放到哪、怎么放。`,
     `- 你做不了、需要我补的，也写进「接下来」。`,
+    ``,
+    TOOLS,
+    `- 计划里除了这篇笔记之外还要加的条目（比如常用入口、事项），有这些工具就直接建好，并在笔记里列出建了哪些；入口的 type 是 link，正文第一行写网址或路径。没有这些工具时，把要加的条目列在「接下来」里。`,
+    `- 这篇笔记本身不要用工具建：直接输出，会自动存好并关联到这条。`,
   ].join("\n");
 }
 
@@ -112,7 +122,11 @@ export function parseBrief(text: string): { ready: false; note?: string; questio
     .filter((x): x is BriefQ => !!x)
     .slice(0, 8);
   if (!qs.length) throw new Error("AI 没有提出问题，也没有给计划。可以再试一次");
-  return { ready: false, note: String(v.note || "").trim() || undefined, questions: qs };
+  // 界面上已经写着「它的理解：」，它自己再带一个「我的理解：」就重复了
+  const note = String(v.note || "")
+    .trim()
+    .replace(/^(我的理解|我现在的理解|理解)\s*[:：]\s*/, "");
+  return { ready: false, note: note || undefined, questions: qs };
 }
 
 /** 把一次回复并进讨论记录 */

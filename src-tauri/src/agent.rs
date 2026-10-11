@@ -211,6 +211,43 @@ fn with_images(cmdline: &str, images: &[std::path::PathBuf]) -> String {
     format!("{}{} -", &t[..t.len() - 2], args)
 }
 
+/// 问答时把 xpanel 自己的 MCP 接给 AI，它就能直接查、建、改工作台里的条目，不用用户先去 AI 工具里配一遍
+pub struct McpLink {
+    /// xp 命令在哪
+    pub xp: std::path::PathBuf,
+    /// 工作台的地址
+    pub url: String,
+    /// 操作记录里写谁做的
+    pub actor: String,
+}
+
+/// 接 MCP 的配置文件，放在工作目录里：用相对路径写进命令行，不用操心路径里的空格和引号
+pub const ASK_MCP: &str = ".xpanel/mcp.json";
+
+/// claude 可以用 --mcp-config 临时接一个 MCP；非交互模式下工具要事先放行，所以把 xpanel 的工具一起放行。
+/// 用户自己在命令里写了 --mcp-config 的不动；别的 AI 命令行原样返回（它们要在各自的配置里接）。
+fn with_mcp(cmdline: &str, dir: &std::path::Path, link: Option<&McpLink>) -> String {
+    let t = cmdline.trim_end();
+    let Some(l) = link else {
+        return cmdline.to_string();
+    };
+    if !exe_is(t, "claude") || t.contains("--mcp-config") {
+        return cmdline.to_string();
+    }
+    let cfg = serde_json::json!({ "mcpServers": { "xpanel": {
+        "command": l.xp.to_string_lossy(),
+        "args": ["mcp"],
+        "env": { "XPANEL_URL": l.url, "XPANEL_ACTOR": l.actor },
+    }}});
+    let f = dir.join(ASK_MCP);
+    let wrote = f.parent().is_some_and(|d| fs::create_dir_all(d).is_ok())
+        && fs::write(&f, cfg.to_string()).is_ok();
+    if !wrote {
+        return cmdline.to_string();
+    }
+    format!("{t} --mcp-config {ASK_MCP} --allowedTools mcp__xpanel")
+}
+
 /// 一次问答用了多少 token（拿不到时整个为空）
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
 pub struct Usage {
@@ -465,6 +502,7 @@ pub fn ask(
     cwd: &str,
     prompt: &str,
     images: &[std::path::PathBuf],
+    mcp: Option<&McpLink>,
     timeout: u64,
 ) -> Result<Answer, String> {
     use std::io::{Read, Write};
@@ -476,7 +514,15 @@ pub fn ask(
         )
     })?;
     let path = prepare_path(&cmdline)?;
-    let (cmdline, stats) = with_stats(&with_images(&cmdline, images));
+    let dir = std::path::Path::new(cwd.trim());
+    let run = if !cwd.trim().is_empty() && dir.is_dir() {
+        dir.to_path_buf()
+    } else {
+        let t = std::env::temp_dir().join("xpanel-ask");
+        let _ = fs::create_dir_all(&t);
+        t
+    };
+    let (cmdline, stats) = with_stats(&with_mcp(&with_images(&cmdline, images), &run, mcp));
     let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg(&cmdline);
@@ -489,14 +535,7 @@ pub fn ask(
     if let Some(p) = path {
         c.env("PATH", p);
     }
-    let dir = std::path::Path::new(cwd.trim());
-    if !cwd.trim().is_empty() && dir.is_dir() {
-        c.current_dir(dir);
-    } else {
-        let t = std::env::temp_dir().join("xpanel-ask");
-        let _ = fs::create_dir_all(&t);
-        c.current_dir(t);
-    }
+    c.current_dir(&run);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -719,6 +758,39 @@ mod ask_tests {
         assert_eq!(with_images("codex exec -", &[]), "codex exec -");
     }
 
+    #[test]
+    fn claude_gets_the_xpanel_mcp() {
+        let dir = std::env::temp_dir().join(format!("xp-mcp-{}", now_nanos()));
+        fs::create_dir_all(&dir).unwrap();
+        let link = McpLink {
+            xp: std::path::PathBuf::from("/opt/my tools/xp"),
+            url: "http://127.0.0.1:8765".into(),
+            actor: "Claude Code".into(),
+        };
+        let c = with_mcp("claude -p", &dir, Some(&link));
+        assert_eq!(
+            c,
+            "claude -p --mcp-config .xpanel/mcp.json --allowedTools mcp__xpanel"
+        );
+        // 接在后面的统计参数不受影响
+        assert!(with_stats(&c)
+            .0
+            .ends_with("mcp__xpanel --output-format json"));
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(ASK_MCP)).unwrap()).unwrap();
+        let x = &v["mcpServers"]["xpanel"];
+        assert_eq!(x["command"], "/opt/my tools/xp");
+        assert_eq!(x["args"][0], "mcp");
+        assert_eq!(x["env"]["XPANEL_URL"], "http://127.0.0.1:8765");
+        assert_eq!(x["env"]["XPANEL_ACTOR"], "Claude Code");
+        // 没有地址、别的 AI、用户自己已经接了的：都不动
+        assert_eq!(with_mcp("claude -p", &dir, None), "claude -p");
+        assert_eq!(with_mcp("codex exec -", &dir, Some(&link)), "codex exec -");
+        let own = "claude -p --mcp-config my.json";
+        assert_eq!(with_mcp(own, &dir, Some(&link)), own);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[cfg(unix)]
     #[test]
     fn runs_with_stdin() {
@@ -727,18 +799,20 @@ mod ask_tests {
             cmd: String::new(),
             ask: "tr a-z A-Z".into(),
         };
-        assert_eq!(ask(&a, "", "hello", &[], 10).unwrap().text, "HELLO");
+        assert_eq!(ask(&a, "", "hello", &[], None, 10).unwrap().text, "HELLO");
         let bad = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "echo oops >&2; exit 3".into(),
         };
-        assert_eq!(ask(&bad, "", "x", &[], 10).unwrap_err(), "oops");
+        assert_eq!(ask(&bad, "", "x", &[], None, 10).unwrap_err(), "oops");
         let slow = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "sleep 5".into(),
         };
-        assert!(ask(&slow, "", "x", &[], 1).unwrap_err().contains("已停止"));
+        assert!(ask(&slow, "", "x", &[], None, 1)
+            .unwrap_err()
+            .contains("已停止"));
     }
 }

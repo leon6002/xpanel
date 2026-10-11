@@ -32,7 +32,7 @@
   右键菜单：`web/src/components/ItemMenu.tsx`，整个页面统一接右键；条目的那一行加 `data-item-id` 就有菜单（归到项目、完成、置顶、优先级、截止、分类、转成、交给 AI、删除）。
 - 交给 AI 之前先讨论：条目的 `brief`（`{agent, status: asking|ready|done, rounds:[{at, note, questions:[{id,q,why,options,a}]}], plan, feedback, resultId}`）。
   逻辑在 `web/src/lib/brief.ts`（提示词、解析 AI 回的 JSON、整理成 Markdown），界面在 `web/src/components/Brief.tsx`（这一条下面的讨论面板、「交给 AI」先选怎么交）。
-  桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来。
+  桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；叫 claude 时自动把 xpanel 的 MCP 接上并放行它的工具（`agent.rs` 的 `with_mcp`，配置写在工作目录的 `.xpanel/mcp.json`，地址和 `xp` 的位置由 `lib.rs` 的 `mcp_link` 给），提示词里告诉它有这些工具；本机文件和命令的权限没放开，仍按 claude 非交互模式的默认；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来。
   导出上下文：`web/src/lib/exportContext.ts` 在界面里打一个 zip（README、task.md、discussion.md、comments.md、related/、files/），桌面版用 `save_download` 存到「下载」文件夹。
 - 关联：条目的 `links: [{id, label?}]`（发起方存，另一边显示「关联了这条」）；正文里 `[标题](xpanel:item/ID)` 是引用（编辑器里输入 `[[`）。
   界面 `web/src/lib/links.ts` + `web/src/components/Related.tsx`。评论里 @AI 时关联条目的内容和附件一起给 AI；AI 的回答可以「存为笔记」并以「产出」关联回来。

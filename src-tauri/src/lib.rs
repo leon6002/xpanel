@@ -509,6 +509,34 @@ async fn run_agent(
     blocking(move || agent::launch_terminal(&agent, &cwd, &prompt)).await
 }
 
+/// AI 通过 MCP 连工作台用的：xp 命令在哪、工作台的地址。主机模式要开着局域网服务才有地址；找不到 xp 就不接
+fn mcp_link(cfg: &Config, actor: &str) -> Option<agent::McpLink> {
+    let url = match cfg.mode.as_str() {
+        "host" if cfg.lan_enabled => format!("http://127.0.0.1:{}", cfg.port),
+        "client" if !cfg.server_url.trim().is_empty() => {
+            cfg.server_url.trim().trim_end_matches('/').to_string()
+        }
+        _ => return None,
+    };
+    let name = if cfg!(windows) { "xp.exe" } else { "xp" };
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(name)))
+        .filter(|f| f.is_file());
+    let xp = beside.or_else(|| {
+        std::env::var_os("PATH").and_then(|p| {
+            std::env::split_paths(&p)
+                .map(|d| d.join(name))
+                .find(|f| f.is_file())
+        })
+    })?;
+    Some(agent::McpLink {
+        xp,
+        url,
+        actor: actor.trim().to_string(),
+    })
+}
+
 /// 问 AI 一个问题（不开窗口），返回回答。cwd 是笔记展开的项目目录时，AI 能看到里面的材料。
 /// images 是笔记和关联条目里的图片、附件（附件名）：先写到工作目录的 `.xpanel/ask-files/` 里，提示词里写的就是这些相对路径，
 /// AI 用读文件的工具就能看到内容（图片 codex 另外用 -i 直接附上）。
@@ -557,7 +585,15 @@ async fn ask_ai(
             }
         }
         std::fs::create_dir_all(&run).map_err(|e| e.to_string())?;
-        agent::ask(&agent, &run.to_string_lossy(), &prompt, &files, 600)
+        let mcp = mcp_link(&st.cfg(), &agent.name);
+        agent::ask(
+            &agent,
+            &run.to_string_lossy(),
+            &prompt,
+            &files,
+            mcp.as_ref(),
+            600,
+        )
     })
     .await
 }
