@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
-import { copyText, errText, putAsset } from "../lib/api";
+import { copyText, errText, openTarget, putAsset } from "../lib/api";
 import { editorExtensions, isRichHtml, looksLikeMarkdown, repairMarkdown, tidyMarkdown, useGentleMarkdown, XImage } from "../lib/editor";
 import { clipFiles, fileLabel, isImgFile, noteTitle } from "../lib/logic";
 import { qc } from "../lib/data";
@@ -568,7 +568,7 @@ export function BlockEditor({
           if (a && (e.ctrlKey || e.metaKey)) {
             const h = a.getAttribute("href") || "";
             if (h.startsWith("asset:")) openAsset(h.slice(6));
-            else window.open(h, "_blank", "noopener");
+            else openTarget(h).catch((err) => useUi.getState().say(errText(err)));
             return true;
           }
           void node;

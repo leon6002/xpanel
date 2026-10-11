@@ -227,7 +227,14 @@ mark.qa-mark:hover { box-shadow: 0 0 0 2px color-mix(in srgb, var(--mark-fg) 35%
 .xp-editor li + li { margin-top: 0.15em; }
 .xp-editor ul[data-type="taskList"] li > label { margin-top: 0.42em; }
 /* 点一下就复制的行内代码、路径 */
-.prose-x code.xp-copy, .prose-x .xp-path { cursor: copy; transition: background 0.12s; }
+.prose-x code.xp-copy { cursor: copy; transition: background 0.12s; }
+.prose-x .xp-path { cursor: pointer; color: inherit; transition: background 0.12s; }
+/* 网址、路径：点了打开；鼠标移上去在末尾浮出一个复制 */
+.prose-x .xp-go-at { position: relative; display: inline-block; width: 0; height: 1em; vertical-align: middle; }
+.prose-x .xp-go-copy { position: absolute; left: 2px; top: 50%; z-index: 5; display: grid; width: 22px; height: 22px; place-items: center; transform: translateY(-50%); border-radius: 6px; background: var(--surface); color: var(--muted); box-shadow: var(--shadow-2); opacity: 0; pointer-events: none; transition: opacity 0.12s; }
+.prose-x .xp-go-copy svg { width: 13px; height: 13px; }
+.prose-x .xp-go:hover .xp-go-copy, .prose-x .xp-go-copy:focus-visible { opacity: 1; pointer-events: auto; }
+.prose-x .xp-go-copy:hover { color: var(--fg); background: var(--surface-3); }
 .prose-x code.xp-copy:hover { background: var(--accent-soft); color: var(--accent-strong); }
 .prose-x .xp-path { border-radius: 4px; padding: 0 2px; margin: 0 -2px; text-decoration: underline dotted color-mix(in srgb, var(--fg) 30%, transparent); text-underline-offset: 3px; }
 .prose-x .xp-path:hover { background: var(--accent-soft); color: var(--accent-strong); text-decoration: none; }

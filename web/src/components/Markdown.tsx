@@ -1,13 +1,14 @@
 /* Markdown 阅读：附件图片、图片大小（|480）、看大图、问答原文高亮 */
+import { Copy } from "lucide-react";
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { assetSrc, copyText, isApp, openTarget } from "../lib/api";
+import { assetSrc, copyText, errText, isApp, openTarget } from "../lib/api";
 import { useUi } from "../lib/store";
 import { useAppState, useConfig } from "../lib/data";
-import { noteTitle } from "../lib/logic";
+import { isTarget, noteTitle } from "../lib/logic";
 import { rehypeImgIndex, rehypePaths, rehypeQaMarks } from "../lib/qa";
 import type { Qa } from "../lib/types";
 import { cx } from "../lib/cx";
@@ -216,19 +217,39 @@ function Link({ href, children }: { href?: string; children?: ReactNode }) {
     );
   }
   return (
-    <a
-      href={h}
-      target="_blank"
-      rel="noreferrer"
-      onClick={(e) => {
-        if (isApp && /^https?:/i.test(h)) {
-          e.preventDefault();
-          openTarget(h);
-        }
-      }}
-    >
+    <Go target={h} link>
       {children}
-    </a>
+    </Go>
+  );
+}
+
+/** 正文里的网址、本地路径：点一下打开（桌面版用系统的浏览器、资源管理器），鼠标移上去旁边有个复制 */
+function Go({ target, link, children }: { target: string; link?: boolean; children?: ReactNode }) {
+  const web = /^https?:/i.test(target);
+  return (
+    <span className="xp-go">
+      <a
+        href={web ? target : "#"}
+        target="_blank"
+        rel="noreferrer"
+        className={link ? undefined : "xp-path"}
+        title={(web || isApp ? "点击打开：" : "点击复制：") + target}
+        onClick={(e) => {
+          e.preventDefault();
+          openTarget(target)
+            .then((r) => r === "copied" && useUi.getState().say("网页版不能直接打开本地路径，已复制：" + target))
+            .catch((err) => useUi.getState().say(errText(err)));
+        }}
+      >
+        {children}
+      </a>
+      {/* 跟在最后一个字后面（折行了也是），不占位置 */}
+      <span data-qa-skip className="xp-go-at">
+        <button type="button" className="xp-go-copy" aria-label="复制" title="复制" onClick={() => copied(target)}>
+          <Copy />
+        </button>
+      </span>
+    </span>
   );
 }
 
@@ -247,23 +268,44 @@ const transform = (url: string) => (/^(asset|xpanel):/.test(url) ? url : default
 const copied = async (v: string) => useUi.getState().say((await copyText(v)) ? "已复制：" + (v.length > 40 ? v.slice(0, 40) + "…" : v) : "复制失败");
 function Pre(props: { children?: ReactNode }) {
   const ref = useRef<HTMLPreElement>(null);
+  // 整块就是一个网址或路径：多一个「打开」
+  const [target, setTarget] = useState("");
+  useEffect(() => {
+    const t = ref.current?.innerText.trim() || "";
+    setTarget(isTarget(t) ? t : "");
+  }, [props.children]);
+  const btn = "rounded-md bg-surface px-2 py-0.5 text-xs text-muted shadow-1 hover:text-fg";
   return (
     <div className="group/pre relative">
       <pre ref={ref}>{props.children}</pre>
-      <button
-        data-qa-skip
-        onClick={() => copied(ref.current?.innerText.replace(/\n$/, "") || "")}
-        className="absolute top-2 right-2 rounded-md bg-surface px-2 py-0.5 text-xs text-muted opacity-0 shadow-1 group-hover/pre:opacity-100 hover:text-fg"
-      >
-        复制
-      </button>
+      <span data-qa-skip className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover/pre:opacity-100 focus-within:opacity-100">
+        {target && (
+          <button className={btn} onClick={() => go(target)}>
+            打开
+          </button>
+        )}
+        <button className={btn} onClick={() => copied(ref.current?.innerText.replace(/\n$/, "") || "")}>
+          复制
+        </button>
+      </span>
     </div>
   );
 }
+const go = (target: string) =>
+  openTarget(target)
+    .then((r) => r === "copied" && useUi.getState().say("网页版不能直接打开本地路径，已复制：" + target))
+    .catch((err) => useUi.getState().say(errText(err)));
 function Code(props: { children?: ReactNode; className?: string; node?: { position?: unknown } }) {
   // 代码块里的 <code> 带 language- 类名或多行，交给 Pre；行内代码点一下复制
   const text = String(props.children ?? "");
   if (/language-/.test(props.className || "") || text.includes("\n")) return <code className={props.className}>{props.children}</code>;
+  // 行内代码里写的是网址或路径：和正文里的一样，点了打开
+  if (isTarget(text))
+    return (
+      <Go target={text.trim()}>
+        <code>{props.children}</code>
+      </Go>
+    );
   return (
     <code className="xp-copy" title="点击复制" onClick={() => copied(text)}>
       {props.children}
@@ -273,11 +315,7 @@ function Code(props: { children?: ReactNode; className?: string; node?: { positi
 function Span(props: { children?: ReactNode; className?: string; "data-copy"?: string }) {
   const v = props["data-copy"];
   if (!v) return <span className={props.className}>{props.children}</span>;
-  return (
-    <span className="xp-path" title="点击复制路径" onClick={() => copied(v)}>
-      {props.children}
-    </span>
-  );
+  return <Go target={v}>{props.children}</Go>;
 }
 
 const components = { img: AssetImg, a: Link, mark: Mark, pre: Pre, code: Code, span: Span } as unknown as Components;

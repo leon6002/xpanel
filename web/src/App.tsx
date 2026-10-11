@@ -6,6 +6,7 @@ import { AiPermits } from "./components/AiLive";
 import { Home } from "./components/Home";
 import { Banner, QaFloat, useClaimPrompt, useGlobalInput } from "./components/Global";
 import { InboxList, InboxMain } from "./components/Inbox";
+import { Links } from "./components/Links";
 import { ListPane } from "./components/ListPane";
 import { Peek, Reader } from "./components/Reader";
 import { Sidebar } from "./components/Sidebar";
@@ -79,6 +80,8 @@ function Shell() {
             </>
           ) : view === "vault" ? (
             <Vault />
+          ) : view === "links" ? (
+            <Links />
           ) : (
             <>
               <ListPane />

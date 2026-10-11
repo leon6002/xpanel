@@ -87,6 +87,23 @@ export function findTarget(text: string): string | null {
   return null;
 }
 export const entryTarget = (it: Item) => findTarget((it.body || "") + "\n" + (it.title || ""));
+/** 一个入口里写的所有网址和路径（最多 4 个）：第一个是点一下打开的那个，其余的（比如仓库的网址之外还写了本地文件夹）另外列出来 */
+export function entryTargets(it: Item): string[] {
+  const text = (it.body || "") + "\n" + (it.title || "");
+  const first = findTarget(text);
+  const out = first ? [first] : [];
+  for (const re of [RE_URL, RE_FILEURL, RE_UNC, RE_DRIVE])
+    for (const m of text.matchAll(new RegExp(re.source, re.flags + "g"))) {
+      const v = m[0].trim().replace(/[，。；,;]+$/, "");
+      if (v && !out.includes(v)) out.push(v);
+    }
+  return out.slice(0, 4);
+}
+/** 这段字是不是整个就是一个网址或路径 */
+export const isTarget = (text: string) => {
+  const t = text.trim();
+  return !!t && !t.includes("\n") && findTarget(t) === t;
+};
 export function autoTitle(target: string) {
   const t = target.replace(/[\\/]+$/, "");
   if (/^https?:\/\//i.test(t)) {

@@ -1,7 +1,7 @@
 /* 中间的列表：事项（焦点 + 三栏）、笔记、入口（按所在机器分组）、规范 */
-import { Check, ChevronRight, Copy, Link2, Disc, ExternalLink, Folder, Globe, Monitor, Pin, Plus, Server, Star } from "lucide-react";
+import { Check, ChevronRight, Copy, Link2, Folder, Pin, Plus, Star } from "lucide-react";
 import { useEffect, useMemo } from "react";
-import { copyText, openTarget } from "../lib/api";
+import { copyText } from "../lib/api";
 
 /** 列表里悬停出现的「复制」：复制标题和正文（Markdown） */
 function CopyBtn({ text, className }: { text: string; className?: string }) {
@@ -21,7 +21,7 @@ function CopyBtn({ text, className }: { text: string; className?: string }) {
 }
 const fullText = (it: Item) => [it.title, it.body].filter(Boolean).join("\n\n");
 import { addItem, patchItem, useAppState, useDevices } from "../lib/data";
-import { ago, byPriority, byRecent, deviceByHost, devOnline, dueInfo, entryTarget, hostOf, imageRefs, inCat, noteTitle, plain, viewOf, VIEW_NAME, type HostKind } from "../lib/logic";
+import { ago, byPriority, byRecent, dueInfo, imageRefs, inCat, noteTitle, plain, viewOf, VIEW_NAME } from "../lib/logic";
 import { useUi, type View } from "../lib/store";
 import type { Item } from "../lib/types";
 import { TYPES } from "../lib/types";
@@ -50,6 +50,38 @@ export function useFilter() {
     }
     return true;
   };
+}
+
+/** 按分类、标签筛选时这个页面里一条都没有，但别的页面里有：说出来在哪，点一下过去。
+    免得看到分类里明明有东西、这里却是空的，以为内容丢了 */
+export function Elsewhere() {
+  const items = useAppState().data?.items ?? [];
+  const ui = useUi();
+  const match = useFilter();
+  const filtering = !!(ui.q || ui.tag || ui.dev || ui.cat || ui.proj);
+  const elsewhere = useMemo(() => {
+    if (!filtering || ui.view === "vault") return [];
+    const by = new Map<View, number>();
+    for (const i of items) {
+      const v = viewOf(i);
+      if (v && i.type !== "project" && match(i)) by.set(v, (by.get(v) ?? 0) + 1);
+    }
+    return by.get(ui.view as Exclude<View, "vault">) ? [] : [...by];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, ui.view, ui.cat, ui.tag, ui.q, ui.dev, ui.proj]);
+  if (!elsewhere.length) return null;
+  return (
+    <div className="flex shrink-0 flex-col gap-2 rounded-xl bg-surface-2 px-3.5 py-3 text-[13px] text-fg-2">
+      <span>「{VIEW_NAME[ui.view]}」里没有符合的，内容在别的页面：</span>
+      <span className="flex flex-wrap gap-1.5">
+        {elsewhere.map(([v, n]) => (
+          <button key={v} onClick={() => ui.setView(v)} className="rounded-lg bg-surface px-2.5 py-1 font-medium text-fg hover:bg-surface-3">
+            {VIEW_NAME[v]} {n} 条 →
+          </button>
+        ))}
+      </span>
+    </div>
+  );
 }
 
 function ItemMeta({ it }: { it: Item }) {
@@ -176,46 +208,6 @@ function TaskRow({ it, on }: { it: Item; on: boolean }) {
   );
 }
 
-const HOST_ICON: Record<HostKind, typeof Monitor> = { pc: Monitor, server: Server, web: Globe, disk: Disc, other: Folder };
-
-function LinkRow({ it, on }: { it: Item; on: boolean }) {
-  const ui = useUi();
-  const t = entryTarget(it);
-  return (
-    <div data-item-id={it.id} className={cx("group flex items-center gap-2 rounded-xl px-3.5 py-2.5 transition-colors", on ? "bg-surface-3" : "hover:bg-surface-2")}>
-      <button onClick={() => ui.select(it.id)} className="flex min-w-0 grow flex-col text-left">
-        <span className="truncate text-[14px] font-semibold">
-          {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
-          {it.title}
-        </span>
-        <span className="truncate font-mono text-xs text-muted" title={t || ""}>
-          {t || "还没填网址或路径"}
-        </span>
-      </button>
-      {t && (
-        <>
-          <button
-            aria-label="复制"
-            title="复制"
-            onClick={async () => (await copyText(t)) && ui.say("已复制：" + t)}
-            className="grid size-8 place-items-center rounded-lg text-muted opacity-0 group-hover:opacity-100 hover:bg-surface-3 hover:text-fg [&_svg]:size-4"
-          >
-            <Copy />
-          </button>
-          <button
-            aria-label="打开"
-            title="打开"
-            onClick={() => openTarget(t).then((r) => r === "copied" && ui.say("网页版不能直接打开本地路径，已复制：" + t))}
-            className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-4"
-          >
-            <ExternalLink />
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 export function ListPane() {
   const { data } = useAppState();
   const items = data?.items ?? [];
@@ -258,48 +250,6 @@ export function ListPane() {
               />
             ))
           : empty(type === "note" ? "还没有笔记" : "写下固定的做法和约定"),
-      };
-    }
-    if (ui.view === "links") {
-      const list = items.filter((i) => i.type === "link" && match(i));
-      const groups = new Map<string, { key: string; kind: HostKind; items: Item[] }>();
-      for (const it of list) {
-        const h = hostOf(entryTarget(it));
-        if (!groups.has(h.key)) groups.set(h.key, { ...h, items: [] });
-        groups.get(h.key)!.items.push(it);
-      }
-      const order = (k: HostKind) => ({ pc: 0, server: 1, disk: 2, web: 3, other: 4 })[k];
-      const arr = [...groups.values()].sort((a, b) => order(a.kind) - order(b.kind) || a.key.localeCompare(b.key));
-      return {
-        count: list.length,
-        node: arr.length
-          ? arr.map((g) => {
-              const Icon = HOST_ICON[g.kind];
-              const dv = g.kind === "pc" || g.kind === "server" ? deviceByHost(devices, g.key) : undefined;
-              g.items.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || a.title.localeCompare(b.title, "zh"));
-              return (
-                <section key={g.key} className="flex flex-col gap-2">
-                  <h2 className="flex items-center gap-1.5 px-1 text-xs font-semibold text-muted [&_svg]:size-3.5">
-                    <Icon className="text-link" />
-                    {dv ? (
-                      <>
-                        <span className={cx("size-1.5 rounded-full", devOnline(dv) ? "bg-ok" : "bg-faint")} />
-                        {dv.name}
-                        {dv.name.toUpperCase() !== g.key && <span className="font-normal text-faint">{g.key}</span>}
-                      </>
-                    ) : (
-                      g.key
-                    )}
-                    <span className="grow" />
-                    <span className="font-normal">{g.items.length}</span>
-                  </h2>
-                  {g.items.map((it) => (
-                    <LinkRow key={it.id} it={it} on={sel === it.id} />
-                  ))}
-                </section>
-              );
-            })
-          : empty("在下面的快速记录里选「入口」，粘贴一个共享文件夹路径或网址就能加进来"),
       };
     }
     // 事项
@@ -363,19 +313,6 @@ export function ListPane() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items, devices, ui.view, ui.cat, ui.tag, ui.q, ui.dev, ui.proj, sel]);
 
-  // 按分类、标签筛选时这个页面里一条都没有，但别的页面里有：说出来在哪，点一下过去。
-  // 免得看到分类里明明有东西、这里却是空的，以为内容丢了
-  const elsewhere = useMemo(() => {
-    if (!filtering || ui.view === "vault") return [];
-    const by = new Map<View, number>();
-    for (const i of items) {
-      const v = viewOf(i);
-      if (v && match(i)) by.set(v, (by.get(v) ?? 0) + 1);
-    }
-    return by.get(ui.view as Exclude<View, "vault">) ? [] : [...by];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, ui.view, ui.cat, ui.tag, ui.q, ui.dev, ui.proj]);
-
   async function create() {
     if (ui.view === "notes") {
       const it = await addItem({ type: "note", title: "", body: "", ...(ui.cat && ui.cat !== "none" ? { category: ui.cat } : {}), tags: ui.tag ? [ui.tag] : [] }).catch(() => null);
@@ -403,18 +340,7 @@ export function ListPane() {
       </div>
       <Filters />
       <div className="scroll-quiet -mx-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
-        {elsewhere.length > 0 && (
-          <div className="flex flex-col gap-2 rounded-xl bg-surface-2 px-3.5 py-3 text-[13px] text-fg-2">
-            <span>「{VIEW_NAME[ui.view]}」里没有符合的，内容在别的页面：</span>
-            <span className="flex flex-wrap gap-1.5">
-              {elsewhere.map(([v, n]) => (
-                <button key={v} onClick={() => ui.setView(v)} className="rounded-lg bg-surface px-2.5 py-1 font-medium text-fg hover:bg-surface-3">
-                  {VIEW_NAME[v]} {n} 条 →
-                </button>
-              ))}
-            </span>
-          </div>
-        )}
+        <Elsewhere />
         {body.node}
       </div>
     </section>

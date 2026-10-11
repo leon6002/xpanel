@@ -30,7 +30,7 @@ function greet() {
 
 /* ---- 入口点过几次（只记在这台电脑的浏览器里），常点的排前面 ---- */
 const LINK_KEY = "wb-link-usage";
-function linkUsage(): Record<string, number> {
+export function linkUsage(): Record<string, number> {
   try {
     return JSON.parse(ls.get(LINK_KEY) || "{}");
   } catch {

@@ -117,7 +117,8 @@ export async function openTarget(t: string): Promise<"opened" | "copied"> {
     window.open(t, "_blank", "noopener");
     return "opened";
   }
-  await navigator.clipboard.writeText(t);
+  // 局域网里用 http 打开的页面没有 navigator.clipboard，copyText 里有退路
+  if (!(await copyText(t))) throw new Error("网页版不能直接打开本地路径，复制也没成");
   return "copied";
 }
 

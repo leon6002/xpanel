@@ -60,11 +60,12 @@
 - `src-tauri`：桌面版。主机模式用 xp-store + xp-server；连接模式（`client.rs`）读写主机的 v1 接口，离线队列 `pending.json`。
 - `web/`：界面（Vite + React 19 + TypeScript + Tailwind v4 + Radix），构建到 `web/dist`。桌面版直接用它（`tauri.conf.json` 的 frontendDist，`beforeBuildCommand` 先构建），
   xp-server 把它编进程序挂在 `/`（`crates/xp-server/src/web.rs`，rust-embed；调试构建直接读磁盘上的 dist）。
-  - `src/components/`：Sidebar（左侧窄栏，只有图标）、Home（首页：各种内容按要紧程度排好的一整页，打开默认在这；各块的位置和大小可以拖，`HomeGrid.tsx` + `lib/grid.ts`，布局记在本机的 `wb-home-layout`，加新的一块要在 `LAYOUT` 里补默认位置）、Filters（列表上方的分类 / 标签 / 设备筛选）、ListPane、Reader（含右侧浮出面板 Peek）、Inbox、Capture、Global（横幅、选中文字后的评论浮窗、全局粘贴/拖放、快捷键）、
+  - `src/components/`：Sidebar（左侧窄栏，只有图标）、Home（首页：各种内容按要紧程度排好的一整页，打开默认在这；各块的位置和大小可以拖，`HomeGrid.tsx` + `lib/grid.ts`，布局记在本机的 `wb-home-layout`，加新的一块要在 `LAYOUT` 里补默认位置）、Filters（列表上方的分类 / 标签 / 设备筛选）、ListPane（事项、笔记、规范的左栏）、Links（入口页：不分左右栏，一整屏密集的几列，点一行直接打开，详情在右侧面板 Peek 里）、Reader（含右侧浮出面板 Peek）、Inbox、Capture、Global（横幅、选中文字后的评论浮窗、全局粘贴/拖放、快捷键）、
     BlockEditor（所见即所得的块编辑器，TipTap；扩展和 Markdown 读写在 `lib/editor.ts`，正文仍存 Markdown）、Comments、Tree
   - `src/dialogs/`：交给 AI（含任务模板）、设置、设备、分类和标签、微信导入 / 聊天设置 / 追加到笔记
   - 全局搜索：`components/Palette.tsx`（Ctrl+K / 左上的放大镜 / 首页顶上的搜索框）。条目和密码库在本机搜、共用 `lib/search.ts` 的打分（容错、多个词、按栏加权），
     聊天记录走主机的 `/inbox/messages?q=`。加了新的内容类型要接进来。
+  - 正文里的网址和本地路径（`components/Markdown.tsx` 的 `Go`）：点了打开（一律走 `openTarget`，桌面版用系统的浏览器 / 资源管理器），鼠标移上去旁边有复制；行内代码和代码块里整段是网址 / 路径的同样能打开，命令之类的还是点了复制。
   - `src/lib/qa.ts`：评论定位（rehype 插件给原文加 `<mark>`）；`lib/ws.ts`：项目目录同步；`lib/drafts.ts`：输入框草稿和待发送附件
   - `src/lib/api.ts` 是唯一的传输层：桌面版走 Tauri 命令（读写条目仍用 `get_state`/`apply_op`，保留连接模式的离线队列），浏览器走 HTTP。
   - `src/lib/data.ts`：TanStack Query 缓存全部条目，写入先改本地再提交；`src/lib/store.ts`：zustand 界面状态。
