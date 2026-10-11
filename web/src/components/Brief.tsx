@@ -6,7 +6,8 @@
 import { Bot, ChevronDown, ClipboardPaste, Copy, FileDown, Play, RotateCw, Send, Sparkles, SquareTerminal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
-import { copyText, desk, errText, isApp, openTarget } from "../lib/api";
+import { copyText, errText, isApp, openTarget } from "../lib/api";
+import { askAi } from "../lib/aiRuns";
 import { applyReply, briefDigest, briefOf, buildBriefPrompt, buildWorkPrompt, openQuestions, parseBrief, type Brief, type BriefQ } from "../lib/brief";
 import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
@@ -19,6 +20,7 @@ import { ls, useUi } from "../lib/store";
 import type { Agent, Item, State } from "../lib/types";
 import { myWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
+import { AiLive } from "./AiLive";
 import { canAsk } from "./Comments";
 import { Md } from "./Markdown";
 import { Button, Chip, ConfirmButton, Pick, textareaCls } from "./ui";
@@ -57,7 +59,7 @@ async function runRound(itemId: string, agent: Agent, me: { id: string; hostname
   setErr(itemId, "");
   try {
     const { rel, files } = material(it);
-    const r = await desk.askAi(agent, cwdOf(it, me), buildBriefPrompt(it, briefOf(it), rel, force), files, it.id);
+    const r = await askAi(agent, cwdOf(it, me), buildBriefPrompt(it, briefOf(it), rel, force), files, it.id);
     const cur = itemOf(itemId);
     if (!cur) return;
     const next = applyReply(briefOf(cur), agent.name, parseBrief(r.text));
@@ -80,7 +82,7 @@ async function runWork(itemId: string, agent: Agent, me: { id: string; hostname:
   setErr(itemId, "");
   try {
     const { rel, files } = material(it);
-    const r = await desk.askAi(agent, cwdOf(it, me), buildWorkPrompt(it, b, rel), files, it.id);
+    const r = await askAi(agent, cwdOf(it, me), buildWorkPrompt(it, b, rel), files, it.id);
     await saveResult(itemId, r.text);
   } catch (e) {
     setErr(itemId, errText(e));
@@ -407,13 +409,7 @@ export function BriefPanel({ it }: { it: Item }) {
         </div>
       )}
 
-      {busy && (
-        <p className="flex items-center gap-2 text-[13.5px] text-fg-2">
-          <span className="size-2 animate-pulse rounded-full bg-accent" />
-          {b.agent} {busy}
-          <span className="text-xs text-faint">可以先去做别的，好了会提醒你</span>
-        </p>
-      )}
+      {busy && <AiLive itemId={it.id} />}
 
       {waitingFirst && !busy && !manual && (
         <Button className="self-start" onClick={() => agent && runRound(it.id, agent, me)}>

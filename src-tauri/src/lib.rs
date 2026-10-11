@@ -7,6 +7,8 @@
 mod agent;
 mod client;
 mod device;
+mod live;
+mod runs;
 mod shortcut;
 mod workspace;
 
@@ -17,7 +19,7 @@ use std::net::UdpSocket;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use xp_core::Op;
 use xp_store::{legacy_rev, Store, ACTOR_UI};
@@ -383,6 +385,18 @@ async fn put_asset(s: St<'_>, name: String, data: String) -> Result<String, Stri
     .await
 }
 
+/// 回答后台 AI 的一个确认请求：allow（这一次）、kind（以后同类的都允许）、all（这次任务都允许）、deny
+#[tauri::command]
+fn ai_decide(run: String, id: String, decision: String) -> Result<(), String> {
+    runs::decide(&run, &id, &decision)
+}
+
+/// 停止一次后台的 AI 任务
+#[tauri::command]
+fn ai_stop(run: String) {
+    runs::stop(&run)
+}
+
 /// 把界面生成的文件（比如导出的上下文压缩包）存到「下载」文件夹，返回存到了哪。重名的在后面加序号，不覆盖
 #[tauri::command]
 async fn save_download(app: AppHandle, name: String, data: String) -> Result<String, String> {
@@ -541,18 +555,21 @@ fn mcp_link(cfg: &Config, actor: &str) -> Option<agent::McpLink> {
 /// images 是笔记和关联条目里的图片、附件（附件名）：先写到工作目录的 `.xpanel/ask-files/` 里，提示词里写的就是这些相对路径，
 /// AI 用读文件的工具就能看到内容（图片 codex 另外用 -i 直接附上）。
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // 参数和界面传来的字段一一对应
 async fn ask_ai(
+    app: AppHandle,
     s: St<'_>,
     agent: Agent,
     cwd: String,
     prompt: String,
     images: Option<Vec<String>>,
     key: Option<String>,
+    run: Option<String>,
 ) -> Result<agent::Answer, String> {
     let st = s.inner().clone();
     blocking(move || {
         let dir = std::path::Path::new(cwd.trim());
-        let run = if !cwd.trim().is_empty() && dir.is_dir() {
+        let dir_run = if !cwd.trim().is_empty() && dir.is_dir() {
             dir.to_path_buf()
         } else {
             let k: String = key
@@ -568,7 +585,7 @@ async fn ask_ai(
         let mut files = vec![];
         let names = images.unwrap_or_default();
         if !names.is_empty() {
-            let d = run.join(agent::ASK_FILES);
+            let d = dir_run.join(agent::ASK_FILES);
             std::fs::create_dir_all(&d).map_err(|e| format!("建图片目录失败：{e}"))?;
             for n in names.iter().take(40) {
                 let Ok(n) = xp_store::safe_asset_name(n) else {
@@ -584,16 +601,31 @@ async fn ask_ai(
                 files.push(f);
             }
         }
-        std::fs::create_dir_all(&run).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&dir_run).map_err(|e| e.to_string())?;
         let mcp = mcp_link(&st.cfg(), &agent.name);
-        agent::ask(
+        // 界面给了编号的：边跑边把进展和要确认的事发给界面（事件 ai-run）
+        let id = run.unwrap_or_default();
+        let live = (!id.trim().is_empty()).then(|| {
+            runs::start(
+                &id,
+                Box::new(move |v| {
+                    let _ = app.emit("ai-run", v);
+                }),
+            )
+        });
+        let out = agent::ask(
             &agent,
-            &run.to_string_lossy(),
+            &dir_run.to_string_lossy(),
             &prompt,
             &files,
             mcp.as_ref(),
+            live.as_deref().map(|r| r as &dyn live::Watch),
             600,
-        )
+        );
+        if live.is_some() {
+            runs::finish(&id);
+        }
+        out
     })
     .await
 }
@@ -672,6 +704,8 @@ pub fn run() {
             set_this_device,
             api_call,
             ask_ai,
+            ai_decide,
+            ai_stop,
             save_download,
             set_sync_dir,
             workspace::workspace_defaults,

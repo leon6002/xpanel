@@ -7,7 +7,9 @@ import { AtSign, Check, ChevronDown, Copy, FilePlus2, CornerDownRight, FileText,
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
-import { copyText, desk, errText, isApp, newId } from "../lib/api";
+import { copyText, errText, isApp, newId } from "../lib/api";
+import { askAi } from "../lib/aiRuns";
+import { AiLive } from "./AiLive";
 import { addItem, patchItem, qc, useAppState, useConfig, useThisDevice } from "../lib/data";
 import { dirOf, projectAsRelated, projectOf, projectsOf } from "../lib/projects";
 import { assetRefs, buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
@@ -74,7 +76,7 @@ export async function postComment(opts: { itemId: string; text: string; sel?: Om
         const everything = qc.getQueryData<State>(["state"])?.items ?? [];
         const rel = [...projectAsRelated(it, everything), ...relatedOf(everything, it).slice(0, 20)];
         const files = [...new Set([it, ...rel.map((r) => r.item)].flatMap((x) => assetRefs(x.body)))];
-        const r = await desk.askAi(a, ws ? ws.path : dirOf(projectOf(it, projectsOf(everything)), opts.me), buildAskPrompt(it, thread || {}, question, prev, rel), files, it.id);
+        const r = await askAi(a, ws ? ws.path : dirOf(projectOf(it, projectsOf(everything)), opts.me), buildAskPrompt(it, thread || {}, question, prev, rel), files, it.id, tid);
         const answer = String(r.text || "").trim();
         const usage = r.usage ? { usage: r.usage } : {};
         await saveThread(itemId, (list) => {
@@ -507,6 +509,7 @@ function Thread({ it, q, lost, onJump }: { it: Item; q: Qa; lost: boolean; onJum
           {p.agent} 正在看这篇笔记…
         </div>
       ))}
+      {pending.length > 0 && <AiLive itemId={it.id} tag={q.id} />}
       <div className="flex items-center gap-0.5 text-xs">
         <Button tone="ghost" className="h-7 px-2 text-xs" onClick={() => setReply((v) => !v)}>
           <CornerDownRight className="size-3.5" />

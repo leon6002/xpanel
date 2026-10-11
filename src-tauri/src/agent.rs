@@ -175,7 +175,7 @@ pub fn ask_command(a: &Agent) -> Option<String> {
 /// 问答时笔记（和关联条目）里的图片、附件放在工作目录的这个子目录（界面写提示词时用同样的相对路径）
 pub const ASK_FILES: &str = ".xpanel/ask-files";
 
-fn exe_is(cmdline: &str, name: &str) -> bool {
+pub(crate) fn exe_is(cmdline: &str, name: &str) -> bool {
     cmdline.split_whitespace().next().is_some_and(|x| {
         x.trim_matches('"')
             .trim_end_matches(".exe")
@@ -318,7 +318,7 @@ fn num(v: &serde_json::Value, k: &str) -> u64 {
 }
 
 /// claude -p --output-format json 的输出
-fn parse_claude(out: &str) -> Option<Result<Answer, String>> {
+pub(crate) fn parse_claude(out: &str) -> Option<Result<Answer, String>> {
     let v: serde_json::Value = serde_json::from_str(out.trim()).ok()?;
     let text = v.get("result")?.as_str()?.trim().to_string();
     if v.get("is_error").and_then(|x| x.as_bool()) == Some(true) {
@@ -503,6 +503,7 @@ pub fn ask(
     prompt: &str,
     images: &[std::path::PathBuf],
     mcp: Option<&McpLink>,
+    watch: Option<&dyn crate::live::Watch>,
     timeout: u64,
 ) -> Result<Answer, String> {
     use std::io::{Read, Write};
@@ -522,7 +523,13 @@ pub fn ask(
         let _ = fs::create_dir_all(&t);
         t
     };
-    let (cmdline, stats) = with_stats(&with_mcp(&with_images(&cmdline, images), &run, mcp));
+    let base = with_mcp(&with_images(&cmdline, images), &run, mcp);
+    // claude 可以边跑边看、要确认时来问；别的命令一次问完
+    let watch = watch.filter(|_| crate::live::can_stream(&base));
+    let (cmdline, stats) = match watch {
+        Some(_) => (crate::live::with_stream(&base), Stats::None),
+        None => with_stats(&base),
+    };
     let mut c = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg(&cmdline);
@@ -547,6 +554,9 @@ pub fn ask(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("启动「{cmdline}」失败：{e}"))?;
+    if let Some(w) = watch {
+        return crate::live::drive(child, prompt, w, timeout);
+    }
     if let Some(mut i) = child.stdin.take() {
         let p = prompt.to_string();
         std::thread::spawn(move || {
@@ -799,19 +809,22 @@ mod ask_tests {
             cmd: String::new(),
             ask: "tr a-z A-Z".into(),
         };
-        assert_eq!(ask(&a, "", "hello", &[], None, 10).unwrap().text, "HELLO");
+        assert_eq!(
+            ask(&a, "", "hello", &[], None, None, 10).unwrap().text,
+            "HELLO"
+        );
         let bad = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "echo oops >&2; exit 3".into(),
         };
-        assert_eq!(ask(&bad, "", "x", &[], None, 10).unwrap_err(), "oops");
+        assert_eq!(ask(&bad, "", "x", &[], None, None, 10).unwrap_err(), "oops");
         let slow = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "sleep 5".into(),
         };
-        assert!(ask(&slow, "", "x", &[], None, 1)
+        assert!(ask(&slow, "", "x", &[], None, None, 1)
             .unwrap_err()
             .contains("已停止"));
     }

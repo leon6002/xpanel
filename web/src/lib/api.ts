@@ -7,6 +7,23 @@ const tauri = (window as unknown as { __TAURI__?: { core?: { invoke: Invoke } } 
 export const invoke: Invoke | null = tauri?.core?.invoke ?? null;
 export const isApp = !!invoke;
 
+/** 桌面版发来的：后台的 AI 走了一步（step）、要你点头（ask）、有人答复了（asked）、结束了（end） */
+export interface AiEvent {
+  run: string;
+  type: "step" | "ask" | "asked" | "end";
+  kind?: string;
+  label?: string;
+  text?: string;
+  id?: string;
+  tool?: string;
+  what?: string;
+  detail?: string;
+}
+export function onAiEvent(cb: (e: AiEvent) => void) {
+  const ev = (window as unknown as { __TAURI__?: { event?: { listen?: (name: string, fn: (e: { payload: AiEvent }) => void) => Promise<unknown> } } }).__TAURI__?.event;
+  ev?.listen?.("ai-run", (e) => cb(e.payload))?.catch?.(() => {});
+}
+
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   let r: Response;
   try {
@@ -176,11 +193,14 @@ export const desk = {
   runAgent: (agent: Agent, cwd: string, prompt: string) => need()<void>("run_agent", { agent, cwd, prompt }),
   /** 设置外置硬盘上的文件夹（只有主机的桌面版能改） */
   setSyncDir: (dir: string) => need()<{ config: Config }>("set_sync_dir", { dir }),
-  askAi: async (agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "") => {
+  /** run：这一次的编号。给了的话桌面版边跑边发 ai-run 事件（进展、要确认的事），见 lib/aiRuns.ts */
+  askAi: async (agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "", run = "") => {
     // 新版返回 {text, usage}；兼容只返回文字的旧版
-    const r = await need()<string | { text: string; usage?: Usage }>("ask_ai", { agent, cwd, prompt, images, key });
+    const r = await need()<string | { text: string; usage?: Usage }>("ask_ai", { agent, cwd, prompt, images, key, run });
     return typeof r === "string" ? { text: r } : r;
   },
+  aiDecide: (run: string, id: string, decision: string) => need()<void>("ai_decide", { run, id, decision }),
+  aiStop: (run: string) => need()<void>("ai_stop", { run }),
   wsDefaults: (title: string, itemId: string, root: string | null) =>
     need()<{ root: string; name: string; path: string; defaultRoot: string }>("workspace_defaults", { title, itemId, root }),
   wsCheck: (root: string, name: string, itemId: string) => need()<{ path: string; state: "new" | "ours" | "other" | "busy" }>("workspace_check", { root, name, itemId }),

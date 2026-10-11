@@ -2,6 +2,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { Capture } from "./components/Capture";
+import { AiPermits } from "./components/AiLive";
 import { Home } from "./components/Home";
 import { Banner, QaFloat, useClaimPrompt, useGlobalInput } from "./components/Global";
 import { InboxList, InboxMain } from "./components/Inbox";
@@ -93,6 +94,7 @@ function Shell() {
       <VaultRequests enabled={!isApp || !!cfg.data?.config.mode} />
       <Palette enabled={!isApp || !!cfg.data?.config.mode} />
       <ItemMenu />
+      <AiPermits />
       <Toast />
       <DebugPanel />
       {dropping && (
