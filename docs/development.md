@@ -72,6 +72,12 @@ npm run dev          # 打开它打印的地址；/api 自动转发到 127.0.0.1
 - Mac：`bash build-mac.sh`，输出 `dist/xpanel.app` 和 `dist/xp`。
 - 所有用同一份数据的电脑（主机、连接到它的电脑、外置硬盘同步的两边）要装**同一个版本**。
 
+### 版本号和 tag
+
+- 版本号是 `主.次.修`，程序、桌面版、界面用同一个。加了功能升中间那位（0.3.0 → 0.4.0），只修问题升最后一位（0.3.0 → 0.3.1）；1.0 之前不用 alpha / rc 后缀。
+- 要改的地方：`Cargo.toml`（`[workspace.package]` 的 `version`，改完跑一次 `cargo check` 更新 `Cargo.lock`）、`src-tauri/tauri.conf.json`、`package.json` 和 `package-lock.json`、`web/package.json` 和 `web/package-lock.json`、`docs/progress.md` 第一行。
+- 改完单独提交一次（`chore(repo): release 0.4.0`），在这个提交上打带说明的 tag 再推送：`git tag -a v0.4.0 -m "..."`，`git push origin main v0.4.0`。
+
 ---
 
 ## 3. 代码约定
