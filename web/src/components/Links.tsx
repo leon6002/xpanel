@@ -69,10 +69,12 @@ async function applyPatches(ps: LinkPatch[]) {
 
 const mini = "grid size-7 shrink-0 place-items-center rounded-md text-muted hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5";
 
-function Row({ it, group, canDrag, onDropAt }: { it: Item; group: string; canDrag: boolean; onDropAt: (group: string, before: string | null) => void }) {
+function Row({ it, group, canDrag, onDropAt, keep }: { it: Item; group: string; canDrag: boolean; onDropAt: (group: string, before: string | null) => void; keep?: string }) {
   const ui = useUi();
   const mark = useOver((s) => (s.over?.id === it.id ? (s.over.after ? "after" : "before") : null));
-  const [first, ...more] = entryTargets(it);
+  // 另外写的地址最多给两个按钮，再多的在详情里
+  const [first, ...rest] = entryTargets(it);
+  const more = rest.slice(0, 2);
   const Icon = HOST_ICON[hostOf(first ?? null).kind];
   return (
     <div
@@ -106,7 +108,8 @@ function Row({ it, group, canDrag, onDropAt }: { it: Item; group: string; canDra
         onDropAt(group, o.after ? sib?.dataset.itemId || null : it.id);
       }}
       className={cx(
-        "group relative flex min-w-0 items-start gap-0.5 rounded-xl py-1.5 pr-1 hover:bg-surface-2",
+        "group relative flex min-w-0 break-inside-avoid items-start gap-0.5 rounded-xl py-1.5 pr-1 hover:bg-surface-2",
+        keep,
         mark === "before" && "shadow-[inset_0_2px_0_0_var(--accent)]",
         mark === "after" && "shadow-[inset_0_-2px_0_0_var(--accent)]",
       )}
@@ -163,8 +166,9 @@ function GroupCard({
   const dv = g.kind === "pc" || g.kind === "server" ? deviceByHost(devices, host) : undefined;
   const name = g.cat !== null ? g.cat.split("/").join(" / ") : dv?.name || host;
   const movable = canDrag && g.cat !== null && g.items.length > 0;
-  // 条目多的分组占满整行，里面再分几列，免得一列拖得老长、旁边空着
-  const wide = g.items.length > 12;
+  // 条目多的分组可以在两列之间断开接着排（每一段都画成一张卡片），整页几列差不多一样高、不留大块空白；
+  // 条目少的整张放在一列里。以前多的那张横跨整行，会把前后的分组挤成只占一列，旁边空一大片
+  const long = g.items.length > 6;
   return (
     <section
       aria-label={name}
@@ -179,7 +183,11 @@ function GroupCard({
         if (dragging.type === "group") onDropGroup(g.key);
         else onDropAt(g.key, null);
       }}
-      className={cx("mb-3 flex break-inside-avoid flex-col gap-0.5 rounded-[18px] p-2.5 transition-colors", hot ? "bg-accent-soft" : "bg-surface", wide && "[column-span:all]")}
+      className={cx(
+        "mb-3 rounded-[18px] p-2.5 transition-colors [-webkit-box-decoration-break:clone] [box-decoration-break:clone]",
+        hot ? "bg-accent-soft" : "bg-surface",
+        !long && "break-inside-avoid",
+      )}
     >
       <h2
         draggable={movable}
@@ -190,7 +198,7 @@ function GroupCard({
         }}
         onDragEnd={endDrag}
         title={g.cat === null ? "没归到分组的，按所在的机器自动分" : movable ? "拖动换分组的先后" : undefined}
-        className={cx("flex h-8 items-center gap-1.5 px-2.5 text-[13px] font-semibold [&_svg]:size-3.5", g.cat === null ? "text-muted" : "text-fg", movable && "cursor-grab")}
+        className={cx("flex h-8 break-after-avoid items-center gap-1.5 px-2.5 text-[13px] font-semibold [&_svg]:size-3.5", g.cat === null ? "text-muted" : "text-fg", movable && "cursor-grab")}
       >
         <Icon className={g.cat === null ? "text-link" : "text-accent"} />
         {dv && <span className={cx("size-1.5 rounded-full", devOnline(dv) ? "bg-ok" : "bg-faint")} title={devOnline(dv) ? "在线" : "不在线"} />}
@@ -204,9 +212,10 @@ function GroupCard({
           </button>
         )}
       </h2>
-      <div className={wide ? "columns-[380px] gap-x-3 [&>*]:break-inside-avoid" : undefined}>
-        {g.items.map((it) => (
-          <Row key={it.id} it={it} group={g.key} canDrag={canDrag} onDropAt={onDropAt} />
+      <div className="[&>*+*]:mt-0.5">
+        {g.items.map((it, i) => (
+          // 分组在两列之间断开时，标题后面至少跟三条、接到下一列的至少两条，不会只剩孤零零的一条
+          <Row key={it.id} it={it} group={g.key} canDrag={canDrag} onDropAt={onDropAt} keep={cx(i < 2 && "break-after-avoid", i >= g.items.length - 2 && "break-before-avoid")} />
         ))}
       </div>
       {!g.items.length && <p className="px-2.5 pb-2 text-xs text-faint">空的。把入口拖到这里。</p>}
