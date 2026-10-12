@@ -15,6 +15,7 @@ import { putAsset } from "../lib/api";
 import { openAgent } from "../dialogs/Agent";
 import { BriefPanel } from "./Brief";
 import { ProjectPick } from "./Projects";
+import { LinkForm } from "./LinkForm";
 import { Md } from "./Markdown";
 import { CommentsSection, flash } from "./Comments";
 import { Breadcrumb, ChildNotes, openMove, type OpenFn } from "./Tree";
@@ -118,6 +119,9 @@ function ReadBody({ it, onEdit, open }: { it: Item; onEdit: () => void; open: Op
   return (
     <div ref={root}>
       <article className="min-w-0">
+        {it.type === "link" ? (
+          <LinkForm key={it.id} it={it} />
+        ) : (
         <div data-qa-host={it.id} onDoubleClick={(e) => !(e.target as HTMLElement).closest("img,a,button") && onEdit()}>
           {it.body ? (
             <Md src={it.body} qa={it.qa} lost={lost} onImageWidth={onImageWidth} onMark={(id) => flash(root.current?.querySelector(`[data-qa-card="${CSS.escape(id)}"]`))} />
@@ -125,6 +129,7 @@ function ReadBody({ it, onEdit, open }: { it: Item; onEdit: () => void; open: Op
             <p className="text-faint">没有正文，双击或点「编辑」开始写。</p>
           )}
         </div>
+        )}
         <ProgressList it={it} />
       </article>
       <BriefPanel it={it} />
@@ -583,7 +588,8 @@ function ItemView({
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 px-5 pt-3.5 pb-1">
-        <Segmented
+        {/* 入口是固定的几栏，直接改，没有阅读 / 编辑之分 */}
+        {it.type !== "link" && <Segmented
           label="显示方式"
           value={mode}
           onChange={setMode}
@@ -599,7 +605,7 @@ function ItemView({
                   ["edit", "编辑"],
                 ]
           }
-        />
+        />}
         <span className="grow" />
         {wide && (
           <IconButton label={full ? "适中宽度（正文居中）" : "全宽显示"} onClick={() => useFullWidth.getState().toggle()}>
@@ -694,13 +700,12 @@ function ItemView({
         </IconButton>
         {bar}
       </div>
-      {mode === "read" ? (
+      {mode === "read" || it.type === "link" ? (
         <div className="scroll-quiet min-h-0 flex-1 overflow-y-auto px-14 pt-6 pb-40 @container">
           <div className={cx("mx-auto w-full", !full && "max-w-[880px]")}>
             <Breadcrumb it={it} open={open} />
             <MetaChips it={it} />
-            <h2 className="mt-3 mb-4 text-[26px] leading-snug font-bold text-fg">{it.type === "note" ? noteTitle(it) : it.title}</h2>
-            {tg && <div className="mb-4 rounded-lg bg-surface-2 px-3 py-2 font-mono text-[13px] break-all text-muted">{tg}</div>}
+            {it.type === "link" ? <div className="h-4" /> : <h2 className="mt-3 mb-4 text-[26px] leading-snug font-bold text-fg">{it.type === "note" ? noteTitle(it) : it.title}</h2>}
             <ReadBody it={it} onEdit={() => setMode("edit")} open={open} />
           </div>
         </div>

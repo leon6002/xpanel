@@ -86,24 +86,65 @@ export function findTarget(text: string): string | null {
   if (s) return s[0].trim();
   return null;
 }
-export const entryTarget = (it: Item) => findTarget((it.body || "") + "\n" + (it.title || ""));
-/** 一个入口里写的所有网址和路径（最多 4 个）：第一个是点一下打开的那个，其余的（比如仓库的网址之外还写了本地文件夹）另外列出来 */
-export function entryTargets(it: Item): string[] {
-  const text = (it.body || "") + "\n" + (it.title || "");
-  const first = findTarget(text);
-  const out = first ? [first] : [];
-  for (const re of [RE_URL, RE_FILEURL, RE_UNC, RE_DRIVE])
-    for (const m of text.matchAll(new RegExp(re.source, re.flags + "g"))) {
-      const v = m[0].trim().replace(/[，。；,;]+$/, "");
-      if (v && !out.includes(v)) out.push(v);
-    }
-  return out.slice(0, 4);
-}
 /** 这段字是不是整个就是一个网址或路径 */
 export const isTarget = (text: string) => {
   const t = text.trim();
   return !!t && !t.includes("\n") && findTarget(t) === t;
 };
+/** 一段话里出现的所有网址和路径，按出现的先后 */
+export function scanTargets(text: string): string[] {
+  const hits: { at: number; v: string }[] = [];
+  for (const re of [RE_URL, RE_FILEURL, RE_UNC, RE_DRIVE])
+    for (const m of text.matchAll(new RegExp(re.source, re.flags + "g"))) {
+      let v = m[0].trim().replace(/[，。；,;]+$/, "");
+      // 路径里可以有空格，所以单独成行的整行都算；夹在一句话中间的只认到空格或标点为止
+      if ((re === RE_UNC || re === RE_DRIVE) && /[\s，。；、）)]/.test(v)) {
+        const at = m.index ?? 0;
+        const line = text.slice(text.lastIndexOf("\n", at) + 1, (text.indexOf("\n", at) + 1 || text.length + 1) - 1).trim();
+        if (line !== v) v = v.split(/[\s，。；、）)]/)[0];
+      }
+      if (v) hits.push({ at: m.index ?? 0, v });
+    }
+  const out: string[] = [];
+  for (const h of hits.sort((a, b) => a.at - b.at)) if (!out.includes(h.v)) out.push(h.v);
+  if (!out.length) {
+    const one = findTarget(text);
+    if (one) out.push(one);
+  }
+  return out;
+}
+/** 入口的内容：地址（第一个是点一下打开的那个）和备注。
+    约定的写法是正文开头一行一个地址，空一行后面是备注（入口的编辑表单就这么存）。
+    以前随手写的、AI 写的不一定守这个约定：开头没有单独成行的地址时，把正文里出现的地址按先后都找出来，其余的当备注。
+    mentioned 是备注里顺口提到的别的地址（「本地：D:\\xx」）：入口那一行也给它一个按钮，表单里可以把它提成正式的地址。 */
+export function parseEntry(it: Pick<Item, "title" | "body">): { targets: string[]; notes: string; mentioned: string[] } {
+  const lines = (it.body || "").split("\n");
+  let n = 0;
+  while (n < lines.length && isTarget(lines[n])) n++;
+  if (n > 0) {
+    const targets = [...new Set(lines.slice(0, n).map((l) => l.trim()))];
+    const notes = lines.slice(n).join("\n").trim();
+    return { targets, notes, mentioned: scanTargets(notes).filter((t) => !targets.includes(t)) };
+  }
+  const targets = scanTargets(it.body || "");
+  if (!targets.length) return { targets: scanTargets(it.title || "").slice(0, 1), notes: (it.body || "").trim(), mentioned: [] };
+  // 单独成行的地址（包括包在代码块、尖括号、Markdown 链接里的）不用再留在备注里
+  const bare = (l: string) => l.trim().replace(/^[`<[(]+|[`>\])]+$/g, "").replace(/^\[[^\]]*\]\(([^)]*)\)$/, "$1").trim();
+  const notes = lines
+    .filter((l) => !/^\s*```/.test(l) && !targets.includes(bare(l)))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return { targets, notes, mentioned: [] };
+}
+/** 把地址和备注拼回正文 */
+export const entryBody = (targets: string[], notes: string) => [targets.join("\n"), notes.trim()].filter(Boolean).join("\n\n");
+/** 一个入口能打开的所有地址（最多 6 个）：第一个是点一下打开的那个，后面是另外写的，再后面是备注里顺口提到的 */
+export const entryTargets = (it: Pick<Item, "title" | "body">): string[] => {
+  const p = parseEntry(it);
+  return [...p.targets, ...p.mentioned].slice(0, 6);
+};
+export const entryTarget = (it: Pick<Item, "title" | "body">) => parseEntry(it).targets[0] ?? null;
 export function autoTitle(target: string) {
   const t = target.replace(/[\\/]+$/, "");
   if (/^https?:\/\//i.test(t)) {

@@ -63,7 +63,7 @@ fn item_fields() -> Value {
     json!({
         "title": {"type":"string","description":"标题（必填）"},
         "type": {"type":"string","enum":["todo","issue","idea","note","link","rule","inbox","project"],"description":"默认 todo"},
-        "body": {"type":"string","description":"正文，Markdown"},
+        "body": {"type":"string","description":"正文，Markdown。入口（link）的写法：开头一行一个地址（网址、共享文件夹、本地路径），第一行是点一下打开的那个，同一个东西的别的地址（比如仓库的本地文件夹）接着各写一行；空一行后面写备注。入口的 category 就是入口页上的分组"},
         "priority": {"type":"string","enum":["P0","P1","P2","P3"]},
         "due": {"type":"string","description":"截止日期 YYYY-MM-DD"},
         "tags": {"type":"array","items":{"type":"string"}},
