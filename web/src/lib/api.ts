@@ -24,6 +24,12 @@ export function onAiEvent(cb: (e: AiEvent) => void) {
   ev?.listen?.("ai-run", (e) => cb(e.payload))?.catch?.(() => {});
 }
 
+/** 主机要令牌而这个浏览器还没登录：通知界面换成输入令牌的页面（见 components/TokenGate.tsx） */
+export const NEED_TOKEN = "xp-need-token";
+const needToken = (r: Response, body: unknown) => {
+  if (r.status === 401 && (body as { needToken?: boolean })?.needToken) window.dispatchEvent(new Event(NEED_TOKEN));
+};
+
 async function http<T>(url: string, init?: RequestInit): Promise<T> {
   let r: Response;
   try {
@@ -38,9 +44,39 @@ async function http<T>(url: string, init?: RequestInit): Promise<T> {
   } catch {
     /* 纯文本（比如 Markdown 导出） */
   }
-  if (!r.ok) throw new Error((body as { error?: string })?.error || `请求失败 ${r.status}`);
+  if (!r.ok) {
+    needToken(r, body);
+    throw new Error((body as { error?: string })?.error || `请求失败 ${r.status}`);
+  }
   return body as T;
 }
+
+/* ---- 局域网令牌（浏览器）：登录后主机种一个 cookie，之后的请求、图片、推送都自动带上 ---- */
+export interface AuthStatus { requireToken: boolean; remoteAi: boolean; local: boolean; ok: boolean; name?: string | null }
+export const auth = {
+  status: () => http<AuthStatus>("/api/v1/auth/status"),
+  login: (token: string) => http<{ ok: boolean; name: string }>("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token.trim() }) }),
+  logout: () => http<{ ok: boolean }>("/api/v1/auth/logout", { method: "POST" }),
+};
+
+/* ---- 主机上的局域网权限和令牌（只有主机本机能改：桌面版主机模式、或主机上的浏览器） ---- */
+export interface AccessInfo { access: { requireToken: boolean; remoteAi: boolean }; tokens: { name: string; createdAt: number; lastUsed?: number | null }[] }
+export const access = {
+  get: () => v1<AccessInfo>("GET", "/access"),
+  set: (a: { requireToken: boolean; remoteAi: boolean }) => v1<{ access: AccessInfo["access"] }>("PUT", "/access", a),
+  create: (name: string) => v1<{ name: string; token: string }>("POST", "/access/tokens", { name }),
+  remove: (name: string) => v1<{ access: AccessInfo["access"] }>("DELETE", "/access/tokens/" + encodeURIComponent(name)),
+};
+
+/* ---- 浏览器里叫主机上的 AI（主机打开了「允许局域网叫本机的 AI」）；进展从 /api/v1/agents/events 推过来，见 lib/aiRuns.ts ---- */
+export interface RemoteAgents { enabled: boolean; reason?: string; agents: { name: string }[]; device?: { id: string; hostname: string } | null }
+export const remoteAi = {
+  list: () => v1<RemoteAgents>("GET", "/agents"),
+  ask: (agent: string, cwd: string, prompt: string, images: string[], key: string, run: string, resume: string) =>
+    v1<{ text: string; usage?: Usage; session?: string }>("POST", "/agents/ask", { agent, cwd, prompt, images, key, run, resume: resume || null }),
+  decide: (run: string, id: string, decision: string) => v1("POST", `/agents/runs/${encodeURIComponent(run)}/decide`, { id, decision }),
+  stop: (run: string) => v1("POST", `/agents/runs/${encodeURIComponent(run)}/stop`),
+};
 
 /** /api/v1 接口 */
 export async function v1<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
@@ -132,7 +168,10 @@ export async function v1Text(path: string): Promise<string> {
     return typeof r.body === "string" ? r.body : JSON.stringify(r.body);
   }
   const r = await fetch("/api/v1" + path, { headers: { "X-Actor": "ui" } });
-  if (!r.ok) throw new Error("读取失败 " + r.status);
+  if (!r.ok) {
+    needToken(r, await r.clone().json().catch(() => null));
+    throw new Error("读取失败 " + r.status);
+  }
   return r.text();
 }
 

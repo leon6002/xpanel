@@ -28,6 +28,24 @@ fn agent() -> ureq::Agent {
         .build()
 }
 
+/// 主机要令牌时用的令牌（设置里填的，见 `Config::server_token`）
+static TOKEN: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+
+pub fn set_token(t: &str) {
+    *TOKEN.write().unwrap_or_else(|e| e.into_inner()) = t.trim().to_string();
+}
+
+/// 发给主机的请求都从这里出：带上令牌（填了的话）
+fn request(method: &str, url: &str) -> ureq::Request {
+    let r = agent().request(method, url);
+    let t = TOKEN.read().unwrap_or_else(|e| e.into_inner()).clone();
+    if t.is_empty() {
+        r
+    } else {
+        r.set("X-Xpanel-Token", &t)
+    }
+}
+
 /// 请求主机失败的三种情况
 #[derive(Debug)]
 pub enum RErr {
@@ -58,7 +76,8 @@ fn remote_err(base: &str, e: ureq::Error) -> RErr {
                 .ok()
                 .and_then(|v| v.get("error").and_then(|x| x.as_str()).map(String::from))
                 .unwrap_or_else(|| format!("主机 {base} 返回错误 {code}"));
-            if code >= 500 || code == 408 || code == 429 {
+            // 401：主机要令牌而这边没填对。改动不能当成被拒绝丢掉，留着等填好令牌再传
+            if code >= 500 || code == 408 || code == 429 || code == 401 {
                 RErr::Busy(m)
             } else {
                 RErr::Rejected(m)
@@ -70,8 +89,7 @@ fn remote_err(base: &str, e: ureq::Error) -> RErr {
 
 fn remote_get(url: &str, path: &str) -> Result<Value, RErr> {
     let b = base(url);
-    agent()
-        .get(&format!("{b}{path}"))
+    request("GET", &format!("{b}{path}"))
         .call()
         .map_err(|e| remote_err(&b, e))?
         .into_json::<Value>()
@@ -81,8 +99,7 @@ fn remote_get(url: &str, path: &str) -> Result<Value, RErr> {
 fn remote_apply(url: &str, op: &Op) -> Result<Value, RErr> {
     let b = base(url);
     let body = serde_json::to_string(op).map_err(|e| RErr::Rejected(e.to_string()))?;
-    agent()
-        .post(&format!("{b}/api/op"))
+    request("POST", &format!("{b}/api/op"))
         .set("Content-Type", "text/plain; charset=utf-8")
         .send_string(&body)
         .map_err(|e| remote_err(&b, e))?
@@ -94,9 +111,7 @@ fn remote_apply(url: &str, op: &Op) -> Result<Value, RErr> {
 /// 调主机的 /api/v1，返回 {status, body}；HTTP 错误也照常返回（界面显示 body.error）
 pub fn v1_raw(url: &str, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
     let b = base(url);
-    let mut req = agent()
-        .request(method, &format!("{b}/api/v1{path}"))
-        .set("X-Actor", "ui");
+    let mut req = request(method, &format!("{b}/api/v1{path}")).set("X-Actor", "ui");
     if path.starts_with("/inbox/wechat/") {
         // 导入聊天记录可能有几十 MB
         req = req.timeout(Duration::from_secs(600));
@@ -138,7 +153,22 @@ pub fn v1(url: &str, method: &str, path: &str, body: Option<Value>) -> Result<Va
 }
 
 pub fn ping(url: &str) -> Result<(), String> {
-    remote_get(url, "/api/ping").map(|_| ()).map_err(RErr::msg)
+    remote_get(url, "/api/ping")
+        .map(|_| ())
+        .map_err(RErr::msg)?;
+    // 主机要令牌的话，看看填的对不对（旧版主机没有这个接口，当作不要令牌）
+    let Ok(s) = remote_get(url, "/api/v1/auth/status") else {
+        return Ok(());
+    };
+    if s["ok"] == false {
+        let filled = !TOKEN.read().unwrap_or_else(|e| e.into_inner()).is_empty();
+        return Err(if filled {
+            "令牌不对，或者已经在主机上删掉了".into()
+        } else {
+            "主机打开了「局域网访问要令牌」，请填上在主机设置里生成的令牌".into()
+        });
+    }
+    Ok(())
 }
 
 // ---- 本机缓存
@@ -327,8 +357,7 @@ pub fn rev(dir: &Path, url: &str) -> Result<String, String> {
 pub fn put_asset(url: &str, name: String, data: String) -> Result<String, String> {
     let b = base(url);
     let body = json!({ "name": name, "data": data }).to_string();
-    let v: Value = agent()
-        .post(&format!("{b}/api/asset"))
+    let v: Value = request("POST", &format!("{b}/api/asset"))
         .set("Content-Type", "text/plain; charset=utf-8")
         .send_string(&body)
         .map_err(|e| remote_err(&b, e).msg())?
@@ -344,8 +373,7 @@ pub fn get_asset(url: &str, name: &str) -> Result<Vec<u8>, String> {
     let b = base(url);
     let n = xp_store::safe_asset_name(name).map_err(|e| e.to_string())?;
     let mut buf = vec![];
-    agent()
-        .get(&format!("{b}/api/asset/{n}"))
+    request("GET", &format!("{b}/api/asset/{n}"))
         .call()
         .map_err(|e| remote_err(&b, e).msg())?
         .into_reader()
@@ -357,8 +385,7 @@ pub fn get_asset(url: &str, name: &str) -> Result<Vec<u8>, String> {
 
 pub fn ui(url: &str) -> Result<String, String> {
     let b = base(url);
-    agent()
-        .get(&format!("{b}/"))
+    request("GET", &format!("{b}/"))
         .call()
         .map_err(|e| remote_err(&b, e).msg())?
         .into_string()

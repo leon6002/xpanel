@@ -1,7 +1,9 @@
 /* 连接与设置：这台电脑存数据（主机）还是连接到主机、AI 命令、导入导出 */
 import { Download, FolderOpen, HardDrive, Plus, Upload, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { desk, errText, isApp } from "../lib/api";
+import { auth, desk, errText, isApp } from "../lib/api";
+import { LanAccess } from "../components/TokenGate";
 import { importItems, qc, setConfig, useAppState, useConfig } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { useUi } from "../lib/store";
@@ -72,11 +74,23 @@ function ImportExport() {
 
 function WebSettings({ close }: { close: () => void }) {
   const st = useAppState().data;
+  const me = useQuery({ queryKey: ["auth"], queryFn: auth.status }).data;
   return (
-    <Dialog title="网页版" desc="数据在主机上。网址可以直接打开，本地路径点「打开」会复制到剪贴板。" onClose={close} footer={<ImportExport />}>
+    <Dialog wide={!!me?.local} title="网页版" desc="数据在主机上。网址可以直接打开，本地路径点「打开」会复制到剪贴板。" onClose={close} footer={<ImportExport />}>
       <p className="text-[13px] text-muted">
         共 {st?.items.length ?? 0} 条。给外部 AI 和脚本的接口文档：<code>{location.origin}/api/v1/openapi.json</code>
       </p>
+      {/* 就在主机上开的浏览器：可以管局域网权限；别处的显示用的是哪把令牌，可以退出 */}
+      {me?.local ? (
+        <LanAccess />
+      ) : me?.name ? (
+        <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">
+          这个浏览器用令牌「{me.name}」进来的。{me.remoteAi ? "可以叫主机上的 AI。" : ""}
+          <Button className="h-7 px-2.5 text-xs" onClick={() => auth.logout().then(() => location.reload())}>
+            退出（清掉这个浏览器上的令牌）
+          </Button>
+        </p>
+      ) : null}
     </Dialog>
   );
 }
@@ -91,6 +105,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
   const [lan, setLan] = useState(c.lanEnabled);
   const [port, setPort] = useState(String(c.port || 8765));
   const [url, setUrl] = useState(c.serverUrl);
+  const [token, setToken] = useState(c.serverToken || "");
   const [agents, setAgents] = useState<Agent[]>(() => (c.agents || []).map((a) => ({ ...a, ask: a.ask || "" })));
   const [cwd, setCwd] = useState(c.agentCwd || "");
   const [err, setErr] = useState("");
@@ -101,6 +116,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
       mode,
       dataDir: dataDir.trim(),
       serverUrl: url.trim(),
+      serverToken: token.trim(),
       port: parseInt(port, 10) || 8765,
       lanEnabled: lan,
       agents: first ? c.agents : agents.map((a) => ({ name: a.name.trim(), cmd: a.cmd.trim(), ask: (a.ask || "").trim() })).filter((a) => a.name && a.cmd),
@@ -164,9 +180,14 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
           "client",
           "连接到主机",
           "这台电脑不存数据。连不上时照常能看、能记，恢复后自动上传。",
-          <Field label="主机地址">
-            <input className={inputCls + " font-mono"} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://主机名或IP:8765" />
-          </Field>,
+          <>
+            <Field label="主机地址">
+              <input className={inputCls + " font-mono"} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://主机名或IP:8765" />
+            </Field>
+            <Field label="令牌（主机要令牌时填）" hint="在主机的设置 → 局域网访问里生成">
+              <input className={inputCls + " font-mono"} type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="xp_…" aria-label="令牌" />
+            </Field>
+          </>,
         )}
       </div>
       {!first && (
@@ -195,6 +216,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
           <Field label="AI 默认工作目录">
             <input className={inputCls + " font-mono"} value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="留空 = 用户目录" />
           </Field>
+          {c.mode === "host" && app?.lan?.running && <LanAccess />}
           {app?.lan?.running && (
             <p className="text-[13px] text-muted">
               局域网访问地址：

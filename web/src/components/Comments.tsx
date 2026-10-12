@@ -10,7 +10,7 @@ import { create } from "zustand";
 import { copyText, errText, isApp, newId } from "../lib/api";
 import { askAi } from "../lib/aiRuns";
 import { AiLive } from "./AiLive";
-import { addItem, patchItem, qc, useAppState, useConfig, useThisDevice } from "../lib/data";
+import { addItem, patchItem, qc, useAgents, useAiDevice, useAppState } from "../lib/data";
 import { dirOf, projectAsRelated, projectOf, projectsOf } from "../lib/projects";
 import { assetRefs, buildAskPrompt, locateQuote, qaDigest, type QaSel } from "../lib/qa";
 import { addLink, relatedOf } from "../lib/links";
@@ -25,7 +25,7 @@ const say = (t: string) => useUi.getState().say(t);
 const itemOf = (id: string) => qc.getQueryData<State>(["state"])?.items.find((x) => x.id === id);
 
 /** 能在后台回答的 AI：填了问答命令，或者是 claude / codex（自动用 -p / exec -） */
-export const canAsk = (a: Agent) => !!(a.ask || "").trim() || /^(claude|codex)(\.exe|\.cmd)?\b/i.test(String(a.cmd || "").trim().split(/[\\/]/).pop() || "");
+export const canAsk = (a: Agent) => !!a.remote || !!(a.ask || "").trim() || /^(claude|codex)(\.exe|\.cmd)?\b/i.test(String(a.cmd || "").trim().split(/[\\/]/).pop() || "");
 
 /** 评论里 @ 到的 AI（名字可能有空格，按名字长的先匹配） */
 function mentioned(text: string, agents: Agent[]) {
@@ -65,7 +65,8 @@ export async function postComment(opts: { itemId: string; text: string; sel?: Om
   const thread = (it.qa || []).find((x) => x.id === tid);
   const prev = (thread?.turns || []).slice(0, -1).map((t) => ({ q: t.q || "（接着说）", a: t.a || "（没有回答）" }));
   const question = stripMentions(text, agents) || "请看看这段，说说你的看法。";
-  const ws = isApp ? myWorkspace(it, opts.me) : null;
+  // 浏览器里叫的是主机上的 AI：me 是主机，按主机找项目文件夹
+  const ws = isApp || opts.me.id ? myWorkspace(it, opts.me) : null;
   const pend = (fn: (l: PendingQ[]) => PendingQ[]) => useUi.setState((s) => ({ qaPending: { ...s.qaPending, [itemId]: fn((s.qaPending[itemId] as PendingQ[]) || []) } }));
   await Promise.all(
     who.map(async (a) => {
@@ -102,10 +103,7 @@ type PendingQ = { q: string; quote: string; agent: string; thread?: string };
 
 /* ---------------------------------------------------------------- 输入框（@ 自动补全） */
 
-export function useAgents() {
-  const cfg = useConfig().data?.config;
-  return cfg?.agents ?? [];
-}
+export { useAgents };
 
 /** 从一段文字里把 @AI 名字拆出来：返回提到的 AI 和去掉之后的文字 */
 function splitMentions(text: string, agents: Agent[]) {
@@ -175,7 +173,7 @@ export function Composer({
   initial?: string[];
 }) {
   const agents = useAgents();
-  const me = useThisDevice();
+  const me = useAiDevice();
   const key = "wb-cdraft-" + itemId + (threadId || sel?.quote || "");
   // 草稿按「@名字 正文」存，读回来再拆成标签
   const [text, setText] = useState(() => ls.get(key) || "");
@@ -282,11 +280,11 @@ export function Composer({
                 onDone();
               }
             }}
-            placeholder={tags.length ? "想问什么…" : placeholder || (isApp ? "写评论，输入 @ 可以叫 AI 来回答…" : "写评论…")}
+            placeholder={tags.length ? "想问什么…" : placeholder || (agents.length ? "写评论，输入 @ 可以叫 AI 来回答…" : "写评论…")}
             className="scroll-quiet w-full resize-none bg-transparent px-0.5 py-0.5 text-[13.5px] leading-6 outline-none placeholder:text-faint"
           />
         </div>
-        {isApp && agents.length > 0 && (
+        {agents.length > 0 && (
           <button
             title="@ 一个 AI"
             onMouseDown={(e) => e.preventDefault()}
@@ -597,6 +595,7 @@ function jumpTo(root: HTMLElement | null, q: Qa) {
 }
 
 export function CommentsSection({ it, lost, root }: { it: Item; lost: Set<string>; root: React.RefObject<HTMLElement | null> }) {
+  const canAskAny = useAgents().some(canAsk);
   const pendingNew = ((useUi((s) => s.qaPending[it.id]) as PendingQ[] | undefined) || []).filter((p) => !p.thread);
   const all = it.qa || [];
   const list = useMemo(() => all.slice().sort((a, b) => a.at - b.at), [all]);
@@ -632,7 +631,7 @@ export function CommentsSection({ it, lost, root }: { it: Item; lost: Set<string
           <span className="size-3 animate-spin rounded-full border-2 border-accent border-t-transparent" /> {p.agent} 正在看这篇笔记…
         </div>
       ))}
-      {!list.length && <p className="text-xs text-faint">{isApp ? "有想法就写在这里；输入 @ 可以请 Claude Code 等 AI 读完这篇后回答。选中正文里的字也能单独评论。" : "有想法就写在这里；选中正文里的字也能单独评论。"}</p>}
+      {!list.length && <p className="text-xs text-faint">{canAskAny ? "有想法就写在这里；输入 @ 可以请 Claude Code 等 AI 读完这篇后回答。选中正文里的字也能单独评论。" : "有想法就写在这里；选中正文里的字也能单独评论。"}</p>}
       <Composer itemId={it.id} />
     </section>
   );
@@ -641,6 +640,7 @@ export function CommentsSection({ it, lost, root }: { it: Item; lost: Set<string
 /* ---------------------------------------------------------------- 划选后的评论框 */
 
 export function SelectionComment({ sel, at, onClose, initial }: { sel: QaSel; at: { x: number; y: number }; onClose: () => void; initial?: string[] }) {
+  const canAskAny = useAgents().some(canAsk);
   const box = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
@@ -661,7 +661,7 @@ export function SelectionComment({ sel, at, onClose, initial }: { sel: QaSel; at
   return createPortal(
     <div ref={box} className="fixed z-40 flex flex-col gap-2 rounded-[14px] bg-surface p-3 shadow-3" style={{ left, top, width }}>
       <div className="line-clamp-2 self-start rounded-md bg-mark/70 px-1.5 py-0.5 text-xs text-mark-fg">{sel.quote}</div>
-      <Composer itemId={sel.itemId} sel={sel} initial={initial} autoFocus onDone={onClose} placeholder={isApp ? "评论这段，@ 可以叫 AI 解释…" : "评论这段…"} />
+      <Composer itemId={sel.itemId} sel={sel} initial={initial} autoFocus onDone={onClose} placeholder={canAskAny ? "评论这段，@ 可以叫 AI 解释…" : "评论这段…"} />
     </div>,
     document.body,
   );

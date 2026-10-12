@@ -4,10 +4,15 @@
 //! - `/api/v1/*`：对外接口，给外部 AI、脚本和 `xp` 命令行用，文档见 `/api/v1/openapi.json`
 //! - `/api/v1/events`：SSE，数据有变化时推送新的 rev
 //! - `/next/`：新界面（React，源码在 web/，构建产物编进程序）
+//! - 局域网访问要不要令牌见 `gate.rs`；局域网里叫主机上的 AI 见 `remote.rs`
 
+#![recursion_limit = "256"]
+
+pub mod gate;
 mod inbox;
 mod legacy;
 mod openapi;
+pub mod remote;
 mod v1;
 mod vault;
 mod web;
@@ -33,11 +38,24 @@ pub const MAX_BODY: usize = 64 * 1024 * 1024;
 
 pub type AppState = Arc<Store>;
 
+pub use remote::{AgentHost, AskReq};
+
 pub fn router(store: Arc<Store>) -> Router {
+    router_with(store, None)
+}
+
+/// agents：桌面版当主机时给的「叫本机的 AI」，局域网里带令牌的可以用（见 remote.rs）
+pub fn router_with(store: Arc<Store>, agents: Option<Arc<dyn AgentHost>>) -> Router {
+    let gate = Arc::new(gate::Gate::default());
     Router::new()
         .merge(legacy::routes())
         .nest("/api/v1", v1::routes())
         .merge(web::routes())
+        .layer(axum::Extension(remote::Remote::new(agents)))
+        .layer(axum::middleware::from_fn_with_state(
+            (store.clone(), gate),
+            gate::middleware,
+        ))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY))
         .layer(CorsLayer::permissive())
         .with_state(store)
@@ -122,10 +140,23 @@ pub async fn serve(
     listener: std::net::TcpListener,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
+    serve_with(store, listener, None, shutdown).await
+}
+
+/// 同上，带上桌面版的「叫本机的 AI」。记下对方地址，本机来的（127.0.0.1）不用令牌
+pub async fn serve_with(
+    store: Arc<Store>,
+    listener: std::net::TcpListener,
+    agents: Option<Arc<dyn AgentHost>>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
     let l = tokio::net::TcpListener::from_std(listener)?;
-    axum::serve(l, router(store))
-        .with_graceful_shutdown(shutdown)
-        .await
+    axum::serve(
+        l,
+        router_with(store, agents).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await
 }
 
 /// 命令行用：自己建运行时，Ctrl+C 退出

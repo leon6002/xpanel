@@ -9,6 +9,15 @@
   每日备份 + 冷备份；首次打开自动导入 v1 的 `workbench.json`；API key（只存哈希）；操作记录 `audit_log`。
 - `crates/xp-server`：axum。v1 兼容接口（`/`、`/api/state|rev|op|asset|ping`，旧界面和连接模式在用）+ `/api/v1/*` 对外接口 + SSE。
   接口文档手写在 `openapi.rs`，改接口时同步改，测试会检查路由都在。
+- 局域网令牌：`xp-server/src/gate.rs`（中间件：主机打开「要令牌」后，除了本机（127.0.0.1 和桌面版在进程里调的）所有 `/api/` 都要令牌；
+  令牌就是 API key，放在 `X-Xpanel-Token`、`Authorization` 或浏览器登录后的 cookie `xp_token`（HttpOnly、SameSite=Strict）；只有 `Authorization` 算身份；
+  `/api/v1/access` 管开关和令牌，只有本机能调）+ `xp-store/src/keys.rs` 的 `Access`（meta 表的 `access`）。服务要用 `serve_with`（带对方地址），别直接 `axum::serve(router)`。
+  界面：`components/TokenGate.tsx`（浏览器的输入令牌页、设置里的 `LanAccess`），接口返回 401 + `needToken` 时 `lib/api.ts` 发 `xp-need-token` 事件；
+  连接模式的令牌在桌面版配置 `serverToken`（`client.rs` 的 `request` 统一带上，401 不当成被拒绝、改动留着），命令行和 MCP 用 `XPANEL_TOKEN`。
+- 浏览器里叫主机上的 AI：`xp-server/src/remote.rs`（`/api/v1/agents`，`AgentHost` 由桌面版 `lib.rs` 的 `HostAgents` 提供，`xp serve` 没有；只认 AI 名字；
+  进展经 `/agents/events` 推送，确认用 `/agents/runs/{run}/decide`，发起的请求断了就停）。要主机打开「要令牌」+「允许局域网叫本机的 AI」。
+  界面 `lib/data.ts` 的 `useAgents` / `useAiDevice`（浏览器里是主机上的 AI 和主机这台设备），`lib/aiRuns.ts` 按 `agent.remote` 走主机接口。
+  测试用 `cargo run -p xp-server --example fake_host`（带假 AI 的服务）。
 - 设备：`xp-core/src/device.rs`（字段规则、心跳合并）+ `xp-store/src/devices.rs`（表、改名同步条目、从旧条目生成）。
   桌面版 `src-tauri/src/device.rs` 每分钟发心跳；界面通过 `api_call` 命令调 `/api/v1`（主机模式在本进程处理，连接模式转发）。
 - 分类和标签：`xp-core/src/category.rs`（路径规则）+ `xp-store/src/categories.rs`（空分类表、改名/移动/删除同步到条目）。
@@ -34,7 +43,7 @@
   逻辑在 `web/src/lib/brief.ts`（提示词、解析 AI 回的 JSON、整理成 Markdown），界面在 `web/src/components/Brief.tsx`（这一条下面的讨论面板、「交给 AI」先选怎么交）。
   桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；叫 claude 时自动把 xpanel 的 MCP 接上并放行它的工具（`agent.rs` 的 `with_mcp`，配置写在工作目录的 `.xpanel/mcp.json`，地址和 `xp` 的位置由 `lib.rs` 的 `mcp_link` 给），提示词里告诉它有这些工具；
   边跑边看和确认：claude 用它的流式接口跑（`src-tauri/src/live.rs`：`--input-format/--output-format stream-json --permission-prompt-tool stdio`），每一步发成 `ai-run` 事件给界面；
-  它要运行命令、读写工作目录外的文件时发来确认请求，桌面版弹窗让用户点（`runs.rs`：这一次 / 以后同类的 / 这次任务都允许 / 拒绝，只在本机回答，不走主机接口），可以中途停止。
+  它要运行命令、读写工作目录外的文件时发来确认请求，桌面版弹窗让用户点（`runs.rs`：这一次 / 以后同类的 / 这次任务都允许 / 拒绝；这台电脑发起的只在这台电脑回答，浏览器经主机发起的在那个浏览器回答），可以中途停止。
   界面 `web/src/lib/aiRuns.ts`（登记正在跑的、收事件）+ `components/AiLive.tsx`（进展条 `AiLive`、确认弹窗 `AiPermits`）；要叫本机 AI 一律用 `aiRuns.ts` 的 `askAi`，不要直接调 `desk.askAi`。别的 AI 命令行没有这个接口，还是一次问完；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来；做完了还能写意见「接着改」（`Brief.tsx` 的 `runRevise`）：claude 用 `--resume` 接着开工那次对话说（`brief.session`，`agent.rs` 的 `with_resume`），接不上就把计划、上一版和之前的意见一起带上（`brief.ts` 的 `buildRevisePrompt`），改好的替换产出那篇或者另存一篇；每一次记在 `brief.revisions`（意见、在改 / 改好了 / 没改成 / 撤销了、它自己说的改了什么——回答开头那行「> 这次改了：」由 `parseRevision` 拆出来、成品是哪篇、撤销用的上一版），面板里逐条显示（`Revisions`）。
   导出上下文：`web/src/lib/exportContext.ts` 在界面里打一个 zip（README、task.md、discussion.md、comments.md、related/、files/），桌面版用 `save_download` 存到「下载」文件夹。
 - 关联：条目的 `links: [{id, label?}]`（发起方存，另一边显示「关联了这条」）；正文里 `[标题](xpanel:item/ID)` 是引用（编辑器里输入 `[[`）。

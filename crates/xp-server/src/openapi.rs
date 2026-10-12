@@ -67,6 +67,17 @@ pub const PATHS: &[&str] = &[
     "/vault/secrets/{id}",
     "/vault/requests",
     "/vault/requests/{id}",
+    "/auth/status",
+    "/auth/login",
+    "/auth/logout",
+    "/access",
+    "/access/tokens",
+    "/access/tokens/{id}",
+    "/agents",
+    "/agents/events",
+    "/agents/ask",
+    "/agents/runs/{id}/decide",
+    "/agents/runs/{id}/stop",
 ];
 
 pub fn spec() -> Value {
@@ -86,6 +97,7 @@ pub fn spec() -> Value {
             "version": env!("CARGO_PKG_VERSION"),
             "description": "xpanel 个人工作台的对外接口：读写待办 / 问题 / 灵感 / 笔记，整理优先级，导出和统计。\n\n\
     身份：请求头 `Authorization: Bearer <key>`（用 `xp key create <名字>` 生成）。没有 key 时可用 `X-Actor: <名字>` 标明来源。所有写入都会记录是谁改的。\n\n\
+    局域网访问：主机打开「局域网访问要令牌」后，除了主机本机，所有 `/api/` 接口都要带令牌（就是上面的 key）：`Authorization: Bearer <key>`、`X-Xpanel-Token: <key>`，或浏览器登录后的 cookie。没带返回 401（`needToken: true`）。`X-Xpanel-Token` 和 cookie 只管能不能进，不算身份。\n\n\
     时间字段是毫秒时间戳；`due` 是 YYYY-MM-DD；`priority` 是 P0（最急）到 P3。"
         },
         "servers": [{ "url": "/api/v1" }],
@@ -319,6 +331,40 @@ fn inbox_paths(err: &Value) -> Value {
             "/vault/requests": {
                 "get": { "summary": "界面用：等用户确认的取用请求", "responses": { "200": { "description": "{requests}" } } },
                 "post": { "summary": "请求取用一条的内容。必须带 API key（弹窗里显示的是 key 的名字）。pub 是你的 X25519 临时公钥（32 字节的 base64）。同一个 key 对同一条同时只能有一个请求。之后轮询 GET /vault/requests/{id}：用户在界面上允许后返回 sealed（epk、n、c），用 X25519 + HKDF-SHA256 + XChaCha20-Poly1305 解开；两分钟没人确认就过期。直接用 MCP 的 xpanel_vault_get 更省事", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["secretId", "pub"], "properties": { "secretId": { "type": "string" }, "reason": { "type": "string", "description": "为什么要用，会显示给用户" }, "pub": { "type": "string" } } } } } }, "responses": { "201": { "description": "{id, status, expiresAt}" }, "400": err.clone(), "401": err.clone(), "404": err.clone(), "409": err.clone(), "503": err.clone() } }
+            },
+            "/auth/status": {
+                "get": { "summary": "不用令牌：主机要不要令牌、这次请求带没带对。返回 {requireToken, remoteAi, local, ok, name}", "responses": { "200": { "description": "状态" } } }
+            },
+            "/auth/login": {
+                "post": { "summary": "不用令牌：浏览器输入令牌，对了就种一个 cookie（HttpOnly、SameSite=Strict，一年）", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["token"], "properties": { "token": { "type": "string" } } } } } }, "responses": { "200": { "description": "{ok, name}" }, "401": err.clone() } }
+            },
+            "/auth/logout": {
+                "post": { "summary": "清掉浏览器里的令牌 cookie", "responses": { "200": { "description": "{ok}" } } }
+            },
+            "/access": {
+                "get": { "summary": "只能在主机本机调：局域网权限和令牌列表（只有名字和时间）。返回 {access: {requireToken, remoteAi}, tokens}", "responses": { "200": { "description": "权限" }, "403": err.clone() } },
+                "put": { "summary": "只能在主机本机调：改局域网权限。要令牌之前得先有一把；remoteAi 只能在 requireToken 时打开", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "requireToken": { "type": "boolean" }, "remoteAi": { "type": "boolean" } } } } } }, "responses": { "200": { "description": "{access}" }, "400": err.clone(), "403": err.clone() } }
+            },
+            "/access/tokens": {
+                "post": { "summary": "只能在主机本机调：生成一把令牌，明文只返回这一次", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" } } } } } }, "responses": { "201": { "description": "{name, token}" }, "400": err.clone(), "403": err.clone() } }
+            },
+            "/access/tokens/{id}": {
+                "delete": { "summary": "只能在主机本机调：删一把令牌（路径里是名字）。删光了「要令牌」自动关掉", "parameters": [id_param()], "responses": { "200": { "description": "{ok, access}" }, "403": err.clone(), "404": err.clone() } }
+            },
+            "/agents": {
+                "get": { "summary": "这台主机上能在后台回答的 AI。要主机打开「允许局域网叫本机的 AI」并带令牌；叫不了时 enabled = false 并说明原因。device 是主机在设备表里的那条", "responses": { "200": { "description": "{enabled, reason?, agents: [{name}], device}" } } }
+            },
+            "/agents/events": {
+                "get": { "summary": "SSE：从局域网发起的 AI 每一步（event: ai，data 是 {run, type: step|ask|asked|end, …}）", "responses": { "200": { "description": "text/event-stream" }, "403": err.clone() } }
+            },
+            "/agents/ask": {
+                "post": { "summary": "叫主机上的一个 AI 回答一次，等它答完才返回 {text, usage?, session?}。只认 agent 的名字，命令用主机自己设置的。请求断了这次任务就停", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["agent", "prompt", "run"], "properties": { "agent": { "type": "string" }, "prompt": { "type": "string" }, "run": { "type": "string", "description": "这一次的编号（字母数字 - _），进展和确认都用它" }, "cwd": { "type": "string", "description": "主机上的工作目录，不存在就用临时目录" }, "images": { "type": "array", "items": { "type": "string" }, "description": "附件名" }, "key": { "type": "string" }, "resume": { "type": "string", "description": "接着 claude 的哪一次对话" } } } } } }, "responses": { "200": { "description": "{text, usage?, session?}" }, "400": err.clone(), "403": err.clone(), "409": err.clone(), "502": err.clone() } }
+            },
+            "/agents/runs/{id}/decide": {
+                "post": { "summary": "回答 AI 的一个确认请求：decision 是 allow（这一次）/ kind（同类的都允许）/ all（这次任务都允许）/ deny", "parameters": [id_param()], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["id", "decision"], "properties": { "id": { "type": "string" }, "decision": { "type": "string" } } } } } }, "responses": { "200": { "description": "{ok}" }, "403": err.clone(), "404": err.clone(), "409": err.clone() } }
+            },
+            "/agents/runs/{id}/stop": {
+                "post": { "summary": "停止一次从局域网发起的 AI 任务", "parameters": [id_param()], "responses": { "200": { "description": "{ok}" }, "403": err.clone() } }
             },
             "/vault/requests/{id}": {
                 "get": { "summary": "取用请求的结果：status 是 pending / approved（带 sealed，取走一次就没了）/ denied / expired", "parameters": [id_param()], "responses": { "200": { "description": "{status, title, sealed}" }, "404": err.clone() } },

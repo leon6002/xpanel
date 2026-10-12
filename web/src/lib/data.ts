@@ -1,8 +1,8 @@
 /* 数据层：全部条目一次取回（和旧界面一样，几千条也很快），变化时整体刷新；写入先改本地再提交 */
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { applyOp, desk, getRev, getState, isApp, newId, v1 } from "./api";
-import type { AppConfig, Chat, Device, Item, State, Template } from "./types";
+import { applyOp, desk, getRev, getState, isApp, newId, remoteAi, v1 } from "./api";
+import type { Agent, AppConfig, Chat, Device, Item, State, Template } from "./types";
 import { useUi } from "./store";
 
 export const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, refetchOnWindowFocus: false, retry: 1 } } });
@@ -21,6 +21,23 @@ export function useConfig() {
 export const setConfig = (c: Partial<AppConfig>) => qc.setQueryData<AppConfig>(["config"], (old) => (old ? { ...old, ...c } : (c as AppConfig)));
 export function useDevices(): Device[] {
   return useAppState().data?.devices ?? [];
+}
+/** 浏览器里：主机上能叫的 AI（主机打开了「允许局域网叫本机的 AI」才有） */
+export function useRemoteAgents() {
+  return useQuery({ queryKey: ["remote-agents"], queryFn: remoteAi.list, enabled: !isApp, staleTime: 60_000, retry: false });
+}
+/** 能在后台回答的 AI：桌面版是设置里的；浏览器里是主机上的（只有名字，经主机叫） */
+export function useAgents(): Agent[] {
+  const cfg = useConfig().data?.config;
+  const r = useRemoteAgents().data;
+  if (isApp) return cfg?.agents ?? [];
+  return r?.enabled ? r.agents.map((a) => ({ name: a.name, cmd: "", remote: true })) : [];
+}
+/** AI 在哪台电脑上干活：桌面版是这台；浏览器里叫的是主机上的，找项目文件夹要按主机找 */
+export function useAiDevice() {
+  const me = useThisDevice();
+  const r = useRemoteAgents().data;
+  return isApp ? me : { id: r?.device?.id || "", hostname: r?.device?.hostname || "" };
 }
 /** 这台电脑在设备表里的 id（浏览器里为空） */
 export function useThisDevice() {

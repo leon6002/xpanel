@@ -212,6 +212,7 @@ fn with_images(cmdline: &str, images: &[std::path::PathBuf]) -> String {
 }
 
 /// 问答时把 xpanel 自己的 MCP 接给 AI，它就能直接查、建、改工作台里的条目，不用用户先去 AI 工具里配一遍
+#[derive(Clone)]
 pub struct McpLink {
     /// xp 命令在哪
     pub xp: std::path::PathBuf,
@@ -219,6 +220,8 @@ pub struct McpLink {
     pub url: String,
     /// 操作记录里写谁做的
     pub actor: String,
+    /// 连接模式下主机要的令牌（空 = 不用）
+    pub token: String,
 }
 
 /// 接 MCP 的配置文件，放在工作目录里：用相对路径写进命令行，不用操心路径里的空格和引号
@@ -226,6 +229,14 @@ pub const ASK_MCP: &str = ".xpanel/mcp.json";
 
 /// claude 可以用 --mcp-config 临时接一个 MCP；非交互模式下工具要事先放行，所以把 xpanel 的工具一起放行。
 /// 用户自己在命令里写了 --mcp-config 的不动；别的 AI 命令行原样返回（它们要在各自的配置里接）。
+fn mcp_env(l: &McpLink) -> serde_json::Value {
+    let mut env = serde_json::json!({ "XPANEL_URL": l.url, "XPANEL_ACTOR": l.actor });
+    if !l.token.is_empty() {
+        env["XPANEL_TOKEN"] = l.token.clone().into();
+    }
+    env
+}
+
 fn with_mcp(cmdline: &str, dir: &std::path::Path, link: Option<&McpLink>) -> String {
     let t = cmdline.trim_end();
     let Some(l) = link else {
@@ -237,7 +248,7 @@ fn with_mcp(cmdline: &str, dir: &std::path::Path, link: Option<&McpLink>) -> Str
     let cfg = serde_json::json!({ "mcpServers": { "xpanel": {
         "command": l.xp.to_string_lossy(),
         "args": ["mcp"],
-        "env": { "XPANEL_URL": l.url, "XPANEL_ACTOR": l.actor },
+        "env": mcp_env(l),
     }}});
     let f = dir.join(ASK_MCP);
     let wrote = f.parent().is_some_and(|d| fs::create_dir_all(d).is_ok())
@@ -835,6 +846,7 @@ mod ask_tests {
             xp: std::path::PathBuf::from("/opt/my tools/xp"),
             url: "http://127.0.0.1:8765".into(),
             actor: "Claude Code".into(),
+            token: String::new(),
         };
         let c = with_mcp("claude -p", &dir, Some(&link));
         assert_eq!(
@@ -852,6 +864,17 @@ mod ask_tests {
         assert_eq!(x["args"][0], "mcp");
         assert_eq!(x["env"]["XPANEL_URL"], "http://127.0.0.1:8765");
         assert_eq!(x["env"]["XPANEL_ACTOR"], "Claude Code");
+        assert!(x["env"].get("XPANEL_TOKEN").is_none());
+        // 连接模式：主机要令牌时一起带上
+        let remote = McpLink {
+            url: "http://base:8765".into(),
+            token: "xp_abc".into(),
+            ..link.clone()
+        };
+        with_mcp("claude -p", &dir, Some(&remote));
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(dir.join(ASK_MCP)).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["xpanel"]["env"]["XPANEL_TOKEN"], "xp_abc");
         // 没有地址、别的 AI、用户自己已经接了的：都不动
         assert_eq!(with_mcp("claude -p", &dir, None), "claude -p");
         assert_eq!(with_mcp("codex exec -", &dir, Some(&link)), "codex exec -");

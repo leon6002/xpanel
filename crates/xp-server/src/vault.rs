@@ -31,7 +31,7 @@ pub fn routes() -> Router<AppState> {
 /// `http://主机:8765` 发请求，把密文和包着的密钥拿走去离线猜主密码。
 /// - 带了 Origin（浏览器的跨站请求一定带）：必须和 Host 是同一个地址
 /// - Host 必须像局域网地址（IP、localhost、不带点的机器名、.local 等），挡住把外面的域名解析到内网的做法
-async fn same_site_only(req: Request, next: Next) -> Result<Response, ApiError> {
+pub(crate) async fn same_site_only(req: Request, next: Next) -> Result<Response, ApiError> {
     if !same_site(req.headers()) {
         return Err(ApiError(
             StatusCode::FORBIDDEN,

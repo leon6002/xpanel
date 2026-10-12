@@ -315,9 +315,16 @@ async fn openapi_lists_every_route() {
             || p.ends_with("/scrub")
             || p == &"/vault/drops"
             || p.contains("/wechat/")
-            || p.starts_with("/inbox/messages/");
+            || p.starts_with("/inbox/messages/")
+            || p.starts_with("/auth/l")
+            || p == &"/access/tokens"
+            || p == &"/agents/ask"
+            || p.starts_with("/agents/runs/");
         let put_only = p.starts_with("/vault/keys/") || p.starts_with("/vault/secrets/");
-        let m = if put_only {
+        let delete_only = p.starts_with("/access/tokens/");
+        let m = if delete_only {
+            Method::DELETE
+        } else if put_only {
             Method::PUT
         } else if post_only {
             Method::POST
@@ -329,7 +336,7 @@ async fn openapi_lists_every_route() {
         if *p == "/backup/merge" {
             // 还没设置外置硬盘上的文件夹：说清楚，不是暂时故障
             assert_eq!(c, StatusCode::BAD_REQUEST, "{p}");
-        } else if !post_only && !p.contains("{id}") {
+        } else if !post_only && !delete_only && !p.contains("{id}") {
             assert_eq!(c, StatusCode::OK, "{p}");
         }
     }
@@ -1040,5 +1047,420 @@ async fn vault_api_round_trip() {
     )
     .await;
     assert_eq!(c, StatusCode::NO_CONTENT);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+// ---------------------------------------------------------------- 局域网令牌、叫主机上的 AI
+
+/// 模拟从某个地址发来的请求（真服务会带上对方地址）。返回状态、Set-Cookie、正文
+async fn call_from(
+    app: &Router,
+    from: &str,
+    method: Method,
+    uri: &str,
+    body: Option<Value>,
+    headers: &[(&str, &str)],
+) -> (StatusCode, Option<String>, Value) {
+    let mut b = Request::builder().method(method).uri(uri);
+    for (k, v) in headers {
+        b = b.header(*k, *v);
+    }
+    let mut req = match body {
+        Some(v) => b
+            .header("content-type", "application/json")
+            .body(Body::from(v.to_string()))
+            .unwrap(),
+        None => b.body(Body::empty()).unwrap(),
+    };
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo::<std::net::SocketAddr>(
+            from.parse().unwrap(),
+        ));
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let cookie = resp
+        .headers()
+        .get("set-cookie")
+        .map(|v| v.to_str().unwrap().to_string());
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    (status, cookie, j(&String::from_utf8_lossy(&bytes)))
+}
+
+const LAN: &str = "192.168.1.20:50000";
+const ME: &str = "127.0.0.1:50000";
+
+#[tokio::test]
+async fn lan_needs_token_once_turned_on() {
+    let (st, d) = setup("gate");
+    let app = router(st.clone());
+    // 默认不要令牌：局域网照常能用
+    let (c, _, _) = call_from(&app, LAN, Method::GET, "/api/state", None, &[]).await;
+    assert_eq!(c, StatusCode::OK);
+    // 改权限、管令牌只能在本机
+    let (c, _, _) = call_from(&app, LAN, Method::GET, "/api/v1/access", None, &[]).await;
+    assert_eq!(c, StatusCode::FORBIDDEN);
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/access/tokens",
+        Some(json!({"name":"x"})),
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::FORBIDDEN);
+    // 没有令牌时打不开
+    let on = json!({"requireToken": true, "remoteAi": false});
+    let (c, _, _) = call_from(
+        &app,
+        ME,
+        Method::PUT,
+        "/api/v1/access",
+        Some(on.clone()),
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::BAD_REQUEST);
+    let (c, _, v) = call_from(
+        &app,
+        ME,
+        Method::POST,
+        "/api/v1/access/tokens",
+        Some(json!({"name":"笔记本"})),
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::CREATED);
+    let tok = v["token"].as_str().unwrap().to_string();
+    let (c, _, v) = call_from(&app, ME, Method::PUT, "/api/v1/access", Some(on), &[]).await;
+    assert_eq!(c, StatusCode::OK);
+    assert_eq!(v["access"]["requireToken"], true);
+    // 局域网没带令牌：接口 401，界面的静态文件和 ping、登录照常
+    for p in [
+        "/api/state",
+        "/api/v1/items",
+        "/api/asset/x.png",
+        "/api/v1/events",
+        "/api/v1/vault",
+    ] {
+        let (c, _, v) = call_from(&app, LAN, Method::GET, p, None, &[]).await;
+        assert_eq!(c, StatusCode::UNAUTHORIZED, "{p}");
+        assert_eq!(v["needToken"], true);
+    }
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/op",
+        Some(json!({"kind":"delete","id":"a"})),
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::UNAUTHORIZED);
+    for p in ["/", "/api/ping", "/old/"] {
+        let (c, _, _) = call_from(&app, LAN, Method::GET, p, None, &[]).await;
+        assert_eq!(c, StatusCode::OK, "{p}");
+    }
+    let (_, _, s) = call_from(&app, LAN, Method::GET, "/api/v1/auth/status", None, &[]).await;
+    assert_eq!(s["requireToken"], true);
+    assert_eq!(s["ok"], false);
+    // 本机不用令牌（桌面版在进程里调的也算本机）
+    let (c, _, _) = call_from(&app, ME, Method::GET, "/api/state", None, &[]).await;
+    assert_eq!(c, StatusCode::OK);
+    let (c, _) = call(&st, Method::GET, "/api/v1/items", None, &[]).await;
+    assert_eq!(c, StatusCode::OK);
+    // 带令牌：三种带法都行
+    for h in [
+        ("x-xpanel-token", tok.clone()),
+        ("authorization", format!("Bearer {tok}")),
+        ("cookie", format!("a=1; xp_token={tok}")),
+    ] {
+        let (c, _, _) = call_from(&app, LAN, Method::GET, "/api/state", None, &[(h.0, &h.1)]).await;
+        assert_eq!(c, StatusCode::OK, "{}", h.0);
+    }
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::GET,
+        "/api/state",
+        None,
+        &[("x-xpanel-token", "xp_wrong")],
+    )
+    .await;
+    assert_eq!(c, StatusCode::UNAUTHORIZED);
+    // 浏览器登录：对了种 cookie，错了 401
+    let (c, cookie, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/auth/login",
+        Some(json!({"token":"xp_nope"})),
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::UNAUTHORIZED);
+    assert!(cookie.is_none());
+    let (c, cookie, v) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/auth/login",
+        Some(json!({"token": tok})),
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK);
+    assert_eq!(v["name"], "笔记本");
+    let cookie = cookie.unwrap();
+    assert!(
+        cookie.contains("HttpOnly") && cookie.contains("SameSite=Strict"),
+        "{cookie}"
+    );
+    let pair = cookie.split(';').next().unwrap().to_string();
+    let (_, _, s) = call_from(
+        &app,
+        LAN,
+        Method::GET,
+        "/api/v1/auth/status",
+        None,
+        &[("cookie", &pair)],
+    )
+    .await;
+    assert_eq!(s["ok"], true);
+    assert_eq!(s["name"], "笔记本");
+    // cookie 不算身份：写入记的还是界面报的名字，不是令牌的名字
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/items",
+        Some(json!({"title":"从笔记本记的"})),
+        &[("cookie", &pair), ("x-actor", "ui")],
+    )
+    .await;
+    assert_eq!(c, StatusCode::CREATED);
+    let (_, _, a) = call_from(&app, ME, Method::GET, "/api/v1/audit", None, &[]).await;
+    assert_eq!(a["entries"][0]["actor"], "ui", "{a}");
+    // 局域网带着令牌也不能改权限
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::PUT,
+        "/api/v1/access",
+        Some(json!({"requireToken": false})),
+        &[("cookie", &pair)],
+    )
+    .await;
+    assert_eq!(c, StatusCode::FORBIDDEN);
+    // 删掉令牌马上失效；删光了「要令牌」自动关掉
+    let (c, _, v) = call_from(
+        &app,
+        ME,
+        Method::DELETE,
+        "/api/v1/access/tokens/%E7%AC%94%E8%AE%B0%E6%9C%AC",
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK);
+    assert_eq!(v["access"]["requireToken"], false);
+    let (_, _, s) = call_from(
+        &app,
+        LAN,
+        Method::GET,
+        "/api/v1/auth/status",
+        None,
+        &[("cookie", &pair)],
+    )
+    .await;
+    assert_eq!(s["requireToken"], false);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+/// 假的桌面版主机：记下收到的请求，跑的时候发一步进展、问一次确认
+struct FakeHost {
+    asked: std::sync::Mutex<Vec<AskReq>>,
+    decided: std::sync::Mutex<Vec<String>>,
+    stopped: std::sync::Mutex<Vec<String>>,
+    gate: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl AgentHost for FakeHost {
+    fn agents(&self) -> Value {
+        json!({"agents": [{"name": "Claude Code"}], "device": {"id": "d1", "hostname": "BASE"}})
+    }
+    fn ask(&self, req: AskReq, emit: Box<dyn Fn(Value) + Send + Sync>) -> Result<Value, String> {
+        emit(json!({"run": req.run, "type": "ask", "id": "0", "what": "运行命令"}));
+        let run = req.run.clone();
+        self.asked.lock().unwrap().push(req);
+        // 等测试放行（模拟等用户点允许）
+        if let Some(rx) = self.gate.lock().unwrap().take() {
+            let _ = rx.recv_timeout(std::time::Duration::from_secs(5));
+        }
+        emit(json!({"run": run, "type": "end"}));
+        Ok(json!({"text": "好了"}))
+    }
+    fn decide(&self, run: &str, id: &str, decision: &str) -> Result<(), String> {
+        self.decided
+            .lock()
+            .unwrap()
+            .push(format!("{run}/{id}/{decision}"));
+        Ok(())
+    }
+    fn stop(&self, run: &str) {
+        self.stopped.lock().unwrap().push(run.to_string());
+    }
+}
+
+#[tokio::test]
+async fn lan_can_ask_host_ai_only_when_allowed() {
+    let (st, d) = setup("agents");
+    let (go, wait) = std::sync::mpsc::channel();
+    let host = Arc::new(FakeHost {
+        asked: Default::default(),
+        decided: Default::default(),
+        stopped: Default::default(),
+        gate: std::sync::Mutex::new(Some(wait)),
+    });
+    let app = router_with(st.clone(), Some(host.clone()));
+    let tok = st.create_key("手机").unwrap();
+    let t = [("x-xpanel-token", tok.as_str())];
+    let ask = json!({"agent": "Claude Code", "prompt": "看看", "run": "r1", "cmd": "rm -rf /"});
+    // 没开要令牌：局域网叫不了（哪怕带着令牌）
+    let (_, _, v) = call_from(&app, LAN, Method::GET, "/api/v1/agents", None, &t).await;
+    assert_eq!(v["enabled"], false);
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/agents/ask",
+        Some(ask.clone()),
+        &t,
+    )
+    .await;
+    assert_eq!(c, StatusCode::FORBIDDEN);
+    // 要令牌但没允许叫 AI：还是不行
+    st.set_access(xp_store::Access {
+        require_token: true,
+        remote_ai: false,
+    })
+    .unwrap();
+    let (_, _, v) = call_from(&app, LAN, Method::GET, "/api/v1/agents", None, &t).await;
+    assert_eq!(v["enabled"], false);
+    assert!(v["reason"]
+        .as_str()
+        .unwrap()
+        .contains("允许局域网叫本机的 AI"));
+    // 本机的浏览器不受限
+    let (_, _, v) = call_from(&app, ME, Method::GET, "/api/v1/agents", None, &[]).await;
+    assert_eq!(v["enabled"], true);
+    st.set_access(xp_store::Access {
+        require_token: true,
+        remote_ai: true,
+    })
+    .unwrap();
+    // 没带令牌：401
+    let (c, _, _) = call_from(&app, LAN, Method::GET, "/api/v1/agents", None, &[]).await;
+    assert_eq!(c, StatusCode::UNAUTHORIZED);
+    let (_, _, v) = call_from(&app, LAN, Method::GET, "/api/v1/agents", None, &t).await;
+    assert_eq!(v["enabled"], true);
+    assert_eq!(v["agents"][0]["name"], "Claude Code");
+    assert_eq!(v["device"]["id"], "d1");
+    // 别的网站发起的：拒绝
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/agents/ask",
+        Some(ask.clone()),
+        &[
+            t[0],
+            ("host", "192.168.1.5:8765"),
+            ("origin", "http://evil.example.com"),
+        ],
+    )
+    .await;
+    assert_eq!(c, StatusCode::FORBIDDEN);
+    // 跑起来：等确认时局域网能回答
+    let a2 = app.clone();
+    let tok2 = tok.clone();
+    let ask2 = ask.clone();
+    let job = tokio::spawn(async move {
+        call_from(
+            &a2,
+            LAN,
+            Method::POST,
+            "/api/v1/agents/ask",
+            Some(ask2),
+            &[("x-xpanel-token", tok2.as_str())],
+        )
+        .await
+    });
+    for _ in 0..50 {
+        if !host.asked.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/agents/ask",
+        Some(ask.clone()),
+        &t,
+    )
+    .await;
+    assert_eq!(c, StatusCode::CONFLICT, "同一个编号不能跑两次");
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/agents/runs/r1/decide",
+        Some(json!({"id":"0","decision":"allow"})),
+        &t,
+    )
+    .await;
+    assert_eq!(c, StatusCode::OK);
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/agents/runs/other/decide",
+        Some(json!({"id":"0","decision":"allow"})),
+        &t,
+    )
+    .await;
+    assert_eq!(c, StatusCode::NOT_FOUND, "主机自己的任务不能从局域网回答");
+    go.send(()).unwrap();
+    let (c, _, v) = job.await.unwrap();
+    assert_eq!(c, StatusCode::OK);
+    assert_eq!(v["text"], "好了");
+    assert_eq!(host.decided.lock().unwrap().as_slice(), ["r1/0/allow"]);
+    // 只把名字交给主机，对方传的命令不认（AskReq 里根本没有这个字段）
+    assert_eq!(host.asked.lock().unwrap()[0].agent, "Claude Code");
+    assert!(host.stopped.lock().unwrap().is_empty(), "正常结束不算停止");
+    // 结束了就不能再回答
+    let (c, _, _) = call_from(
+        &app,
+        LAN,
+        Method::POST,
+        "/api/v1/agents/runs/r1/decide",
+        Some(json!({"id":"0","decision":"allow"})),
+        &t,
+    )
+    .await;
+    assert_eq!(c, StatusCode::NOT_FOUND);
+    // 命令行开的服务（没有桌面版）：叫不了
+    let (_, _, v) = call_from(
+        &router(st.clone()),
+        ME,
+        Method::GET,
+        "/api/v1/agents",
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(v["enabled"], false);
     let _ = std::fs::remove_dir_all(d);
 }

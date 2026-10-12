@@ -120,11 +120,14 @@ export interface BackupResult { needsMerge?: boolean; latest?: DriveBackup; mani
 export interface MergeResult { applied: Record<string, number>; kept: number; copiedFiles: number; copiedBytes: number; other?: { vault?: { keys: number; secrets: number; keptOld: number } } }
 
 /* ---- 桌面版配置（get_config） ---- */
-export interface Agent { name: string; cmd: string; ask?: string }
+/** remote：主机上的 AI（浏览器里经主机的 /api/v1/agents 叫，只认名字） */
+export interface Agent { name: string; cmd: string; ask?: string; remote?: boolean }
 export interface Config {
   mode: "" | "host" | "client";
   dataDir: string;
   serverUrl: string;
+  /** 连接模式：主机要令牌时填的 */
+  serverToken?: string;
   port: number;
   lanEnabled: boolean;
   agents: Agent[];

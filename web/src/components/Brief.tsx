@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { askAi } from "../lib/aiRuns";
 import { applyReply, briefDigest, briefOf, buildBriefPrompt, buildRevisePrompt, buildWorkPrompt, parseRevision, type Revision, openQuestions, parseBrief, type Brief, type BriefQ } from "../lib/brief";
-import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
+import { addItem, patchItem, qc, useAgents, useAiDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { buildContextZip, saveFile } from "../lib/exportContext";
 import { addLink, relatedOf } from "../lib/links";
@@ -258,11 +258,11 @@ export function openHandoff(it: Item, onDirect: () => void) {
 }
 
 function Handoff({ it, close, onDirect }: { it: Item; close: () => void; onDirect: () => void }) {
-  const agents = (useConfig().data?.config.agents ?? []).filter(canAsk);
-  const me = useThisDevice();
+  const agents = useAgents().filter(canAsk);
+  const me = useAiDevice();
   const [pick, setPick] = useState(() => Math.max(0, agents.findIndex((a) => a.name === ls.get("wb-agent"))));
   const has = !!briefOf(it);
-  const manual = !isApp || !agents.length;
+  const manual = !agents.length;
   const start = async () => {
     close();
     if (manual) {
@@ -307,7 +307,7 @@ function Handoff({ it, close, onDirect }: { it: Item; close: () => void; onDirec
         <p className="text-[13px] text-muted">这一条已经在讨论了，点「接着讨论」回去看。</p>
       ) : manual ? (
         <p className="rounded-xl bg-surface-2 px-3.5 py-2.5 text-[13px] leading-relaxed text-muted">
-          {isApp ? "还没有配置能在后台回答的 AI（设置里加 Claude Code 或 Codex）。" : "网页版叫不动电脑上的 AI。"}会走手动：把提示词复制给任意一个 AI，再把它的回复贴回来。
+          {isApp ? "还没有配置能在后台回答的 AI（设置里加 Claude Code 或 Codex）。" : "主机没有打开「允许局域网叫本机的 AI」（在主机的设置里，先打开「局域网访问要令牌」）。"}会走手动：把提示词复制给任意一个 AI，再把它的回复贴回来。
         </p>
       ) : (
         <Pick label="和哪个 AI 讨论" items={agents} value={pick} onChange={setPick} render={(a) => (<><Sparkles />{a.name}</>)} />
@@ -355,8 +355,8 @@ function Question({ q, n, value, onChange, onBlur }: { q: BriefQ; n: number; val
 
 export function BriefPanel({ it }: { it: Item }) {
   const b = briefOf(it);
-  const me = useThisDevice();
-  const agents = useConfig().data?.config.agents ?? [];
+  const me = useAiDevice();
+  const agents = useAgents();
   const busy = useBriefRun((s) => s.busy[it.id]);
   const err = useBriefRun((s) => s.err[it.id]);
   const last = b?.rounds[b.rounds.length - 1];
@@ -376,7 +376,7 @@ export function BriefPanel({ it }: { it: Item }) {
   if (!b) return null;
 
   const agent = agents.find((a) => a.name === b.agent && canAsk(a));
-  const manual = !isApp || !agent;
+  const manual = !agent;
   /** 把正在填的回答存进条目（离开输入框时、发给 AI 之前） */
   const persist = async () => {
     const cur = itemOf(it.id);
@@ -596,7 +596,7 @@ export function BriefPanel({ it }: { it: Item }) {
       {manual && b.status !== "done" && (
         <div className="flex flex-col gap-2 rounded-xl bg-surface px-3.5 py-3">
           <span className="text-xs leading-relaxed text-muted">
-            {isApp ? `没找到能在后台回答的「${b.agent}」，` : "网页版叫不动电脑上的 AI，"}这里走手动：{b.status === "ready" ? "复制开工的提示词交给 AI，把它写的成品贴回来存成笔记。" : b.rounds.length ? "回答完上面的问题后，复制提示词交给 AI，把它的回复贴回来。" : "复制提示词交给任意一个 AI，把它的回复贴回来。"}
+            {isApp ? `没找到能在后台回答的「${b.agent}」，` : `主机上叫不了「${b.agent}」（主机设置里要打开「允许局域网叫本机的 AI」），`}这里走手动：{b.status === "ready" ? "复制开工的提示词交给 AI，把它写的成品贴回来存成笔记。" : b.rounds.length ? "回答完上面的问题后，复制提示词交给 AI，把它的回复贴回来。" : "复制提示词交给任意一个 AI，把它的回复贴回来。"}
           </span>
           <div className="flex flex-wrap gap-2">
             <Button

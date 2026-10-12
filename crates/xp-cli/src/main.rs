@@ -2,6 +2,7 @@
 //!
 //! 连接哪个 xpanel：环境变量 XPANEL_URL（默认 http://127.0.0.1:8765）
 //! 身份：环境变量 XPANEL_KEY（用 `xp key create <名字>` 在主机上生成）
+//! 主机打开了「局域网访问要令牌」时：XPANEL_KEY 本身就能进；只想进、不想改身份就设 XPANEL_TOKEN
 
 mod mcp;
 mod vault;
@@ -30,6 +31,9 @@ struct Cli {
     /// 没有 key 时，用这个名字标明是谁在操作
     #[arg(long = "as", env = "XPANEL_ACTOR", global = true)]
     actor: Option<String>,
+    /// 主机要令牌时带的令牌（只管能不能进，不算身份；有 key 时不用填）
+    #[arg(long, env = "XPANEL_TOKEN", hide_env_values = true, global = true)]
+    token: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -243,6 +247,17 @@ enum KeyCmd {
         #[arg(long, env = "XPANEL_DATA")]
         data: String,
     },
+    /// 局域网访问的权限：xp key access --require on --ai on（不带参数就是看现在的）
+    Access {
+        #[arg(long, env = "XPANEL_DATA")]
+        data: String,
+        /// 局域网访问要令牌（本机不用）
+        #[arg(long, value_parser = ["on", "off"])]
+        require: Option<String>,
+        /// 允许局域网里带令牌的叫主机上的 AI（只有桌面版当主机时有用）
+        #[arg(long, value_parser = ["on", "off"])]
+        ai: Option<String>,
+    },
 }
 
 #[derive(Args, Default)]
@@ -290,6 +305,8 @@ struct Client {
     base: String,
     key: Option<String>,
     actor: Option<String>,
+    /// 主机要令牌时带上（X-Xpanel-Token）
+    token: Option<String>,
 }
 
 impl Client {
@@ -307,7 +324,19 @@ impl Client {
         } else if let Some(a) = &self.actor {
             r = r.set("X-Actor", a);
         }
-        r
+        self.with_token(r)
+    }
+
+    fn with_token(&self, r: ureq::Request) -> ureq::Request {
+        match self
+            .token
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
+            Some(t) => r.set("X-Xpanel-Token", t),
+            None => r,
+        }
     }
 
     fn done(&self, r: Result<ureq::Response, ureq::Error>) -> Result<ureq::Response, String> {
@@ -319,7 +348,12 @@ impl Client {
                     .ok()
                     .and_then(|v| v["error"].as_str().map(String::from))
                     .unwrap_or_default();
-                Err(format!("xpanel 返回 {code}：{msg}"))
+                let hint = if code == 401 {
+                    "\n主机要令牌：设置环境变量 XPANEL_TOKEN（或 XPANEL_KEY）"
+                } else {
+                    ""
+                };
+                Err(format!("xpanel 返回 {code}：{msg}{hint}"))
             }
             Err(ureq::Error::Transport(t)) => Err(format!(
                 "连不上 xpanel（{}）：{t}\n用 --url 或环境变量 XPANEL_URL 指定地址",
@@ -455,6 +489,7 @@ fn run(cli: Cli) -> Result<(), String> {
         base: cli.url.clone(),
         key: cli.key.clone(),
         actor: cli.actor.clone(),
+        token: cli.token.clone(),
     };
     match cli.cmd {
         Cmd::Add {
@@ -746,6 +781,25 @@ fn run(cli: Cli) -> Result<(), String> {
                 KeyCmd::Rm { name, data } => {
                     open(&data)?.delete_key(&name).map_err(|e| e.to_string())?;
                     println!("已删除 {name}");
+                }
+                KeyCmd::Access { data, require, ai } => {
+                    let st = open(&data)?;
+                    let mut a = st.access().map_err(|e| e.to_string())?;
+                    if require.is_some() || ai.is_some() {
+                        if let Some(r) = require {
+                            a.require_token = r == "on";
+                        }
+                        if let Some(x) = ai {
+                            a.remote_ai = x == "on";
+                        }
+                        a = st.set_access(a).map_err(|e| e.to_string())?;
+                    }
+                    let on = |b: bool| if b { "开" } else { "关" };
+                    println!(
+                        "局域网访问要令牌：{}\n允许局域网叫本机的 AI：{}\n（正在跑的服务最多 5 秒后生效）",
+                        on(a.require_token),
+                        on(a.remote_ai)
+                    );
                 }
             }
         }

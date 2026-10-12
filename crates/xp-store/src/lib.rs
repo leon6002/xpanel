@@ -31,6 +31,7 @@ use xp_core::{
 
 pub use assets::{mime_of, safe_asset_name};
 pub use inbox::{MessageQuery, SOURCE_WECHAT};
+pub use keys::Access;
 
 pub const DB_FILE: &str = "xpanel.db";
 /// 界面（旧版 index.html 和桌面版）写入时用的操作者名
@@ -93,6 +94,8 @@ pub struct Store {
     events: broadcast::Sender<u64>,
     /// 密码库：AI 发来、等用户确认的取用请求（只在内存里）
     vault_requests: Mutex<std::collections::HashMap<String, vault::Request>>,
+    /// 令牌和局域网权限每变一次加 1：服务那边缓存的「哪些令牌有效」看到它变了就作废
+    access_gen: std::sync::atomic::AtomicU64,
 }
 
 /// 旧版 workbench.json 的读取（数组，或 {version, items}）
@@ -161,6 +164,7 @@ impl Store {
             backed_up_day: Mutex::new(String::new()),
             events,
             vault_requests: Mutex::new(Default::default()),
+            access_gen: Default::default(),
         };
         st.init_replica()?;
         st.import_v1()?;

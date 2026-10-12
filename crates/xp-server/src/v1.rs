@@ -58,6 +58,9 @@ pub fn routes() -> Router<AppState> {
         )
         .nest("/inbox", crate::inbox::routes())
         .nest("/vault", crate::vault::routes())
+        .nest("/auth", crate::gate::auth_routes())
+        .nest("/access", crate::gate::access_routes())
+        .nest("/agents", crate::remote::routes())
 }
 
 // ---------------------------------------------------------------- 身份

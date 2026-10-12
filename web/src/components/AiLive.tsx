@@ -131,7 +131,7 @@ function PermitDialog({ run, more }: { run: AiRun; more: number }) {
   return (
     <Dialog
       title={`${run.agent} 想${ask.what}`}
-      desc={it ? `在做「${noteTitle(it)}」。它在这台电脑上做的事，要你点头才会做。` : "它在这台电脑上做的事，要你点头才会做。"}
+      desc={(it ? `在做「${noteTitle(it)}」。` : "") + (run.remote ? "它在主机上做的事，要你点头才会做。" : "它在这台电脑上做的事，要你点头才会做。")}
       onClose={() => {}}
       dismissable={false}
       wide

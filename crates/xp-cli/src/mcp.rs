@@ -495,6 +495,7 @@ mod tests {
             base: "http://127.0.0.1:9".into(),
             key: None,
             actor: Some("test".into()),
+            token: None,
         }
     }
 

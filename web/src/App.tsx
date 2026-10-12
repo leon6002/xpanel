@@ -11,6 +11,7 @@ import { ListPane } from "./components/ListPane";
 import { Peek } from "./components/Reader";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
+import { TokenGate, useNeedToken } from "./components/TokenGate";
 import { Vault, VaultRequests } from "./components/Vault";
 import { Palette } from "./components/Palette";
 import { ItemMenu } from "./components/ItemMenu";
@@ -45,6 +46,7 @@ function Shell() {
   useWorkspaceSync();
   useClaimPrompt();
   const dropping = useGlobalInput();
+  const locked = useNeedToken();
 
   useEffect(() => {
     applyTheme(theme);
@@ -55,6 +57,14 @@ function Shell() {
     return () => mq.removeEventListener("change", on);
   }, [theme]);
 
+  // 浏览器里：主机要令牌而还没登录
+  if (locked && !isApp)
+    return (
+      <>
+        <TokenGate />
+        <Toast />
+      </>
+    );
   if (needSetup)
     return (
       <>

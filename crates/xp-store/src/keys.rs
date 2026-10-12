@@ -1,10 +1,25 @@
-//! 外部 AI 用的 API key。每个 AI 一把，主要用来区分“是谁改的”；
+//! API key（也叫令牌）。两种用法：
+//! - 外部 AI、脚本带着它调接口（`Authorization: Bearer`），用来区分“是谁改的”；
+//! - 主机打开「局域网访问要令牌」后，别的电脑和浏览器要带一把才能用（见 xp-server 的 gate.rs）。
+//!
 //! 库里只存 key 的 SHA-256，明文只在创建时显示一次。
 
 use crate::{Result, Store, StoreError};
 use rusqlite::{params, OptionalExtension};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::Ordering;
+
+/// 局域网访问的权限，存在 meta 表的 `access`（只有主机本机能改）
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Access {
+    /// 别的电脑和浏览器要带令牌（本机自己访问不用）
+    pub require_token: bool,
+    /// 带令牌的可以叫这台主机上的 AI（只有开了令牌才能打开）
+    pub remote_ai: bool,
+}
 
 fn hash(key: &str) -> String {
     Sha256::digest(key.as_bytes())
@@ -40,8 +55,9 @@ impl Store {
             params![name, hash(&key), xp_core::now_ms()],
         )?;
         if n == 0 {
-            return Err(StoreError::Invalid(format!("已经有叫 {name} 的 key 了")));
+            return Err(StoreError::Invalid(format!("已经有叫 {name} 的令牌了")));
         }
+        self.bump_access();
         Ok(key)
     }
 
@@ -56,13 +72,59 @@ impl Store {
     }
 
     pub fn delete_key(&self, name: &str) -> Result<()> {
-        match self
+        let n = self
             .lock()
-            .execute("DELETE FROM api_keys WHERE name = ?1", [name])?
-        {
-            0 => Err(StoreError::NotFound(format!("没有叫 {name} 的 key"))),
-            _ => Ok(()),
+            .execute("DELETE FROM api_keys WHERE name = ?1", [name])?;
+        if n == 0 {
+            return Err(StoreError::NotFound(format!("没有叫 {name} 的令牌")));
         }
+        self.bump_access();
+        // 删光了就没法带令牌访问了：一起把要令牌关掉，免得别的电脑全都进不来又没地方拿令牌
+        if self.list_keys()?.is_empty() && self.access()?.require_token {
+            self.set_access(Access::default())?;
+        }
+        Ok(())
+    }
+
+    fn bump_access(&self) {
+        self.access_gen.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// 令牌或权限变过几次（只在这个进程里算；别的进程改的靠缓存过期）
+    pub fn access_gen(&self) -> u64 {
+        self.access_gen.load(Ordering::SeqCst)
+    }
+
+    pub fn access(&self) -> Result<Access> {
+        let raw: Option<String> = self
+            .lock()
+            .query_row("SELECT value FROM meta WHERE key = 'access'", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        Ok(raw
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default())
+    }
+
+    /// 改权限。要令牌之前得先有一把；叫 AI 只能在要令牌时打开
+    pub fn set_access(&self, a: Access) -> Result<Access> {
+        if a.require_token && self.list_keys()?.is_empty() {
+            return Err(StoreError::Invalid(
+                "先生成一个令牌，再打开「要令牌」".into(),
+            ));
+        }
+        let a = Access {
+            remote_ai: a.remote_ai && a.require_token,
+            ..a
+        };
+        let v = serde_json::to_string(&a).map_err(|e| StoreError::Invalid(e.to_string()))?;
+        self.lock().execute(
+            "INSERT INTO meta (key, value) VALUES ('access', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [v],
+        )?;
+        self.bump_access();
+        Ok(a)
     }
 
     /// 校验 key，返回它的名字；顺便记下最后使用时间

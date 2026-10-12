@@ -2,7 +2,7 @@
 import { MessageSquarePlus, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errText, isApp } from "../lib/api";
-import { qc, useAppState, useConfig, useThisDevice } from "../lib/data";
+import { qc, useAgents, useAppState, useConfig, useThisDevice } from "../lib/data";
 import { useDrafts } from "../lib/drafts";
 import { clipFiles } from "../lib/logic";
 import { selectionContext, type QaSel } from "../lib/qa";
@@ -44,8 +44,7 @@ export function Banner() {
 export function QaFloat() {
   const [pos, setPos] = useState<{ x: number; y: number; sel: QaSel } | null>(null);
   const [open, setOpen] = useState<{ x: number; y: number; sel: QaSel; initial?: string[] } | null>(null);
-  const agents = useConfig().data?.config.agents ?? [];
-  const asker = isApp ? agents.find(canAsk) : undefined;
+  const asker = useAgents().find(canAsk);
   useEffect(() => {
     const up = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest?.(".qa-float")) return;

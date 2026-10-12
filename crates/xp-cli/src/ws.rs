@@ -33,14 +33,15 @@ pub fn default_root() -> PathBuf {
 impl Client {
     /// 读附件原始内容（/api/asset/<名字>）
     pub fn asset(&self, name: &str) -> Result<Vec<u8>, String> {
-        let r = ureq::get(&format!(
-            "{}/api/asset/{}",
-            self.base.trim_end_matches('/'),
-            name
-        ))
-        .timeout(std::time::Duration::from_secs(120))
-        .call()
-        .map_err(|e| format!("读取附件 {name} 失败：{e}"))?;
+        let r = self
+            .with_token(ureq::get(&format!(
+                "{}/api/asset/{}",
+                self.base.trim_end_matches('/'),
+                name
+            )))
+            .timeout(std::time::Duration::from_secs(120))
+            .call()
+            .map_err(|e| format!("读取附件 {name} 失败：{e}"))?;
         let mut buf = vec![];
         r.into_reader()
             .take(200_000_000)

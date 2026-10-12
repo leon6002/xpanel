@@ -38,6 +38,8 @@ pub struct Config {
     pub mode: String,
     pub data_dir: String,
     pub server_url: String,
+    /// 连接模式：主机打开了「局域网访问要令牌」时填的令牌
+    pub server_token: String,
     pub port: u16,
     pub lan_enabled: bool,
     /// 可以把条目交给的 AI；cmd 里用 {prompt} 代表提示词
@@ -58,6 +60,7 @@ impl Default for Config {
             mode: String::new(),
             data_dir: default_dir(),
             server_url: String::new(),
+            server_token: String::new(),
             port: xp_server::DEFAULT_PORT,
             lan_enabled: true,
             agents: agent::default_agents(),
@@ -122,7 +125,7 @@ fn stop_lan(st: &AppState) {
     }
 }
 
-fn start_lan(st: &Arc<AppState>) -> Result<(), String> {
+fn start_lan(st: &Arc<AppState>, app: &AppHandle) -> Result<(), String> {
     stop_lan(st);
     let cfg = st.cfg();
     if cfg.mode != "host" || !cfg.lan_enabled {
@@ -146,8 +149,13 @@ fn start_lan(st: &Arc<AppState>) -> Result<(), String> {
     }
     let listener = listener.ok_or(last)?;
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    // 局域网里带令牌的可以叫这台电脑上的 AI（主机设置里打开才行，见 xp-server 的 remote.rs）
+    let agents: Arc<dyn xp_server::AgentHost> = Arc::new(HostAgents {
+        st: st.clone(),
+        app: app.clone(),
+    });
     tauri::async_runtime::spawn(async move {
-        if let Err(e) = xp_server::serve(store, listener, async {
+        if let Err(e) = xp_server::serve_with(store, listener, Some(agents), async {
             let _ = rx.await;
         })
         .await
@@ -257,7 +265,7 @@ async fn api_call(
 }
 
 #[tauri::command]
-async fn save_config(s: St<'_>, cfg: Config) -> Result<Value, String> {
+async fn save_config(app: AppHandle, s: St<'_>, cfg: Config) -> Result<Value, String> {
     let st = s.inner().clone();
     blocking(move || {
         let mut cfg = cfg;
@@ -278,12 +286,18 @@ async fn save_config(s: St<'_>, cfg: Config) -> Result<Value, String> {
             Store::open(&cfg.data_dir).map_err(|e| e.to_string())?;
         }
         if cfg.mode == "client" {
-            client::ping(&cfg.server_url)?;
+            cfg.server_token = cfg.server_token.trim().to_string();
+            let old = st.cfg().server_token;
+            client::set_token(&cfg.server_token);
+            if let Err(e) = client::ping(&cfg.server_url) {
+                client::set_token(&old);
+                return Err(e);
+            }
         }
         write_config(&st, &cfg)?;
         // 数据文件夹或冷备份位置可能变了：重新打开数据库
         *st.store.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        let lan_err = start_lan(&st).err();
+        let lan_err = start_lan(&st, &app).err();
         heartbeat_soon(&st);
         Ok(json!({ "config": st.cfg(), "lan": lan_info_of(&st), "lanError": lan_err }))
     })
@@ -548,6 +562,12 @@ fn mcp_link(cfg: &Config, actor: &str) -> Option<agent::McpLink> {
         xp,
         url,
         actor: actor.trim().to_string(),
+        // 主机本机走 127.0.0.1 不用令牌；连接模式连主机要带
+        token: if cfg.mode == "client" {
+            cfg.server_token.trim().to_string()
+        } else {
+            String::new()
+        },
     })
 }
 
@@ -568,70 +588,148 @@ async fn ask_ai(
     resume: Option<String>,
 ) -> Result<agent::Answer, String> {
     let st = s.inner().clone();
+    let req = xp_server::AskReq {
+        agent: agent.name.clone(),
+        cwd,
+        prompt,
+        images: images.unwrap_or_default(),
+        key: key.unwrap_or_default(),
+        run: run.unwrap_or_default(),
+        resume,
+    };
     blocking(move || {
-        let dir = std::path::Path::new(cwd.trim());
-        let dir_run = if !cwd.trim().is_empty() && dir.is_dir() {
-            dir.to_path_buf()
-        } else {
-            let k: String = key
-                .unwrap_or_default()
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-                .take(40)
-                .collect();
-            std::env::temp_dir()
-                .join("xpanel-ask")
-                .join(if k.is_empty() { "note".into() } else { k })
-        };
-        let mut files = vec![];
-        let names = images.unwrap_or_default();
-        if !names.is_empty() {
-            let d = dir_run.join(agent::ASK_FILES);
-            std::fs::create_dir_all(&d).map_err(|e| format!("建图片目录失败：{e}"))?;
-            for n in names.iter().take(40) {
-                let Ok(n) = xp_store::safe_asset_name(n) else {
-                    continue;
-                };
-                let f = d.join(&n);
-                if !f.exists() {
-                    match asset_bytes(&st, &n) {
-                        Ok(b) => std::fs::write(&f, b).map_err(|e| format!("写图片失败：{e}"))?,
-                        Err(_) => continue,
-                    }
-                }
-                files.push(f);
-            }
-        }
-        std::fs::create_dir_all(&dir_run).map_err(|e| e.to_string())?;
-        let mcp = mcp_link(&st.cfg(), &agent.name);
-        // 界面给了编号的：边跑边把进展和要确认的事发给界面（事件 ai-run）
-        let id = run.unwrap_or_default();
-        let live = (!id.trim().is_empty()).then(|| {
-            runs::start(
-                &id,
-                Box::new(move |v| {
-                    let _ = app.emit("ai-run", v);
-                }),
-            )
-        });
-        let out = agent::ask(
+        run_ask(
+            &st,
             &agent,
-            &dir_run.to_string_lossy(),
-            &prompt,
-            &files,
-            agent::Extras {
-                mcp: mcp.as_ref(),
-                watch: live.as_deref().map(|r| r as &dyn live::Watch),
-                resume: resume.as_deref(),
-            },
-            600,
-        );
-        if live.is_some() {
-            runs::finish(&id);
-        }
-        out
+            req,
+            Box::new(move |v| {
+                let _ = app.emit("ai-run", v);
+            }),
+        )
     })
     .await
+}
+
+/// 问一次 AI（这台电脑上的界面和局域网里叫的都走这里）。run 不为空时边跑边把进展和要确认的事交给 emit
+fn run_ask(
+    st: &Arc<AppState>,
+    agent: &Agent,
+    req: xp_server::AskReq,
+    emit: Box<dyn Fn(Value) + Send + Sync>,
+) -> Result<agent::Answer, String> {
+    let xp_server::AskReq {
+        cwd,
+        prompt,
+        images,
+        key,
+        run,
+        resume,
+        ..
+    } = req;
+    let dir = std::path::Path::new(cwd.trim());
+    let dir_run = if !cwd.trim().is_empty() && dir.is_dir() {
+        dir.to_path_buf()
+    } else {
+        let k: String = key
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .take(40)
+            .collect();
+        std::env::temp_dir()
+            .join("xpanel-ask")
+            .join(if k.is_empty() { "note".into() } else { k })
+    };
+    let mut files = vec![];
+    if !images.is_empty() {
+        let d = dir_run.join(agent::ASK_FILES);
+        std::fs::create_dir_all(&d).map_err(|e| format!("建图片目录失败：{e}"))?;
+        for n in images.iter().take(40) {
+            let Ok(n) = xp_store::safe_asset_name(n) else {
+                continue;
+            };
+            let f = d.join(&n);
+            if !f.exists() {
+                match asset_bytes(st, &n) {
+                    Ok(b) => std::fs::write(&f, b).map_err(|e| format!("写图片失败：{e}"))?,
+                    Err(_) => continue,
+                }
+            }
+            files.push(f);
+        }
+    }
+    std::fs::create_dir_all(&dir_run).map_err(|e| e.to_string())?;
+    let mcp = mcp_link(&st.cfg(), &agent.name);
+    // 给了编号的：边跑边把进展和要确认的事发出去（事件 ai-run）
+    let live = (!run.trim().is_empty()).then(|| runs::start(&run, emit));
+    let out = agent::ask(
+        agent,
+        &dir_run.to_string_lossy(),
+        &prompt,
+        &files,
+        agent::Extras {
+            mcp: mcp.as_ref(),
+            watch: live.as_deref().map(|r| r as &dyn live::Watch),
+            resume: resume.as_deref(),
+        },
+        600,
+    );
+    if live.is_some() {
+        runs::finish(&run);
+    }
+    out
+}
+
+/// 局域网里叫这台主机上的 AI（主机设置里打开「允许局域网叫本机的 AI」才会用到，见 xp-server 的 remote.rs）。
+/// 只认名字，命令用这台电脑设置里的；确认请求发回发起的那一端回答，这台电脑的窗口里也能看到
+struct HostAgents {
+    st: Arc<AppState>,
+    app: AppHandle,
+}
+
+impl xp_server::AgentHost for HostAgents {
+    fn agents(&self) -> Value {
+        let cfg = self.st.cfg();
+        let list: Vec<Value> = cfg
+            .agents
+            .iter()
+            .filter(|a| agent::ask_command(a).is_some())
+            .map(|a| json!({ "name": a.name }))
+            .collect();
+        json!({ "agents": list, "device": { "id": cfg.device_id, "hostname": device::hostname() } })
+    }
+
+    fn ask(
+        &self,
+        req: xp_server::AskReq,
+        emit: Box<dyn Fn(Value) + Send + Sync>,
+    ) -> Result<Value, String> {
+        let cfg = self.st.cfg();
+        let a = cfg
+            .agents
+            .iter()
+            .find(|a| a.name == req.agent && agent::ask_command(a).is_some())
+            .cloned()
+            .ok_or_else(|| format!("主机上没有能在后台回答的「{}」", req.agent))?;
+        let app = self.app.clone();
+        let out = run_ask(
+            &self.st,
+            &a,
+            req,
+            Box::new(move |v| {
+                emit(v.clone());
+                let _ = app.emit("ai-run", v);
+            }),
+        )?;
+        serde_json::to_value(out).map_err(|e| e.to_string())
+    }
+
+    fn decide(&self, run: &str, id: &str, decision: &str) -> Result<(), String> {
+        runs::decide(run, id, decision)
+    }
+
+    fn stop(&self, run: &str) {
+        runs::stop(run)
+    }
 }
 
 #[tauri::command]
@@ -677,7 +775,8 @@ pub fn run() {
                 store: Mutex::new(None),
                 lan: Mutex::new(None),
             });
-            if let Err(e) = start_lan(&st) {
+            client::set_token(&st.cfg().server_token);
+            if let Err(e) = start_lan(&st, app.handle()) {
                 eprintln!("{e}");
             }
             // 每分钟上报一次心跳（在线状态、当前 IP）

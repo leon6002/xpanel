@@ -285,6 +285,38 @@ fn reprioritize_dry_run_then_apply() {
 }
 
 #[test]
+fn access_needs_a_token_first() {
+    let d = tmp("access");
+    let st = Store::open(&d).unwrap();
+    assert_eq!(st.access().unwrap(), Access::default());
+    let on = Access {
+        require_token: true,
+        remote_ai: true,
+    };
+    // 没有令牌时不能要令牌
+    assert!(matches!(st.set_access(on), Err(StoreError::Invalid(_))));
+    let g = st.access_gen();
+    st.create_key("笔记本").unwrap();
+    assert!(st.access_gen() > g);
+    assert_eq!(st.set_access(on).unwrap(), on);
+    // 叫 AI 只能在要令牌时打开
+    let a = st
+        .set_access(Access {
+            require_token: false,
+            remote_ai: true,
+        })
+        .unwrap();
+    assert!(!a.remote_ai);
+    st.set_access(on).unwrap();
+    drop(st);
+    let st = Store::open(&d).unwrap();
+    assert_eq!(st.access().unwrap(), on);
+    // 令牌删光了，要令牌一起关掉
+    st.delete_key("笔记本").unwrap();
+    assert_eq!(st.access().unwrap(), Access::default());
+}
+
+#[test]
 fn keys_and_events() {
     let d = tmp("keys");
     let st = Store::open(&d).unwrap();
