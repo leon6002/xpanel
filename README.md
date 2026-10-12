@@ -7,7 +7,7 @@ A self-hosted personal dashboard for todos, issues, ideas, Markdown notes and en
 One machine stores the data (SQLite); other machines, browsers and AI agents connect to it over the LAN.
 Built with Tauri 2 (Rust). External AI tools can read and write through a REST API (`/api/v1`, OpenAPI) and the `xp` CLI.
 
-文档：[开发指南](docs/development.md) · [开发进度](docs/progress.md) · [外置硬盘同步](docs/drive-sync.md) · [密码库](docs/vault.md)
+文档：[开发指南](docs/development.md) · [开发进度](docs/progress.md) · [外置硬盘同步](docs/drive-sync.md) · [密码库](docs/vault.md) · [接入飞书](docs/feishu.md)
 
 ## 功能
 

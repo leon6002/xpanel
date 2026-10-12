@@ -86,11 +86,23 @@ pub fn describe(tool: &str, input: &Value) -> (String, String) {
             });
         return (what.into(), clip(&detail, 300));
     }
-    if tool.starts_with("mcp__") {
-        return (
-            format!("用外部工具 {}", tool.trim_start_matches("mcp__")),
-            clip(&input.to_string(), 300),
-        );
+    if let Some(rest) = tool.strip_prefix("mcp__") {
+        let (server, name) = rest.split_once("__").unwrap_or((rest, ""));
+        let known = match name {
+            "docx_builtin_search" => Some("搜飞书文档"),
+            "docx_v1_document_rawContent" => Some("读飞书文档"),
+            "docx_builtin_import" => Some("在飞书里新建文档"),
+            "wiki_v1_node_search" => Some("搜飞书知识库"),
+            "wiki_v2_space_getNode" => Some("读飞书知识库"),
+            "drive_v1_permissionMember_create" => Some("给飞书文档加协作者"),
+            _ => None,
+        };
+        let what = match known {
+            Some(k) => k.to_string(),
+            None if name.is_empty() => format!("用外部工具 {server}"),
+            None => format!("用 {server} 的 {name}"),
+        };
+        return (what, clip(&input.to_string(), 300));
     }
     let cmd = s(input, "command");
     if !cmd.is_empty() {
@@ -367,6 +379,14 @@ mod tests {
         assert_eq!(
             describe("Glob", &json!({"pattern": "**/.git", "path": "/work"})),
             ("找文件".into(), "**/.git（在 /work）".into())
+        );
+        assert_eq!(
+            describe("mcp__feishu__docx_builtin_search", &json!({"q": "周会"})).0,
+            "搜飞书文档"
+        );
+        assert_eq!(
+            describe("mcp__slack__post", &json!({})).0,
+            "用 slack 的 post"
         );
         assert_eq!(
             describe(

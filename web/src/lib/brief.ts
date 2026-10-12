@@ -44,7 +44,7 @@ const history = (b: Brief | undefined) => {
 
 /** 讨论阶段的提示词。force：别再问了，直接给计划 */
 /** 桌面版叫本机的 Claude Code 时会把 xpanel 的 MCP 一起接上（src-tauri 的 with_mcp）；别的 AI、手动复制提示词时不一定有，所以写成「有就用」 */
-const TOOLS = `关于工作台（xpanel）本身：你的工具里如果有名字以 mcp__xpanel__ 开头的，就能直接读写工作台——查条目（xpanel_list_items、xpanel_get_item）、新建事项 / 笔记 / 入口（xpanel_create_items）、改条目（xpanel_update_item）。`;
+const TOOLS = `关于工作台（xpanel）本身：你的工具里如果有名字以 mcp__xpanel__ 开头的，就能直接读写工作台——查条目（xpanel_list_items、xpanel_get_item）、新建事项 / 笔记 / 入口（xpanel_create_items）、改条目（xpanel_update_item）。你的工具里如果还有别的 MCP（比如 mcp__feishu__ 开头的飞书文档工具），需要时也可以用。`;
 
 export function buildBriefPrompt(it: Item, b: Brief | undefined, related: Rel, force = false) {
   const L = [

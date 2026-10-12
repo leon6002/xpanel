@@ -56,6 +56,7 @@
   种类和各栏定义在 `lib/vault.ts` 的 `SPECS`（银行分手机银行 / 信用卡，`sub` 在密文里）；平台预设和 logo 在 `lib/platformData.ts` / `lib/platforms.ts`（`platform`、`label` 在密文里，同平台两个以上账号排成一组）；页面是一整屏的密集列表，点格子复制、点名称展开，编辑是弹窗不常驻。
   规矩：主密码和明文不发给主机、不进日志和操作记录；密码库的内容不要接进条目、搜索、导出、@AI 上下文、项目目录；
   写操作都要过 `check_mac`（只有解锁了的界面算得出校验值）；界面解开后只认密文里的名称，不认主机上的 `title` 列。说明和安全边界见 `docs/vault.md`，改之前先看。
+- 飞书：不是 xpanel 自己的功能，是给 Claude Code 接飞书官方的 MCP（`@larksuiteoapi/lark-mcp`）。启动器 `scripts/feishu-mcp.mjs` 从 `~/.feishu/app.json` 读凭据（密钥不进配置、不进仓库），说明见 `docs/feishu.md`；xpanel 后台叫起来的 Claude Code 也会加载它，确认弹窗里飞书的工具有中文说法（`live.rs` 的 `describe`）。
 - `crates/xp-cli`：`xp` 命令行，走 `/api/v1`；`xp key` 和 `xp serve` 直接读写数据文件夹。
 - `src-tauri`：桌面版。主机模式用 xp-store + xp-server；连接模式（`client.rs`）读写主机的 v1 接口，离线队列 `pending.json`。
 - `web/`：界面（Vite + React 19 + TypeScript + Tailwind v4 + Radix），构建到 `web/dist`。桌面版直接用它（`tauri.conf.json` 的 frontendDist，`beforeBuildCommand` 先构建），
