@@ -16,7 +16,7 @@
 | `wiki_v1_node_search`、`wiki_v2_space_getNode` | 搜索知识库、读知识库节点（拿到对应的文档） |
 | `drive_v1_permissionMember_create` | 给文档加协作者 |
 
-官方 MCP 目前**不能改已有文档的内容**（只能读、搜、导入成新的）。要改已有文档，可以另外接社区的 `feishu-mcp`（第三方，能按块编辑），到时候再评估。
+官方 MCP 目前**不能改已有文档的内容**（只能读、搜、导入成新的），所以另外接了社区的 `feishu-mcp`（见下面「改已有文档」）。
 它还在 Beta，工具和参数可能会变。想换工具集：`node scripts/feishu-mcp.mjs -t preset.light`（参数原样交给 lark-mcp）。
 
 ## 第一次设置
@@ -37,6 +37,26 @@
    claude mcp list
    ```
    列表里 `feishu` 显示已连接就好了。仓库换了位置，要用新路径重新加一次。
+
+## 改已有文档：社区的 feishu-mcp
+
+[cso1z/Feishu-MCP](https://github.com/cso1z/Feishu-MCP)，第三方开源（MIT），能做官方的做不了的：新建文档、按块读写（改文字、加内容、删内容）、表格、插图片、画板、文件夹。
+同一个启动器加 `edit` 就是它，凭据也从 app.json 读（走环境变量，不出现在命令行里）。版本固定在测过的 0.3.2，要换设 `FEISHU_MCP_VERSION`。
+
+1. 飞书开放平台再加一个重定向 URL：`http://localhost:3333/callback`。
+2. 权限管理里开通它要的用户身份权限，主要是：`docx:document`、`docx:document:create`、`docx:document:readonly`、`docx:document.block:convert`、
+   `docs:document.content:read`、`drive:drive`、`drive:file`、`drive:file:upload`、`space:document:retrieve`、`space:folder:create`、
+   `wiki:wiki`、`wiki:space:read`、`search:docs:read`、`offline_access`（完整列表见它仓库里的 FEISHU_CONFIG.md），再发布一个版本。
+3. 加到 Claude Code：
+   ```
+   claude mcp add feishu-edit -s user -- node D:\codes\xpanel\scripts\feishu-mcp.mjs edit
+   ```
+4. 第一次用它的工具时，它会回一个授权链接（AI 会把链接给你），浏览器里点同意，再让 AI 重试一次。之后就不用了。
+   想先授权好：在终端里开 Claude Code，说一句「用 feishu-edit 搜一下飞书文档」，点它给的链接。
+
+它默认用你自己的身份（`FEISHU_AUTH_TYPE=user`）；改成 `tenant` 就是应用身份，那样只能动分享给应用的文档。它要求 Node.js 20.17 以上。
+
+两个一起加也没关系：官方的搜索、读取更稳；要改文档时 AI 会用 `feishu-edit` 的工具。
 
 ## 在 xpanel 里用
 

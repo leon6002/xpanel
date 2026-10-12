@@ -95,6 +95,20 @@ pub fn describe(tool: &str, input: &Value) -> (String, String) {
             "wiki_v1_node_search" => Some("搜飞书知识库"),
             "wiki_v2_space_getNode" => Some("读飞书知识库"),
             "drive_v1_permissionMember_create" => Some("给飞书文档加协作者"),
+            // 社区版 feishu-mcp
+            "create_feishu_document" => Some("在飞书里新建文档"),
+            "get_feishu_document_info" | "get_feishu_document_blocks" => Some("读飞书文档"),
+            "search_feishu_documents" => Some("搜飞书文档"),
+            "batch_update_feishu_block_text" => Some("改飞书文档里的文字"),
+            "batch_create_feishu_blocks" => Some("往飞书文档里加内容"),
+            "delete_feishu_document_blocks" => Some("删飞书文档里的内容"),
+            "create_feishu_table" => Some("在飞书文档里加表格"),
+            "upload_and_bind_image_to_block" => Some("往飞书文档里插图片"),
+            "get_feishu_image_resource" => Some("下载飞书文档里的图片"),
+            "get_feishu_whiteboard_content" => Some("读飞书画板"),
+            "fill_whiteboard_with_plantuml" => Some("画飞书画板"),
+            "get_feishu_root_folder_info" | "get_feishu_folder_files" => Some("看飞书文件夹"),
+            "create_feishu_folder" => Some("在飞书里新建文件夹"),
             _ => None,
         };
         let what = match known {
@@ -387,6 +401,14 @@ mod tests {
         assert_eq!(
             describe("mcp__slack__post", &json!({})).0,
             "用 slack 的 post"
+        );
+        assert_eq!(
+            describe(
+                "mcp__feishu-edit__batch_update_feishu_block_text",
+                &json!({})
+            )
+            .0,
+            "改飞书文档里的文字"
         );
         assert_eq!(
             describe(

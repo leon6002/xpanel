@@ -5,8 +5,12 @@
 //   node scripts/feishu-mcp.mjs login          用自己的飞书账号授权一次（浏览器里点同意），之后读写的是你自己能看到的文档
 //   node scripts/feishu-mcp.mjs                作为 MCP 服务运行（给 Claude Code 用：claude mcp add feishu -s user -- node <本文件的完整路径>）
 //   node scripts/feishu-mcp.mjs -t preset.light   后面的参数原样交给 lark-mcp，会替换掉默认的工具集
+//   node scripts/feishu-mcp.mjs edit           改用社区的 feishu-mcp（第三方，能改已有文档：按块增删改、表格、图片、画板、文件夹）
+//                                              加到 Claude Code：claude mcp add feishu-edit -s user -- node <本文件的完整路径> edit
 //
-// 环境变量：FEISHU_APP_JSON 换一个凭据文件；FEISHU_DOMAIN=https://open.larksuite.com 用国际版 Lark。
+// 环境变量：FEISHU_APP_JSON 换一个凭据文件；FEISHU_DOMAIN=https://open.larksuite.com 用国际版 Lark（只管官方的）；
+//          社区版：FEISHU_AUTH_TYPE=tenant 改用应用身份（默认 user，用你自己的身份）、FEISHU_ENABLED_MODULES（默认 document）、
+//          FEISHU_MCP_VERSION 换版本（默认用测过的那个）。
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -28,19 +32,34 @@ if (!id || !secret) {
 }
 
 const argv = process.argv.slice(2);
-const login = argv[0] === "login";
-const rest = login ? argv.slice(1) : argv;
-const domain = process.env.FEISHU_DOMAIN ? ["--domain", process.env.FEISHU_DOMAIN] : [];
-// 默认：用你自己的身份（user_access_token），只开文档相关的工具（搜索、读正文、导入成新文档、知识库、给文档加协作者）
-const defaults = login ? [] : ["--oauth", "--token-mode", "user_access_token", ...(rest.includes("-t") || rest.includes("--tools") ? [] : ["-t", "preset.doc.default"])];
-const args = ["-y", "@larksuiteoapi/lark-mcp", login ? "login" : "mcp", "-a", id, "-s", secret, ...domain, ...defaults, ...rest];
-
-// Windows 上 npx 是 npx.cmd，要经过 shell 才能启动；参数里没有空格和引号，直接拼没问题
 const win = process.platform === "win32";
-const child = spawn("npx", args, { stdio: "inherit", shell: win, windowsHide: true });
-child.on("error", (e) => {
-  console.error(`启动 npx 失败（装了 Node.js 吗？）：${e.message}`);
-  process.exit(1);
-});
-child.on("exit", (code, sig) => process.exit(code ?? (sig ? 1 : 0)));
-for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => child.kill(s));
+const run = (args, env) => {
+  // Windows 上 npx 是 npx.cmd，要经过 shell 才能启动；参数里没有空格和引号，直接拼没问题
+  const child = spawn("npx", args, { stdio: "inherit", shell: win, windowsHide: true, env: { ...process.env, ...env } });
+  child.on("error", (e) => {
+    console.error(`启动 npx 失败（装了 Node.js 吗？）：${e.message}`);
+    process.exit(1);
+  });
+  child.on("exit", (code, sig) => process.exit(code ?? (sig ? 1 : 0)));
+  for (const s of ["SIGINT", "SIGTERM"]) process.on(s, () => child.kill(s));
+};
+
+// 社区版：密钥走环境变量（不出现在命令行里）。用你自己的身份时，第一次用会给出一个授权链接，浏览器里点同意就行
+if (argv[0] === "edit") {
+  const version = process.env.FEISHU_MCP_VERSION || "0.3.2";
+  run(["-y", `feishu-mcp@${version}`, "--stdio", ...argv.slice(1)], {
+    FEISHU_APP_ID: id,
+    FEISHU_APP_SECRET: secret,
+    FEISHU_AUTH_TYPE: process.env.FEISHU_AUTH_TYPE || "user",
+    FEISHU_ENABLED_MODULES: process.env.FEISHU_ENABLED_MODULES || "document",
+  });
+} else {
+  // 官方版
+  const login = argv[0] === "login";
+  const rest = login ? argv.slice(1) : argv;
+  const domain = process.env.FEISHU_DOMAIN ? ["--domain", process.env.FEISHU_DOMAIN] : [];
+  // 默认：用你自己的身份（user_access_token），只开文档相关的工具（搜索、读正文、导入成新文档、知识库、给文档加协作者）
+  const defaults = login ? [] : ["--oauth", "--token-mode", "user_access_token", ...(rest.includes("-t") || rest.includes("--tools") ? [] : ["-t", "preset.doc.default"])];
+  const args = ["-y", "@larksuiteoapi/lark-mcp", login ? "login" : "mcp", "-a", id, "-s", secret, ...domain, ...defaults, ...rest];
+  run(args);
+}
