@@ -47,11 +47,11 @@ onAiEvent((e) => {
 
 let seq = 0;
 /** 叫本机的 AI 回答一次，同时登记这一次，界面能看到进展 */
-export async function askAi(agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "", tag = "") {
+export async function askAi(agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "", tag = "", resume = "") {
   const id = `${Date.now().toString(36)}-${(seq++).toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   useAiRuns.setState((s) => ({ runs: { ...s.runs, [id]: { id, key, tag, agent: agent.name, at: Date.now(), steps: [] } } }));
   try {
-    return await desk.askAi(agent, cwd, prompt, images, key, id);
+    return await desk.askAi(agent, cwd, prompt, images, key, id, resume);
   } finally {
     useAiRuns.setState((s) => {
       const { [id]: _gone, ...rest } = s.runs;

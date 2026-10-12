@@ -265,6 +265,34 @@ pub struct Answer {
     pub text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+    /// claude 这次对话的编号：之后用 --resume 接着这次对话说（接着改产出时，不用把前面看过的再看一遍）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+}
+
+/// 问答时可选的几样：接上 xpanel 的 MCP、边跑边看和确认、接着上一次对话
+#[derive(Default, Clone, Copy)]
+pub struct Extras<'a> {
+    pub mcp: Option<&'a McpLink>,
+    pub watch: Option<&'a dyn crate::live::Watch>,
+    pub resume: Option<&'a str>,
+}
+
+/// claude 的对话编号只能是字母、数字和横线（拼进命令行的，不能带别的）
+pub fn valid_session(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 80 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// 接着上一次对话：claude 加 --resume；别的命令行没有这个，原样返回
+fn with_resume(cmdline: &str, resume: Option<&str>) -> String {
+    match resume {
+        Some(id)
+            if valid_session(id) && exe_is(cmdline, "claude") && !cmdline.contains("--resume") =>
+        {
+            format!("{} --resume {id}", cmdline.trim_end())
+        }
+        _ => cmdline.to_string(),
+    }
 }
 
 /// 怎么拿到用量：claude 加 --output-format json（一整段 JSON，里面有 result 和 usage）；
@@ -337,7 +365,16 @@ pub(crate) fn parse_claude(out: &str) -> Option<Result<Answer, String>> {
             cost_usd: v.get("total_cost_usd").and_then(|x| x.as_f64()),
         }
     });
-    Some(Ok(Answer { text, usage }))
+    let session = v
+        .get("session_id")
+        .and_then(|x| x.as_str())
+        .filter(|x| valid_session(x))
+        .map(String::from);
+    Some(Ok(Answer {
+        text,
+        usage,
+        session,
+    }))
 }
 
 /// codex exec --json 的事件流：找最后一个带 input_tokens / output_tokens 的用量，和最后一条回答
@@ -502,10 +539,10 @@ pub fn ask(
     cwd: &str,
     prompt: &str,
     images: &[std::path::PathBuf],
-    mcp: Option<&McpLink>,
-    watch: Option<&dyn crate::live::Watch>,
+    ex: Extras,
     timeout: u64,
 ) -> Result<Answer, String> {
+    let Extras { mcp, watch, resume } = ex;
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
     let cmdline = ask_command(a).ok_or_else(|| {
@@ -523,7 +560,7 @@ pub fn ask(
         let _ = fs::create_dir_all(&t);
         t
     };
-    let base = with_mcp(&with_images(&cmdline, images), &run, mcp);
+    let base = with_resume(&with_mcp(&with_images(&cmdline, images), &run, mcp), resume);
     // claude 可以边跑边看、要确认时来问；别的命令一次问完
     let watch = watch.filter(|_| crate::live::can_stream(&base));
     let (cmdline, stats) = match watch {
@@ -622,6 +659,7 @@ pub fn ask(
         Stats::Claude => parse_claude(&out).unwrap_or(Ok(Answer {
             text: out,
             usage: None,
+            session: None,
         })),
         Stats::Codex(f) => {
             let last = fs::read_to_string(&f)
@@ -631,13 +669,18 @@ pub fn ask(
             let _ = fs::remove_file(&f);
             let (text, usage) = parse_codex(&out);
             match last.or(text) {
-                Some(text) => Ok(Answer { text, usage }),
+                Some(text) => Ok(Answer {
+                    text,
+                    usage,
+                    session: None,
+                }),
                 None => Err("codex 没有返回回答".into()),
             }
         }
         Stats::None => Ok(Answer {
             text: out,
             usage: None,
+            session: None,
         }),
     }
 }
@@ -769,6 +812,22 @@ mod ask_tests {
     }
 
     #[test]
+    fn resumes_only_claude_with_a_safe_id() {
+        let id = "0f8e2a3c-1b2d-4e5f-9a8b-7c6d5e4f3a2b";
+        assert_eq!(
+            with_resume("claude -p", Some(id)),
+            format!("claude -p --resume {id}")
+        );
+        assert_eq!(with_resume("claude -p", Some("x; rm -rf /")), "claude -p");
+        assert_eq!(with_resume("codex exec -", Some(id)), "codex exec -");
+        assert_eq!(with_resume("claude -p", None), "claude -p");
+        let a = parse_claude(&format!(r#"{{"result":"ok","session_id":"{id}"}}"#))
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.session.as_deref(), Some(id));
+    }
+
+    #[test]
     fn claude_gets_the_xpanel_mcp() {
         let dir = std::env::temp_dir().join(format!("xp-mcp-{}", now_nanos()));
         fs::create_dir_all(&dir).unwrap();
@@ -810,7 +869,9 @@ mod ask_tests {
             ask: "tr a-z A-Z".into(),
         };
         assert_eq!(
-            ask(&a, "", "hello", &[], None, None, 10).unwrap().text,
+            ask(&a, "", "hello", &[], Extras::default(), 10)
+                .unwrap()
+                .text,
             "HELLO"
         );
         let bad = Agent {
@@ -818,13 +879,16 @@ mod ask_tests {
             cmd: String::new(),
             ask: "echo oops >&2; exit 3".into(),
         };
-        assert_eq!(ask(&bad, "", "x", &[], None, None, 10).unwrap_err(), "oops");
+        assert_eq!(
+            ask(&bad, "", "x", &[], Extras::default(), 10).unwrap_err(),
+            "oops"
+        );
         let slow = Agent {
             name: "t".into(),
             cmd: String::new(),
             ask: "sleep 5".into(),
         };
-        assert!(ask(&slow, "", "x", &[], None, None, 1)
+        assert!(ask(&slow, "", "x", &[], Extras::default(), 1)
             .unwrap_err()
             .contains("已停止"));
     }

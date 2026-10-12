@@ -20,6 +20,10 @@ export interface Brief {
   feedback?: string[];
   /** 产出存成的笔记 */
   resultId?: string;
+  /** 做完之后你让它接着改的意见（按先后） */
+  revisions?: { at: number; note: string }[];
+  /** 上一次开工时 claude 那次对话的编号：接着改的时候接着那次对话说，它记得自己看过什么、做过什么 */
+  session?: string;
 }
 export const briefOf = (it?: Item | null) => (it?.brief as Brief | undefined) || undefined;
 /** 还没回答的问题（最新一轮） */
@@ -91,6 +95,27 @@ export function buildWorkPrompt(it: Item, b: Brief, related: Rel) {
   ].join("\n");
 }
 
+/** 做完了不满意、让它接着改的提示词。
+    resumed = 接着上一次对话说（它记得前面的一切），只要说意见；否则把讨论、计划和上一版都带上 */
+export function buildRevisePrompt(it: Item, b: Brief, related: Rel, note: string, prev: { title: string; body: string } | null, resumed: boolean) {
+  const tail = [
+    ``,
+    `按我的意见接着做。需要再看电脑上的文件、运行命令、在工作台里加或改条目的，直接用你的工具（需要我同意的会弹出来问我）。`,
+    `最后把改好的成品整篇重新输出：Markdown，第一行是一级标题（# 开头）。它会替换掉上一版${prev ? `「${prev.title}」` : ""}，所以要写完整的，不要只写改了哪些，也不要写「好的」这类开场白。`,
+  ];
+  if (resumed) return [`你上一次的产出${prev ? `（存成了笔记「${prev.title}」）` : ""}我看了，还要改。我的意见：`, ``, note.trim(), ...tail].join("\n");
+  const earlier = (b.revisions ?? []).map((r) => "- " + r.note);
+  return [
+    buildWorkPrompt(it, b, related),
+    ...(prev ? [``, `你上一版的产出（笔记「${prev.title}」）：`, `<<<`, prev.body, `>>>`] : []),
+    ...(earlier.length ? [``, `我之前提过的意见：`, ...earlier] : []),
+    ``,
+    `这次的意见：`,
+    note.trim(),
+    ...tail,
+  ].join("\n");
+}
+
 /** 从 AI 的回复里取出那个 JSON（它有时会包一层 ```json，或者前后带几句话） */
 export function parseBrief(text: string): { ready: false; note?: string; questions: BriefQ[] } | { ready: true; plan: string } {
   const raw = String(text || "").trim();
@@ -146,5 +171,6 @@ export function briefDigest(b: Brief) {
   });
   if (b.plan) L.push(``, `## 计划`, ``, b.plan);
   if (b.feedback?.length) L.push(``, `## 对计划的意见`, ``, ...b.feedback.map((f) => "- " + f));
+  if (b.revisions?.length) L.push(``, `## 做完之后的意见`, ``, ...b.revisions.map((r) => "- " + r.note));
   return L.join("\n");
 }

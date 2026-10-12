@@ -565,6 +565,7 @@ async fn ask_ai(
     images: Option<Vec<String>>,
     key: Option<String>,
     run: Option<String>,
+    resume: Option<String>,
 ) -> Result<agent::Answer, String> {
     let st = s.inner().clone();
     blocking(move || {
@@ -618,8 +619,11 @@ async fn ask_ai(
             &dir_run.to_string_lossy(),
             &prompt,
             &files,
-            mcp.as_ref(),
-            live.as_deref().map(|r| r as &dyn live::Watch),
+            agent::Extras {
+                mcp: mcp.as_ref(),
+                watch: live.as_deref().map(|r| r as &dyn live::Watch),
+                resume: resume.as_deref(),
+            },
             600,
         );
         if live.is_some() {

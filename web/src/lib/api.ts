@@ -195,9 +195,10 @@ export const desk = {
   /** 设置外置硬盘上的文件夹（只有主机的桌面版能改） */
   setSyncDir: (dir: string) => need()<{ config: Config }>("set_sync_dir", { dir }),
   /** run：这一次的编号。给了的话桌面版边跑边发 ai-run 事件（进展、要确认的事），见 lib/aiRuns.ts */
-  askAi: async (agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "", run = "") => {
-    // 新版返回 {text, usage}；兼容只返回文字的旧版
-    const r = await need()<string | { text: string; usage?: Usage }>("ask_ai", { agent, cwd, prompt, images, key, run });
+  /** resume：接着 claude 的哪一次对话说（上一次返回的 session） */
+  askAi: async (agent: Agent, cwd: string, prompt: string, images: string[] = [], key = "", run = "", resume = "") => {
+    // 新版返回 {text, usage, session}；兼容只返回文字的旧版
+    const r = await need()<string | { text: string; usage?: Usage; session?: string }>("ask_ai", { agent, cwd, prompt, images, key, run, resume: resume || null });
     return typeof r === "string" ? { text: r } : r;
   },
   aiDecide: (run: string, id: string, decision: string) => need()<void>("ai_decide", { run, id, decision }),

@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { askAi } from "../lib/aiRuns";
-import { applyReply, briefDigest, briefOf, buildBriefPrompt, buildWorkPrompt, openQuestions, parseBrief, type Brief, type BriefQ } from "../lib/brief";
+import { applyReply, briefDigest, briefOf, buildBriefPrompt, buildRevisePrompt, buildWorkPrompt, openQuestions, parseBrief, type Brief, type BriefQ } from "../lib/brief";
 import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { buildContextZip, saveFile } from "../lib/exportContext";
@@ -83,7 +83,57 @@ async function runWork(itemId: string, agent: Agent, me: { id: string; hostname:
   try {
     const { rel, files } = material(it);
     const r = await askAi(agent, cwdOf(it, me), buildWorkPrompt(it, b, rel), files, it.id);
-    await saveResult(itemId, r.text);
+    await saveResult(itemId, r.text, r.session);
+  } catch (e) {
+    setErr(itemId, errText(e));
+  } finally {
+    setBusy(itemId, null);
+  }
+}
+
+/** 做完了不满意：按意见接着改，改好的替换掉产出那篇笔记（可以撤销）。
+    能接着上一次对话就接着说（它记得自己看过、做过什么，不用从头再来）；接不上（换了电脑、对话太旧）就把讨论、计划和上一版都带上重新说 */
+async function runRevise(itemId: string, agent: Agent, me: { id: string; hostname: string }, note: string) {
+  const it = itemOf(itemId);
+  const b = briefOf(it);
+  if (!it || !b || !note.trim() || useBriefRun.getState().busy[itemId]) return;
+  setBusy(itemId, "正在按你的意见改…");
+  setErr(itemId, "");
+  try {
+    const { rel, files } = material(it);
+    const old = b.resultId ? itemOf(b.resultId) : undefined;
+    const prev = old ? { title: noteTitle(old), body: old.body || "" } : null;
+    let r;
+    try {
+      if (!b.session) throw new Error("no session");
+      r = await askAi(agent, cwdOf(it, me), buildRevisePrompt(it, b, rel, note, prev, true), [], it.id, "", b.session);
+    } catch (e) {
+      if (b.session && /已停止/.test(errText(e))) throw e;
+      r = await askAi(agent, cwdOf(it, me), buildRevisePrompt(it, b, rel, note, prev, false), files, it.id);
+    }
+    const out = String(r.text || "").trim();
+    if (!out) throw new Error("AI 没有返回内容");
+    const m = out.match(/^#\s+(.+)\n?/);
+    const title = (m?.[1] || prev?.title || noteTitle(it) + "（AI 产出）").replace(/[*`#]/g, "").trim().slice(0, 60);
+    const body = (m ? out.slice(m[0].length) : out).trim();
+    let resultId = old?.id;
+    if (old) await patchItem(old, { title, body });
+    else {
+      const n = await addItem({ type: "note", title, body, category: it.category || undefined, tags: [...(it.tags || [])] });
+      await addLink(it, n.id, "产出").catch(() => {});
+      resultId = n.id;
+    }
+    const cur = itemOf(itemId);
+    const cb = briefOf(cur);
+    if (cur && cb) await saveBrief(cur, { ...cb, status: "done", resultId, session: r.session || cb.session, revisions: [...(cb.revisions ?? []), { at: Date.now(), note: note.trim() }] });
+    say(`改好了，更新了「${title}」`, {
+      label: old ? "撤销" : "打开",
+      run: () => {
+        if (!old) return useUi.getState().openPeek(resultId!);
+        const now = itemOf(old.id);
+        if (now) patchItem(now, { title: old.title, body: old.body }).catch(() => {});
+      },
+    });
   } catch (e) {
     setErr(itemId, errText(e));
   } finally {
@@ -92,7 +142,7 @@ async function runWork(itemId: string, agent: Agent, me: { id: string; hostname:
 }
 
 /** 把 AI 的成品存成笔记：第一行的一级标题当标题 */
-async function saveResult(itemId: string, text: string) {
+async function saveResult(itemId: string, text: string, session?: string) {
   const it = itemOf(itemId);
   const out = String(text || "").trim();
   if (!it) return;
@@ -103,7 +153,7 @@ async function saveResult(itemId: string, text: string) {
   await addLink(it, n.id, "产出").catch(() => {});
   const cur = itemOf(itemId);
   const b = briefOf(cur);
-  if (cur && b) await saveBrief(cur, { ...b, status: "done", resultId: n.id });
+  if (cur && b) await saveBrief(cur, { ...b, status: "done", resultId: n.id, session });
   say(`做完了，存成了笔记「${title}」`, { label: "打开", run: () => useUi.getState().openPeek(n.id) });
 }
 
@@ -235,6 +285,8 @@ export function BriefPanel({ it }: { it: Item }) {
   const [fb, setFb] = useState("");
   const [paste, setPaste] = useState("");
   const [old, setOld] = useState(false);
+  /** 做完之后让它接着改的意见 */
+  const [more, setMore] = useState("");
   const ansRef = useRef(ans);
   ansRef.current = ans;
   // 换了一轮问题：把已经存下的回答读进来
@@ -401,11 +453,53 @@ export function BriefPanel({ it }: { it: Item }) {
           )}
           <span className="grow" />
           {!manual && (
-            <Button tone="ghost" onClick={() => agent && runWork(it.id, agent, me)} title="按同样的计划再做一遍，另存一篇">
+            <Button tone="ghost" onClick={() => agent && runWork(it.id, agent, me)} title="按同样的计划从头再做一遍，另存一篇">
               <RotateCw className="size-4" />
-              再做一次
+              从头再做
             </Button>
           )}
+        </div>
+      )}
+      {b.status === "done" && !busy && (b.revisions?.length ?? 0) > 0 && (
+        <ul className="flex flex-col gap-1 text-[12.5px] text-muted">
+          {b.revisions!.map((r) => (
+            <li key={r.at} className="flex gap-2">
+              <span className="shrink-0 text-faint">{ago(r.at)}让它改：</span>
+              <span className="min-w-0 break-words whitespace-pre-wrap">{r.note}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {b.status === "done" && !busy && !manual && (
+        <div className="flex items-end gap-2">
+          <textarea
+            className={cx(textareaCls, "min-h-[38px] grow bg-surface")}
+            rows={Math.min(6, more.split("\n").length)}
+            value={more}
+            onChange={(e) => setMore(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && more.trim() && agent) {
+                e.preventDefault();
+                runRevise(it.id, agent, me, more);
+                setMore("");
+              }
+            }}
+            placeholder="不满意？告诉它接着怎么改，Ctrl+回车发送"
+            aria-label="接着改的意见"
+          />
+          <Button
+            tone="primary"
+            disabled={!more.trim() || !agent}
+            onClick={() => {
+              if (!agent) return;
+              runRevise(it.id, agent, me, more);
+              setMore("");
+            }}
+            title={b.session ? "接着上一次的对话改，它记得自己做过什么" : "把讨论、计划和上一版一起给它，让它改"}
+          >
+            <Send className="size-4" />
+            接着改
+          </Button>
         </div>
       )}
 

@@ -512,8 +512,10 @@ echo "{\"type\":\"result\",\"is_error\":false,\"result\":\"allowed=$said\",\"usa
             &dir.to_string_lossy(),
             "在当前目录新建文件 hello.txt，内容是 hi，然后用一句话说做完了。",
             &[],
-            None,
-            Some(&w),
+            crate::agent::Extras {
+                watch: Some(&w),
+                ..Default::default()
+            },
             120,
         )
         .unwrap();
@@ -521,6 +523,22 @@ echo "{\"type\":\"result\",\"is_error\":false,\"result\":\"allowed=$said\",\"usa
         assert!(dir.join("hello.txt").is_file());
         assert!(w.steps.lock().unwrap().iter().any(|x| x == "ask|Write"));
         assert!(out.usage.is_some());
+        // 接着同一次对话问：它记得刚才做了什么
+        let again = crate::agent::ask(
+            &a,
+            &dir.to_string_lossy(),
+            "你刚才新建的文件叫什么？只回答文件名。",
+            &[],
+            crate::agent::Extras {
+                watch: Some(&w),
+                resume: out.session.as_deref(),
+                ..Default::default()
+            },
+            120,
+        )
+        .unwrap();
+        println!("{}", again.text);
+        assert!(again.text.contains("hello.txt"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
