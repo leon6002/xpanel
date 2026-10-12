@@ -35,7 +35,7 @@
   桌面版用 `ask_ai` 叫本机的 AI（claude -p），和评论里 @AI 是同一条路；叫 claude 时自动把 xpanel 的 MCP 接上并放行它的工具（`agent.rs` 的 `with_mcp`，配置写在工作目录的 `.xpanel/mcp.json`，地址和 `xp` 的位置由 `lib.rs` 的 `mcp_link` 给），提示词里告诉它有这些工具；
   边跑边看和确认：claude 用它的流式接口跑（`src-tauri/src/live.rs`：`--input-format/--output-format stream-json --permission-prompt-tool stdio`），每一步发成 `ai-run` 事件给界面；
   它要运行命令、读写工作目录外的文件时发来确认请求，桌面版弹窗让用户点（`runs.rs`：这一次 / 以后同类的 / 这次任务都允许 / 拒绝，只在本机回答，不走主机接口），可以中途停止。
-  界面 `web/src/lib/aiRuns.ts`（登记正在跑的、收事件）+ `components/AiLive.tsx`（进展条 `AiLive`、确认弹窗 `AiPermits`）；要叫本机 AI 一律用 `aiRuns.ts` 的 `askAi`，不要直接调 `desk.askAi`。别的 AI 命令行没有这个接口，还是一次问完；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来；做完了还能写意见「接着改」（`Brief.tsx` 的 `runRevise`）：claude 用 `--resume` 接着开工那次对话说（`brief.session`，`agent.rs` 的 `with_resume`），接不上就把计划、上一版和之前的意见一起带上（`brief.ts` 的 `buildRevisePrompt`），改好的替换产出那篇（可撤销），意见记在 `brief.revisions`。
+  界面 `web/src/lib/aiRuns.ts`（登记正在跑的、收事件）+ `components/AiLive.tsx`（进展条 `AiLive`、确认弹窗 `AiPermits`）；要叫本机 AI 一律用 `aiRuns.ts` 的 `askAi`，不要直接调 `desk.askAi`。别的 AI 命令行没有这个接口，还是一次问完；浏览器里或没配 AI 时走手动（复制提示词、贴回复）。开工的产出存成笔记，以「产出」关联回来；做完了还能写意见「接着改」（`Brief.tsx` 的 `runRevise`）：claude 用 `--resume` 接着开工那次对话说（`brief.session`，`agent.rs` 的 `with_resume`），接不上就把计划、上一版和之前的意见一起带上（`brief.ts` 的 `buildRevisePrompt`），改好的替换产出那篇或者另存一篇；每一次记在 `brief.revisions`（意见、在改 / 改好了 / 没改成 / 撤销了、它自己说的改了什么——回答开头那行「> 这次改了：」由 `parseRevision` 拆出来、成品是哪篇、撤销用的上一版），面板里逐条显示（`Revisions`）。
   导出上下文：`web/src/lib/exportContext.ts` 在界面里打一个 zip（README、task.md、discussion.md、comments.md、related/、files/），桌面版用 `save_download` 存到「下载」文件夹。
 - 关联：条目的 `links: [{id, label?}]`（发起方存，另一边显示「关联了这条」）；正文里 `[标题](xpanel:item/ID)` 是引用（编辑器里输入 `[[`）。
   界面 `web/src/lib/links.ts` + `web/src/components/Related.tsx`。评论里 @AI 时关联条目的内容和附件一起给 AI；AI 的回答可以「存为笔记」并以「产出」关联回来。

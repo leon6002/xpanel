@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { askAi } from "../lib/aiRuns";
-import { applyReply, briefDigest, briefOf, buildBriefPrompt, buildRevisePrompt, buildWorkPrompt, openQuestions, parseBrief, type Brief, type BriefQ } from "../lib/brief";
+import { applyReply, briefDigest, briefOf, buildBriefPrompt, buildRevisePrompt, buildWorkPrompt, parseRevision, type Revision, openQuestions, parseBrief, type Brief, type BriefQ } from "../lib/brief";
 import { addItem, patchItem, qc, useConfig, useThisDevice } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { buildContextZip, saveFile } from "../lib/exportContext";
@@ -91,14 +91,25 @@ async function runWork(itemId: string, agent: Agent, me: { id: string; hostname:
   }
 }
 
-/** 做完了不满意：按意见接着改，改好的替换掉产出那篇笔记（可以撤销）。
-    能接着上一次对话就接着说（它记得自己看过、做过什么，不用从头再来）；接不上（换了电脑、对话太旧）就把讨论、计划和上一版都带上重新说 */
-async function runRevise(itemId: string, agent: Agent, me: { id: string; hostname: string }, note: string) {
+/** 改一次「接着改」的记录（按 at 找到那一次） */
+async function setRevision(itemId: string, at: number, ch: Partial<Revision>) {
+  const cur = itemOf(itemId);
+  const cb = briefOf(cur);
+  if (!cur || !cb) return;
+  await saveBrief(cur, { ...cb, revisions: (cb.revisions ?? []).map((r) => (r.at === at ? { ...r, ...ch } : r)) });
+}
+
+/** 做完了不满意：按意见接着改。默认替换产出那篇（可以撤销）；saveAs = 另存一篇，上一版留着。
+    能接着上一次对话就接着说（它记得自己看过、做过什么，不用从头再来）；接不上（换了电脑、对话太旧）就把讨论、计划和上一版都带上重新说。
+    每一次都记在 brief.revisions 里：先记「在改」，改完记下它说的改了什么、成品是哪篇，没成就记下原因 */
+async function runRevise(itemId: string, agent: Agent, me: { id: string; hostname: string }, note: string, saveAs = false) {
   const it = itemOf(itemId);
   const b = briefOf(it);
   if (!it || !b || !note.trim() || useBriefRun.getState().busy[itemId]) return;
-  setBusy(itemId, "正在按你的意见改…");
+  const at = Date.now();
+  setBusy(itemId, saveAs ? "正在按你的意见做新的一版…" : "正在按你的意见改…");
   setErr(itemId, "");
+  await saveBrief(it, { ...b, revisions: [...(b.revisions ?? []), { at, note: note.trim(), state: "working", ...(saveAs ? { saveAs } : {}) }] });
   try {
     const { rel, files } = material(it);
     const old = b.resultId ? itemOf(b.resultId) : undefined;
@@ -106,39 +117,107 @@ async function runRevise(itemId: string, agent: Agent, me: { id: string; hostnam
     let r;
     try {
       if (!b.session) throw new Error("no session");
-      r = await askAi(agent, cwdOf(it, me), buildRevisePrompt(it, b, rel, note, prev, true), [], it.id, "", b.session);
+      r = await askAi(agent, cwdOf(it, me), buildRevisePrompt(it, b, rel, note, prev, true, saveAs), [], it.id, "", b.session);
     } catch (e) {
       if (b.session && /已停止/.test(errText(e))) throw e;
-      r = await askAi(agent, cwdOf(it, me), buildRevisePrompt(it, b, rel, note, prev, false), files, it.id);
+      r = await askAi(agent, cwdOf(it, me), buildRevisePrompt(it, b, rel, note, prev, false, saveAs), files, it.id);
     }
-    const out = String(r.text || "").trim();
-    if (!out) throw new Error("AI 没有返回内容");
-    const m = out.match(/^#\s+(.+)\n?/);
-    const title = (m?.[1] || prev?.title || noteTitle(it) + "（AI 产出）").replace(/[*`#]/g, "").trim().slice(0, 60);
-    const body = (m ? out.slice(m[0].length) : out).trim();
+    const got = parseRevision(r.text);
+    if (!got.body) throw new Error("AI 没有返回内容");
+    const title = got.title || (saveAs ? noteTitle(it) + "（新的一版）" : prev?.title) || noteTitle(it) + "（AI 产出）";
     let resultId = old?.id;
-    if (old) await patchItem(old, { title, body });
+    if (old && !saveAs) await patchItem(old, { title, body: got.body });
     else {
-      const n = await addItem({ type: "note", title, body, category: it.category || undefined, tags: [...(it.tags || [])] });
-      await addLink(it, n.id, "产出").catch(() => {});
+      const n = await addItem({ type: "note", title, body: got.body, category: it.category || undefined, tags: [...(it.tags || [])] });
+      await addLink(itemOf(itemId) ?? it, n.id, "产出").catch(() => {});
       resultId = n.id;
     }
     const cur = itemOf(itemId);
     const cb = briefOf(cur);
-    if (cur && cb) await saveBrief(cur, { ...cb, status: "done", resultId, session: r.session || cb.session, revisions: [...(cb.revisions ?? []), { at: Date.now(), note: note.trim() }] });
-    say(`改好了，更新了「${title}」`, {
-      label: old ? "撤销" : "打开",
-      run: () => {
-        if (!old) return useUi.getState().openPeek(resultId!);
-        const now = itemOf(old.id);
-        if (now) patchItem(now, { title: old.title, body: old.body }).catch(() => {});
-      },
-    });
+    if (cur && cb) {
+      // 撤销用的上一版只留最近三次的
+      const list = (cb.revisions ?? []).map((x) =>
+        x.at === at ? { ...x, state: "done" as const, summary: got.summary, title, resultId, ...(old && !saveAs && prev ? { prev } : {}) } : x,
+      );
+      const keep = new Set(list.filter((x) => x.prev).slice(-3).map((x) => x.at));
+      await saveBrief(cur, { ...cb, status: "done", resultId, session: r.session || cb.session, revisions: list.map((x) => (x.prev && !keep.has(x.at) ? { ...x, prev: undefined } : x)) });
+    }
+    say(saveAs ? `做好了新的一版「${title}」` : `改好了，更新了「${title}」`, { label: "打开", run: () => useUi.getState().openPeek(resultId!) });
   } catch (e) {
     setErr(itemId, errText(e));
+    await setRevision(itemId, at, { state: "failed", error: errText(e) }).catch(() => {});
   } finally {
     setBusy(itemId, null);
   }
+}
+
+/** 撤销一次「接着改」：把那篇笔记换回改之前的样子 */
+async function undoRevision(itemId: string, r: Revision) {
+  const n = r.resultId ? itemOf(r.resultId) : undefined;
+  if (!n || !r.prev) return;
+  await patchItem(n, { title: r.prev.title, body: r.prev.body });
+  await setRevision(itemId, r.at, { state: "undone" });
+  say(`已撤销，「${r.prev.title}」回到了改之前`);
+}
+
+/** 每一次「接着改」：你说了什么，它改成什么样了（在改 / 改好了 / 没改成 / 撤销了） */
+function Revisions({ it, list, busy }: { it: Item; list: Revision[]; busy: boolean }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? list : list.slice(-3);
+  const last = list.filter((r) => (r.state ?? "done") === "done" && r.prev).slice(-1)[0];
+  return (
+    <ol aria-label="接着改的记录" className="flex flex-col gap-1.5">
+      {list.length > shown.length && (
+        <button className="self-start rounded-md px-1.5 py-0.5 text-xs text-muted hover:bg-surface-3 hover:text-fg" onClick={() => setAll(true)}>
+          前面还改过 {list.length - shown.length} 次
+        </button>
+      )}
+      {shown.map((r) => {
+        const state = r.state ?? "done";
+        const n = r.resultId ? itemOf(r.resultId) : undefined;
+        return (
+          <li key={r.at} className="flex flex-col gap-1 rounded-xl bg-surface px-3.5 py-2.5 text-[13px]">
+            <div className="flex gap-2">
+              <span className="shrink-0 text-faint">你</span>
+              <span className="min-w-0 grow break-words whitespace-pre-wrap text-fg-2">{r.note}</span>
+              <span className="shrink-0 text-xs text-faint">{ago(r.at)}</span>
+            </div>
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="shrink-0 text-faint">它</span>
+              {state === "working" ? (
+                busy ? (
+                  <span className="flex items-center gap-1.5 text-muted">
+                    <span className="size-1.5 animate-pulse rounded-full bg-accent" /> 在改，下面能看到它每一步在做什么
+                  </span>
+                ) : (
+                  <span className="text-muted">没等到结果（改的时候程序关掉了？）。可以再发一次。</span>
+                )
+              ) : state === "failed" ? (
+                <span className="min-w-0 break-words text-danger">没改成：{r.error || "不知道为什么"}</span>
+              ) : (
+                <>
+                  <span className={cx("min-w-0 break-words", state === "undone" ? "text-faint line-through" : "text-fg-2")}>
+                    {r.summary || (r.saveAs ? "做了新的一版" : "改好了")}
+                  </span>
+                  {n && (
+                    <button className="min-w-0 rounded-md px-1.5 text-left text-accent-strong hover:bg-surface-3" onClick={() => useUi.getState().openPeek(n.id)} title="在右侧打开">
+                      {r.saveAs ? "另存为" : "更新了"}「{noteTitle(n)}」
+                    </button>
+                  )}
+                  {state === "undone" && <span className="text-xs text-faint">已撤销</span>}
+                  {last?.at === r.at && n && (
+                    <button className="rounded-md px-1.5 text-xs text-muted hover:bg-surface-3 hover:text-fg" onClick={() => undoRevision(it.id, r).catch((e) => say(errText(e)))} title="把这篇换回这次改之前的样子">
+                      撤销这次
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 /** 把 AI 的成品存成笔记：第一行的一级标题当标题 */
@@ -443,10 +522,10 @@ export function BriefPanel({ it }: { it: Item }) {
         <div className="flex flex-wrap items-center gap-2 text-[13.5px]">
           {result ? (
             <>
-              <span className="text-fg-2">产出：</span>
-              <Button className="bg-surface hover:bg-surface-3" onClick={() => useUi.getState().openPeek(result.id)}>
+              <span className="shrink-0 text-fg-2">产出：</span>
+              <button className="min-w-0 rounded-[10px] bg-surface px-3 py-1.5 text-left font-medium break-words text-fg hover:bg-surface-3" onClick={() => useUi.getState().openPeek(result.id)} title="在右侧打开">
                 {noteTitle(result)}
-              </Button>
+              </button>
             </>
           ) : (
             <span className="text-muted">产出的笔记已经不在了。</span>
@@ -460,16 +539,7 @@ export function BriefPanel({ it }: { it: Item }) {
           )}
         </div>
       )}
-      {b.status === "done" && !busy && (b.revisions?.length ?? 0) > 0 && (
-        <ul className="flex flex-col gap-1 text-[12.5px] text-muted">
-          {b.revisions!.map((r) => (
-            <li key={r.at} className="flex gap-2">
-              <span className="shrink-0 text-faint">{ago(r.at)}让它改：</span>
-              <span className="min-w-0 break-words whitespace-pre-wrap">{r.note}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {(b.revisions?.length ?? 0) > 0 && <Revisions it={it} list={b.revisions!} busy={!!busy} />}
       {b.status === "done" && !busy && !manual && (
         <div className="flex items-end gap-2">
           <textarea
@@ -499,6 +569,17 @@ export function BriefPanel({ it }: { it: Item }) {
           >
             <Send className="size-4" />
             接着改
+          </Button>
+          <Button
+            disabled={!more.trim() || !agent}
+            onClick={() => {
+              if (!agent) return;
+              runRevise(it.id, agent, me, more, true);
+              setMore("");
+            }}
+            title="按意见做新的一版，另存一篇笔记，上一版留着（比如「再出一套题」）"
+          >
+            另存一篇
           </Button>
         </div>
       )}
