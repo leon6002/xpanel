@@ -1,5 +1,5 @@
 /* 阅读 / 编辑一条：主界面右边的阅读区，和任何页面都能打开的右侧浮出面板（Peek）共用 */
-import { CalendarDays, Copy, Link2, ExternalLink, FilePlus2, FoldHorizontal, UnfoldHorizontal, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
+import { CalendarDays, Copy, Link2, ExternalLink, FilePlus2, FoldHorizontal, UnfoldHorizontal, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X } from "lucide-react";
 import { create } from "zustand";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
@@ -721,53 +721,6 @@ function ItemView({
   );
 }
 
-/** 主界面右边的阅读区 */
-export function Reader() {
-  const { data } = useAppState();
-  const ui = useUi();
-  const id = ui.selected[ui.view];
-  const it = id ? data?.items.find((x) => x.id === id) : undefined;
-  const [focusTitle, setFocusTitle] = useState(false);
-  useEffect(() => {
-    // 新建的条目（标题空）直接写标题
-    setFocusTitle(!!it && !it.title && it.type !== "note");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  if (!it)
-    return (
-      <main className="grid min-w-0 flex-1 place-items-center rounded-[18px] bg-surface p-6 text-center text-sm text-faint">
-        {ui.view === "notes" ? (
-          <div className="flex flex-col items-center gap-3">
-            <FileText className="size-8 text-line" />
-            临时的内容、会议记录、粘贴来的长文本都放这里。
-            <br />
-            支持 Markdown，可以直接粘贴图片和拖入文件。
-          </div>
-        ) : (
-          "从左边选一条"
-        )}
-      </main>
-    );
-  return (
-    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-[18px] bg-surface">
-      <ItemView
-        it={it}
-        mode={ui.mode}
-        setMode={ui.setMode}
-        wide
-        focusTitle={focusTitle}
-        open={(id, edit) => {
-          const t = data?.items.find((x) => x.id === id);
-          if (t && viewOf(t.type) !== ui.view) ui.setView(viewOf(t.type));
-          useUi.getState().select(id);
-          if (edit && ui.mode === "read") ui.setMode("edit");
-        }}
-      />
-    </main>
-  );
-}
-
 /* ---------------------------------------------------------------- 右侧浮出面板 */
 
 const sideWidth = () => Math.max(380, Math.min(+(ls.get("wb-sidew") || 0) || 620, window.innerWidth - 420));
@@ -828,25 +781,20 @@ export function Peek() {
       <ItemView
         it={it}
         mode={ui.peek.mode}
-        setMode={(m) => ui.openPeek(it.id, m === "split" ? "edit" : m)}
+        setMode={(m) => useUi.setState({ peek: { id: it.id, mode: m } })}
         wide={full}
+        focusTitle={ui.peek.mode === "edit" && !it.title && it.type !== "note"}
         open={(id, edit) => {
           ui.openPeek(id, edit ? "edit" : "read");
           if (full) useUi.setState({ peekFull: true });
         }}
         bar={
           <>
-            <IconButton
-              label="在它所在的页面打开"
-              onClick={() => {
-                const v = viewOf(it.type);
-                ui.setView(v);
-                useUi.getState().select(it.id);
-                ui.closePeek();
-              }}
-            >
-              <PanelRightOpen />
-            </IconButton>
+            {viewOf(it.type) !== ui.view && (
+              <IconButton label="到它所在的页面" onClick={() => ui.setView(viewOf(it.type))}>
+                <PanelRightOpen />
+              </IconButton>
+            )}
             <IconButton label={full ? "还原" : "铺满"} onClick={() => useUi.setState({ peekFull: !full })}>
               {full ? <Minimize2 /> : <Maximize2 />}
             </IconButton>

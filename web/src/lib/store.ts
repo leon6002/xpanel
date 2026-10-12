@@ -42,13 +42,12 @@ interface Ui {
   proj: string | null;
   q: string;
   /** 右侧浮出的阅读面板（在任何页面都能打开任意一条） */
-  peek: { id: string; mode: "read" | "edit" } | null;
+  peek: { id: string; mode: "read" | "edit" | "split" } | null;
   peekFull: boolean;
   /** 正在后台问 AI 的问题（按条目） */
   qaPending: Record<string, { q: string; quote: string; agent: string }[]>;
   theme: Theme;
   capType: ItemType;
-  mode: "read" | "edit" | "split";
   toast: { text: string; action?: { label: string; run: () => void } } | null;
   setView: (v: View) => void;
   select: (id: string | null) => void;
@@ -57,7 +56,7 @@ interface Ui {
   setQ: (q: string) => void;
   setDev: (d: string | null) => void;
   setProj: (p: string | null) => void;
-  openPeek: (id: string, mode?: "read" | "edit") => void;
+  openPeek: (id: string, mode?: "read" | "edit" | "split") => void;
   closePeek: () => void;
   cycleTheme: () => void;
   setCapType: (t: ItemType) => void;
@@ -67,7 +66,6 @@ interface Ui {
   /** 收件箱当前的会话："me" = 随手记，其他是导入的聊天 id */
   ibx: string;
   setIbx: (id: string) => void;
-  setMode: (m: "read" | "edit" | "split") => void;
   say: (text: string, action?: { label: string; run: () => void }) => void;
 }
 
@@ -92,7 +90,6 @@ export const useUi = create<Ui>((set, get) => ({
   qaPending: {},
   theme: (ls.get("wb-theme") as Theme) || "system",
   capType: "todo",
-  mode: (ls.get("wb-notemode") as "read" | "edit" | "split") || "read",
   toast: null,
   setView: (view) => {
     ls.set("wb-next-view", view);
@@ -126,10 +123,6 @@ export const useUi = create<Ui>((set, get) => ({
     set({ ibx });
   },
   focusCapture: (t) => set((s) => ({ capFocus: s.capFocus + 1, ...(t ? { capType: t } : {}) })),
-  setMode: (mode) => {
-    ls.set("wb-notemode", mode);
-    set({ mode });
-  },
   say: (text, action) => {
     window.clearTimeout(toastTimer);
     set({ toast: { text, action } });

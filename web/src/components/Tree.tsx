@@ -222,7 +222,7 @@ export function SubRows({ parent, depth, sel, seen }: { parent: string; depth: n
 
 function SubRow({ it, depth, sel, seen }: { it: Item; depth: number; sel?: string | null; seen: Set<string> }) {
   const tree = useTree();
-  const select = useUi((s) => s.select);
+  const select = useUi((s) => s.openPeek);
   const open = useOpenNodes((s) => !!s.open[it.id]);
   const toggle = useOpenNodes((s) => s.toggle);
   const n = tree.children(it.id).length;

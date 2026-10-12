@@ -8,7 +8,7 @@ import { Banner, QaFloat, useClaimPrompt, useGlobalInput } from "./components/Gl
 import { InboxList, InboxMain } from "./components/Inbox";
 import { Links } from "./components/Links";
 import { ListPane } from "./components/ListPane";
-import { Peek, Reader } from "./components/Reader";
+import { Peek } from "./components/Reader";
 import { Sidebar } from "./components/Sidebar";
 import { Toast } from "./components/Toast";
 import { Vault, VaultRequests } from "./components/Vault";
@@ -83,10 +83,7 @@ function Shell() {
           ) : view === "links" ? (
             <Links />
           ) : (
-            <>
-              <ListPane />
-              <Reader />
-            </>
+            <ListPane />
           )}
         </div>
       </div>
