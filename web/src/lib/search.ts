@@ -83,6 +83,20 @@ function snippetOf(body: string, toks: string[]) {
   return (from ? "…" : "") + text.slice(from, from + 100);
 }
 
+function itemFields(it: Item, title: string): SearchField[] {
+  const comments = (it.qa || []).flatMap((x) => [x.quote, ...x.turns.flatMap((t) => [t.q, t.a])]).join("\n");
+  return [
+    [low(title), 10, true],
+    [low((it.tags || []).join(" ")), 6, true],
+    [low(it.category), 5, true],
+    [low(it.body), 3, false],
+    [low(comments), 1.5, false],
+  ];
+}
+
+/** 页面上的搜索框用：这一条对不对得上（和全局搜索一样的规则：容错、多个词都要对上） */
+export const itemMatches = (it: Item, toks: string[]) => !toks.length || scoreFields(toks, itemFields(it, titleOfItem(it))) > 0;
+
 export function searchItems(items: Item[], q: string): ItemHit[] {
   const toks = tokensOf(q);
   if (!toks.length) return [];
@@ -90,15 +104,7 @@ export function searchItems(items: Item[], q: string): ItemHit[] {
   const out: ItemHit[] = [];
   for (const it of items) {
     const title = titleOfItem(it);
-    const comments = (it.qa || []).flatMap((x) => [x.quote, ...x.turns.flatMap((t) => [t.q, t.a])]).join("\n");
-    const fields: SearchField[] = [
-      [low(title), 10, true],
-      [low((it.tags || []).join(" ")), 6, true],
-      [low(it.category), 5, true],
-      [low(it.body), 3, false],
-      [low(comments), 1.5, false],
-    ];
-    let score = scoreFields(toks, fields);
+    let score = scoreFields(toks, itemFields(it, title));
     if (!score) continue;
     // 同样对得上时：置顶的、没做完的、最近改过的靠前；做完的靠后
     score += (it.pinned ? 1 : 0) + (it.done ? -2 : 0) + (now - it.updatedAt < 7 * 864e5 ? 1 : now - it.updatedAt < 30 * 864e5 ? 0.5 : 0);

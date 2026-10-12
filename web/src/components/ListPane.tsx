@@ -32,22 +32,21 @@ import { rootDropProps, SubRows, useNoteDnd } from "./Tree";
 import { buildTree, useOpenNodes } from "../lib/tree";
 import { linksOf } from "../lib/links";
 import { NO_PROJECT, projectOf } from "../lib/projects";
-import { Filters } from "./Filters";
+import { itemMatches, tokensOf } from "../lib/search";
+import { CatBar, Filters, SearchBox } from "./Filters";
 import { useProjects } from "./Projects";
 import { Button, Chip, Pri } from "./ui";
 
 export function useFilter() {
   const { cat, tag, q, dev, proj } = useUi();
   const projects = useProjects();
+  const toks = tokensOf(q);
   return (it: Item) => {
     if (proj && (proj === NO_PROJECT ? !!projectOf(it, projects) : projectOf(it, projects)?.id !== proj)) return false;
     if (cat === "none" ? !!it.category : cat && !inCat(it.category, cat)) return false;
     if (tag && !(it.tags || []).includes(tag)) return false;
     if (dev && it.device && it.device !== dev) return false;
-    if (q) {
-      const hay = `${it.title}\n${it.body || ""}\n${(it.tags || []).join(" ")}\n${it.category || ""}`.toLowerCase();
-      if (!q.toLowerCase().split(/\s+/).every((w) => hay.includes(w))) return false;
-    }
+    if (toks.length && !itemMatches(it, toks)) return false;
     return true;
   };
 }
@@ -345,12 +344,14 @@ export function ListPane() {
           {body.count} {ui.view === "notes" || ui.view === "rules" ? "篇" : "条"}
         </span>
         <span className="grow" />
-        <Filters />
+        <SearchBox />
+        <Filters bar />
         <Button tone="primary" onClick={create} title={ui.view === "notes" ? "新建笔记" : ui.view === "rules" ? "新建规范" : "在快速记录里写"}>
           <Plus className="size-4" />
           新建
         </Button>
       </div>
+      <CatBar />
       <Elsewhere />
       <div className="flex min-h-[40vh] shrink-0 flex-col" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
         {body.node}

@@ -13,7 +13,7 @@ import { buildGroups, planGroupMove, planMove, type LinkGroup, type LinkPatch } 
 import { deviceByHost, devOnline, entryTargets, hostOf, normCat, type HostKind } from "../lib/logic";
 import { ls, useUi } from "../lib/store";
 import type { Item, State } from "../lib/types";
-import { Filters } from "./Filters";
+import { Filters, SearchBox } from "./Filters";
 import { bumpLink } from "./Home";
 import { Elsewhere, useFilter } from "./ListPane";
 import { Button } from "./ui";
@@ -288,6 +288,7 @@ export function Links() {
           {count} 条 · 点一下直接打开{canDrag ? "，按住可以拖到别的位置或分组" : "（筛选时不能拖动）"}
         </span>
         <span className="grow" />
+        <SearchBox />
         <Filters />
         {naming === null ? (
           <Button onClick={() => setNaming("")} disabled={filtering} title="建一个自己的分组，再把入口拖进去">

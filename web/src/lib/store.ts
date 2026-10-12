@@ -94,8 +94,10 @@ export const useUi = create<Ui>((set, get) => ({
   setView: (view) => {
     ls.set("wb-next-view", view);
     // 快速记录默认记成当前页的类型
+    // 页面上的搜索框只管这一页，换页面就清空
     set((s) => ({
       view,
+      q: "",
       capType: ({ notes: "note", links: "link", rules: "rule" } as Record<string, ItemType>)[view] ?? (["todo", "issue", "idea"].includes(s.capType) ? s.capType : "todo"),
     }));
   },
