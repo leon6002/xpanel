@@ -41,7 +41,7 @@ Built with Tauri 2 (Rust). External AI tools can read and write through a REST A
   被评论的原文淡色高亮，位置按「原话 + 前后文」记，之后往笔记里插内容也找得回来；评论内容能被搜索到。
 - **交给 AI**：任意条目一键交给 Claude Code、Codex 等命令行工具（新终端窗口），或在浏览器打开 ChatGPT；命令可自定义。
 - **对外接口**：外部 AI 可以写入待办、整理优先级、导出、做统计分析，每次修改都记录是谁改的。
-- **多机共用**：一台「主机」存数据并在局域网开放；其他电脑选「连接到主机」，浏览器直接访问 `http://主机:8765`。
+- **多机共用**：一台「主机」存数据并在局域网开放；其他电脑选「连接到主机」，浏览器直接访问 `http://主机:28765`。
   可以设成局域网访问要令牌；打开后还能让浏览器叫主机上的 AI（见下面的安全说明）。
 - **离线可用**：连接模式下连不上主机时照常能看、能记，恢复后自动补传；主机暂时存不了时改动也不会丢。
 - **外置硬盘同步（换电脑）**：每台电脑用自己的数据文件夹，外置硬盘交接。左下角硬盘图标（或「设置 → 外置硬盘同步」）：
@@ -55,27 +55,27 @@ Built with Tauri 2 (Rust). External AI tools can read and write through a REST A
 
 ## 对外接口（给 AI 和脚本）
 
-主机开着时，接口文档在 `http://主机:8765/api/v1/openapi.json`，把这个地址交给 AI 就能自己学会用。
+主机开着时，接口文档在 `http://主机:28765/api/v1/openapi.json`，把这个地址交给 AI 就能自己学会用。
 
 ```bash
 # 在主机上为某个 AI 生成一把 key（只显示一次）
 xp key create claude-code --data D:\xpanel
 
 # 写入待办
-curl -X POST http://主机:8765/api/v1/items \
+curl -X POST http://主机:28765/api/v1/items \
   -H "Authorization: Bearer $XPANEL_KEY" -H "Content-Type: application/json" \
   -d '{"title":"整理客户反馈","priority":"P1","tags":["客户"],"due":"2026-10-08"}'
 
 # 查询未完成的待办和问题
-curl "http://主机:8765/api/v1/items?type=todo,issue&status=open"
+curl "http://主机:28765/api/v1/items?type=todo,issue&status=open"
 
 # 批量调整优先级：先 dryRun 看对比，确认后再提交
-curl -X POST http://主机:8765/api/v1/items/reprioritize -H "Content-Type: application/json" \
+curl -X POST http://主机:28765/api/v1/items/reprioritize -H "Content-Type: application/json" \
   -d '{"dryRun":true,"changes":[{"id":"…","priority":"P0","reason":"客户在催"}]}'
 
 # 导出（md 适合交给 AI 读，csv 给表格，json 给程序）和统计
-curl "http://主机:8765/api/v1/export?format=md&status=open"
-curl "http://主机:8765/api/v1/stats"
+curl "http://主机:28765/api/v1/export?format=md&status=open"
+curl "http://主机:28765/api/v1/stats"
 ```
 
 | 接口 | 用途 |
@@ -114,7 +114,7 @@ curl "http://主机:8765/api/v1/stats"
 
 ```bash
 # Claude Code（-s user：所有项目都能用）
-claude mcp add xpanel -s user -e XPANEL_URL=http://主机:8765 -e XPANEL_KEY=xp_… -- xp mcp
+claude mcp add xpanel -s user -e XPANEL_URL=http://主机:28765 -e XPANEL_KEY=xp_… -- xp mcp
 ```
 
 ```toml
@@ -122,17 +122,17 @@ claude mcp add xpanel -s user -e XPANEL_URL=http://主机:8765 -e XPANEL_KEY=xp_
 [mcp_servers.xpanel]
 command = "xp"
 args = ["mcp"]
-env = { XPANEL_URL = "http://主机:8765", XPANEL_KEY = "xp_…" }
+env = { XPANEL_URL = "http://主机:28765", XPANEL_KEY = "xp_…" }
 ```
 
-- `XPANEL_URL`：主机地址；在主机本机上用 `http://127.0.0.1:8765`（需要在设置里勾选「在局域网开放」，或用 `xp serve` 跑服务）。
+- `XPANEL_URL`：主机地址；在主机本机上用 `http://127.0.0.1:28765`（需要在设置里勾选「在局域网开放」，或用 `xp serve` 跑服务）。
 - `XPANEL_KEY`：可选，在主机上用 `xp key create claude-code` 生成，操作记录里就会写「claude-code」；不填时记为「mcp」，也可以用 `XPANEL_ACTOR` 起个名字。
 - MCP 直接连主机，主机连不上时会返回错误（不像桌面版有离线队列）。
 
 ## 命令行 `xp`
 
 ```bash
-export XPANEL_URL=http://主机:8765 XPANEL_KEY=xp_…   # Windows 用 $env:XPANEL_URL = "…"
+export XPANEL_URL=http://主机:28765 XPANEL_KEY=xp_…   # Windows 用 $env:XPANEL_URL = "…"
 xp add 写周报 -p P1 --tag 周报 --due 2026-10-08 -c 工作/周报
 xp ls -s open -t todo,issue
 xp done <id>
@@ -160,7 +160,7 @@ xp serve --data /srv/xpanel            # 无窗口运行（Linux 主机、Docker
 - 开发：`npm install && npx tauri dev`
 - 只改界面：程序（或 `xp serve`）照常跑着，在 `web/` 里 `npm install && npm run dev`，打开它给出的地址，保存即刷新，不用编译 Rust。
   打包时 `tauri build` 会先构建 `web/`；`dev.bat` 也会。
-- 旧界面（单文件）还留在 `http://主机:8765/old/`，新界面有问题时可以先用它。
+- 旧界面（单文件）还留在 `http://主机:28765/old/`，新界面有问题时可以先用它。
 - 测试：`cargo test --workspace`
 
 代码结构：
@@ -182,7 +182,9 @@ ui/           旧界面（单文件），挂在 /old/
 首次打开选择角色：
 
 - **这台电脑存数据（主机）**：填一个数据文件夹，勾选「在局域网开放」。Windows 防火墙询问时允许「专用网络」。
-- **连接到主机**：填 `http://主机名或IP:8765`。
+- **连接到主机**：填 `http://主机名或IP:28765`。
+- 以前的默认端口是 8765（容易和别的程序撞上）。更新后桌面版自动换成 28765，连接模式填的主机地址也一起换；自己改过端口的不动。
+  主机和其他电脑要一起更新；浏览器书签、命令行和 MCP 里写了 8765 的要自己改。
 
 数据文件夹里：`xpanel.db`（数据库）、`assets/`（图片和附件）、`backups/`（每日备份）。
 从旧版升级时，旧的 `workbench.json` 会自动导入，并改名为 `workbench.v1.json` 保留。

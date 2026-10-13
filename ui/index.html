@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="wb-ui-version" content="16">
+<meta name="wb-ui-version" content="17">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>我的工作台</title>
 <script>try{var t=localStorage.getItem("wb-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
@@ -1606,7 +1606,7 @@ function localDirOf(it){const tg=entryTarget(it);return tg&&!/^(https?|smb|ssh)/
 function agentRow(a){return `<div class="agent-row"><input class="name" value="${esc(a.name)}" placeholder="名称" aria-label="名称"><input class="cmd" value="${esc(a.cmd)}" placeholder="命令，如 claude {prompt}" aria-label="命令"><input class="cmd ask" value="${esc(a.ask||"")}" placeholder="问答命令（可空）" title="划词问 AI 时用的非交互命令，提示词从标准输入传入。留空时 claude / codex 会自动用 claude -p / codex exec -" aria-label="问答命令"><button class="ic" data-delagent title="删除" aria-label="删除">${ico("x")}</button></div>`}
 function closeModal(){$("#modalRoot").innerHTML=""}
 function openSettings(first){
-  const c=S.cfg||{mode:"",dataDir:"",serverUrl:"",port:8765,lanEnabled:true};
+  const c=S.cfg||{mode:"",dataDir:"",serverUrl:"",port:28765,lanEnabled:true};
   let mode=c.mode||"host";
   const root=$("#modalRoot");
   root.innerHTML=`<div class="overlay"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -1617,9 +1617,9 @@ function openSettings(first){
         <label class="field">数据文件夹<input id="fDir" value="${esc(c.dataDir)}" placeholder="例如 D:\\xpanel"></label>
         <label class="field">冷备份文件夹（可选，比如 8TB 盘；每天复制一份备份和新附件过去）<input id="fCold" value="${esc(c.coldBackupDir||"")}" placeholder="留空 = 不做冷备份"></label>
         <label class="toggle"><input type="checkbox" id="fLan" ${c.lanEnabled?"checked":""}> 在局域网开放（其他电脑和浏览器访问要用）</label>
-        <label class="field">端口<input id="fPort" value="${c.port||8765}" inputmode="numeric" style="width:120px"></label></div>
+        <label class="field">端口<input id="fPort" value="${c.port||28765}" inputmode="numeric" style="width:120px"></label></div>
       <div class="choice" role="radio" tabindex="0" data-mode="client"><h3>连接到主机</h3><p>这台电脑不存数据。连不上时照常能看、能记，恢复后自动上传。</p>
-        <label class="field">主机地址<input id="fUrl" value="${esc(c.serverUrl)}" placeholder="http://主机名或IP:8765"></label></div>
+        <label class="field">主机地址<input id="fUrl" value="${esc(c.serverUrl)}" placeholder="http://主机名或IP:28765"></label></div>
     </div>
     ${first?"":`<div class="field"><span>可以交给的 AI（命令里的 <code>{prompt}</code> 会换成提示词；以 http 开头的会在浏览器打开）</span>
       <div class="agent-rows" id="fAgents">${(c.agents||[]).map(a=>agentRow(a)).join("")}</div>
@@ -1647,7 +1647,7 @@ function openSettings(first){
   $("#fImport")&&($("#fImport").onchange=ev=>{const f=ev.target.files[0];if(f)importFile(f)});
   $("#fSave").onclick=async()=>{
     const agents=$("#fAgents")?[...document.querySelectorAll("#fAgents .agent-row")].map(r=>({name:r.querySelector(".name").value.trim(),cmd:r.querySelector(".cmd").value.trim(),ask:r.querySelector(".ask").value.trim()})).filter(a=>a.name&&a.cmd):(c.agents||[]);
-    const cfg={mode,dataDir:$("#fDir").value.trim(),serverUrl:$("#fUrl").value.trim(),port:parseInt($("#fPort").value,10)||8765,lanEnabled:$("#fLan").checked,agents,agentCwd:$("#fCwd")?$("#fCwd").value.trim():(c.agentCwd||""),coldBackupDir:$("#fCold")?$("#fCold").value.trim():(c.coldBackupDir||"")};
+    const cfg={mode,dataDir:$("#fDir").value.trim(),serverUrl:$("#fUrl").value.trim(),port:parseInt($("#fPort").value,10)||28765,lanEnabled:$("#fLan").checked,agents,agentCwd:$("#fCwd")?$("#fCwd").value.trim():(c.agentCwd||""),coldBackupDir:$("#fCold")?$("#fCold").value.trim():(c.coldBackupDir||"")};
     if(mode==="host"&&!cfg.dataDir){$("#fErr").textContent="请填写数据文件夹";return}
     if(mode==="client"&&!cfg.serverUrl){$("#fErr").textContent="请填写主机地址";return}
     const b=$("#fSave");b.disabled=true;b.textContent=mode==="client"?"正在连接主机…":"保存中…";$("#fErr").textContent="";

@@ -30,7 +30,9 @@ use xp_store::{Store, StoreError};
 pub const UI_HTML: &str = include_str!("../../../ui/index.html");
 pub const MARKED_JS: &str = include_str!("../../../ui/vendor/marked.js");
 pub const PURIFY_JS: &str = include_str!("../../../ui/vendor/purify.js");
-pub const DEFAULT_PORT: u16 = 8765;
+/// 默认端口。原来是 8765，但不少 WebSocket 程序也默认用 8765，Windows 上它们只占 127.0.0.1 时
+/// 和 xpanel 能同时起来，本机发到 127.0.0.1 的请求（后台 AI 的 MCP）就会被它们接走
+pub const DEFAULT_PORT: u16 = 28765;
 /// /api/v1 的协议版本，不兼容的改动才加 1
 pub const API_VERSION: u32 = 1;
 /// 请求体上限：截图、附件走 base64（体积大约 4/3 倍），界面单个附件限制 25MB

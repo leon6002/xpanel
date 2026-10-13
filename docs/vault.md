@@ -226,7 +226,7 @@ xpanel 的接口在局域网里默认不用登录（API key 只是用来标明�
 - 接口：`crates/xp-server/src/vault.rs`。`same_site_only` 挡住别的网站的网页（Origin 和 Host 不一致、Host 不像局域网地址、`Sec-Fetch-Site: cross-site`）；`POST /vault/requests` 用 `KeyActor`，只认验证过的 API key。
   附件（`/api/asset/*`）带 `Content-Security-Policy: sandbox` 和 `nosniff`：附件谁都能传，带脚本的 SVG 直接打开时不能以这个站点的身份跑，否则上面这道检查就白做了。
 - 界面：`web/src/lib/vault.ts`（加解密、校验值、解锁状态、读写）、`web/src/components/Vault.tsx`（整页 + `VaultRequests` 弹窗，挂在 `App.tsx`）。
-  - 用纯 JS 的 @noble 库而不是 `crypto.subtle`：局域网里用 `http://主机:8765` 打开时浏览器不提供后者。
+  - 用纯 JS 的 @noble 库而不是 `crypto.subtle`：局域网里用 `http://主机:28765` 打开时浏览器不提供后者。
   - 密文里的 JSON 带 `title`、`kind`，解开后界面只认这一份；主机上的 `title` 列只是标签。**不要改成显示主机上的名称**，否则可以把一条的密文换到另一个名称下骗用户批准。
   - 主机给的 scrypt 参数只接受 N 在 2^15 到 2^18 之间、r=8、p≤2。
   - 种类：`login`、`bank`、`apikey`、`server`、`other`（主机只认这几个，加种类要同时改 `xp-store/src/vault.rs` 的 `KINDS`）。银行分手机银行和信用卡，

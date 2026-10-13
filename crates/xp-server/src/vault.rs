@@ -28,7 +28,7 @@ pub fn routes() -> Router<AppState> {
 
 /// 密码库的接口只给自己的界面和局域网里的工具用，不给别的网站上的网页用。
 /// 其他接口允许跨站调用（方便写小工具），这里不行：你在浏览器里打开的任何网页，都可能偷偷向
-/// `http://主机:8765` 发请求，把密文和包着的密钥拿走去离线猜主密码。
+/// `http://主机:28765` 发请求，把密文和包着的密钥拿走去离线猜主密码。
 /// - 带了 Origin（浏览器的跨站请求一定带）：必须和 Host 是同一个地址
 /// - Host 必须像局域网地址（IP、localhost、不带点的机器名、.local 等），挡住把外面的域名解析到内网的做法
 pub(crate) async fn same_site_only(req: Request, next: Next) -> Result<Response, ApiError> {
@@ -67,7 +67,7 @@ fn same_site(headers: &HeaderMap) -> bool {
 }
 
 fn lan_host(host: &str) -> bool {
-    // 去掉端口；IPv6 是 [::1]:8765 这种写法
+    // 去掉端口；IPv6 是 [::1]:28765 这种写法
     let name = if let Some(rest) = host.strip_prefix('[') {
         rest.split(']').next().unwrap_or("")
     } else {

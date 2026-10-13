@@ -1,6 +1,6 @@
 //! xp：xpanel 命令行。给人用，也给在终端里干活的 AI 用（加 --json 输出结构化结果）。
 //!
-//! 连接哪个 xpanel：环境变量 XPANEL_URL（默认 http://127.0.0.1:8765）
+//! 连接哪个 xpanel：环境变量 XPANEL_URL（默认 http://127.0.0.1:28765）
 //! 身份：环境变量 XPANEL_KEY（用 `xp key create <名字>` 在主机上生成）
 //! 主机打开了「局域网访问要令牌」时：XPANEL_KEY 本身就能进；只想进、不想改身份就设 XPANEL_TOKEN
 
@@ -21,7 +21,7 @@ struct Cli {
     #[arg(
         long,
         env = "XPANEL_URL",
-        default_value = "http://127.0.0.1:8765",
+        default_value = "http://127.0.0.1:28765",
         global = true
     )]
     url: String,

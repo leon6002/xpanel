@@ -7,7 +7,7 @@ import { LanAccess } from "../components/TokenGate";
 import { importItems, qc, setConfig, useAppState, useConfig } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { useUi } from "../lib/store";
-import type { Agent, Config, Item, State } from "../lib/types";
+import { DEFAULT_PORT, type Agent, type Config, type Item, type State } from "../lib/types";
 import { cx } from "../lib/cx";
 import { Button, ErrorText, Field, Toggle, inputCls } from "../components/ui";
 import { openDriveSync } from "./DriveSync";
@@ -98,12 +98,12 @@ function WebSettings({ close }: { close: () => void }) {
 /** 桌面版的设置；first = 第一次打开，必须先选好角色 */
 export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () => void }) {
   const app = useConfig().data;
-  const c: Config = app?.config ?? { mode: "", dataDir: "", serverUrl: "", port: 8765, lanEnabled: true, agents: [], agentCwd: "", deviceId: "" };
+  const c: Config = app?.config ?? { mode: "", dataDir: "", serverUrl: "", port: DEFAULT_PORT, lanEnabled: true, agents: [], agentCwd: "", deviceId: "" };
   const [mode, setMode] = useState<"host" | "client">(c.mode === "client" ? "client" : "host");
   const [dataDir, setDataDir] = useState(c.dataDir);
   const [cold, setCold] = useState(c.coldBackupDir || "");
   const [lan, setLan] = useState(c.lanEnabled);
-  const [port, setPort] = useState(String(c.port || 8765));
+  const [port, setPort] = useState(String(c.port || DEFAULT_PORT));
   const [url, setUrl] = useState(c.serverUrl);
   const [token, setToken] = useState(c.serverToken || "");
   const [agents, setAgents] = useState<Agent[]>(() => (c.agents || []).map((a) => ({ ...a, ask: a.ask || "" })));
@@ -117,7 +117,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
       dataDir: dataDir.trim(),
       serverUrl: url.trim(),
       serverToken: token.trim(),
-      port: parseInt(port, 10) || 8765,
+      port: parseInt(port, 10) || DEFAULT_PORT,
       lanEnabled: lan,
       agents: first ? c.agents : agents.map((a) => ({ name: a.name.trim(), cmd: a.cmd.trim(), ask: (a.ask || "").trim() })).filter((a) => a.name && a.cmd),
       agentCwd: first ? c.agentCwd : cwd.trim(),
@@ -182,7 +182,7 @@ export function SettingsForm({ first, onDone }: { first?: boolean; onDone?: () =
           "这台电脑不存数据。连不上时照常能看、能记，恢复后自动上传。",
           <>
             <Field label="主机地址">
-              <input className={inputCls + " font-mono"} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://主机名或IP:8765" />
+              <input className={inputCls + " font-mono"} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://主机名或IP:28765" />
             </Field>
             <Field label="令牌（主机要令牌时填）" hint="在主机的设置 → 局域网访问里生成">
               <input className={inputCls + " font-mono"} type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="xp_…" aria-label="令牌" />

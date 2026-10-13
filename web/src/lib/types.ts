@@ -122,6 +122,8 @@ export interface MergeResult { applied: Record<string, number>; kept: number; co
 /* ---- 桌面版配置（get_config） ---- */
 /** remote：主机上的 AI（浏览器里经主机的 /api/v1/agents 叫，只认名字） */
 export interface Agent { name: string; cmd: string; ask?: string; remote?: boolean }
+/** 主机默认端口（和 xp-server 的 DEFAULT_PORT 一致） */
+export const DEFAULT_PORT = 28765;
 export interface Config {
   mode: "" | "host" | "client";
   dataDir: string;

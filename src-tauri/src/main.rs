@@ -6,7 +6,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(|s| s == "--serve").unwrap_or(false) {
         let dir = args.get(2).cloned().unwrap_or_else(|| ".".into());
-        let port = args.get(3).and_then(|p| p.parse().ok()).unwrap_or(8765);
+        let port = args
+            .get(3)
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(xp_server::DEFAULT_PORT);
         xpanel_lib::serve_cli(dir, port);
         return;
     }

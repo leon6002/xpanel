@@ -119,4 +119,4 @@
 - 只跑服务：`cargo run -p xp-cli -- serve --data <文件夹>`
 - 打包安装（Windows）：`build-windows.bat`（发布用，慢）；开发时用 `dev.bat`（`[profile.fast]`，增量编译，替换安装目录里的程序）
 - 界面语法检查：把 `<script>` 内容抽出来 `node --check`（见 `.github/workflows/ci.yml`）
-- 界面：`cd web && npm install && npm run dev`（Vite 开发服务，`/api` 转发到 127.0.0.1:8765，改了即时刷新）；`npm run build` 做类型检查并构建，之后重新编译程序才会更新
+- 界面：`cd web && npm install && npm run dev`（Vite 开发服务，`/api` 转发到 127.0.0.1:28765，改了即时刷新）；`npm run build` 做类型检查并构建，之后重新编译程序才会更新

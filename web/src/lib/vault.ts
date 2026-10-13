@@ -6,7 +6,7 @@
    - 改动（存、删、改主密码、批准取用）要带一个校验值：用从密码库密钥派生的校验密钥算的 HMAC。
      接口在局域网里不用登录，没有它谁都能改掉、删掉密文或者冒充用户批准
    - AI 取用：用户点了允许，才把那一条用请求方的临时公钥加密（X25519 + HKDF-SHA256）后交给主机转交，主机看不到内容
-   用的是纯 JS 的 @noble 库而不是浏览器自带的 crypto.subtle：局域网里用 http://主机:8765 打开时浏览器不提供后者。 */
+   用的是纯 JS 的 @noble 库而不是浏览器自带的 crypto.subtle：局域网里用 http://主机:28765 打开时浏览器不提供后者。 */
 import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";

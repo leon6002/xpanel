@@ -3,7 +3,7 @@
 //! 让 Claude Code、Codex 等支持 MCP 的 AI 在任何项目里直接读写 xpanel：
 //!
 //! ```text
-//! claude mcp add xpanel -e XPANEL_URL=http://主机:8765 -e XPANEL_KEY=xp_… -- xp mcp
+//! claude mcp add xpanel -e XPANEL_URL=http://主机:28765 -e XPANEL_KEY=xp_… -- xp mcp
 //! ```
 //!
 //! 每个工具都是对 /api/v1 的一次调用，所以权限、校验、操作记录和网页 / 命令行完全一样。

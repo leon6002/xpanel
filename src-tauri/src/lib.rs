@@ -52,6 +52,31 @@ pub struct Config {
     pub device_id: String,
     /// 外置硬盘上的文件夹（比如 F:\xpanel），一键备份和合并用。界面不传这个字段时保留原值
     pub sync_dir: String,
+    /// 已经从旧的默认端口 8765 挪到新的默认端口（旧配置里没有这个字段 = false）
+    #[serde(default)]
+    pub port_moved: bool,
+}
+
+/// 以前的默认端口
+const OLD_PORT: u16 = 8765;
+
+impl Config {
+    /// 旧的默认端口 8765 挪到新的默认端口：主机的端口、连接模式填的主机地址都换掉。只做一次
+    fn move_old_port(&mut self) -> bool {
+        if self.port_moved {
+            return false;
+        }
+        self.port_moved = true;
+        if self.port == OLD_PORT {
+            self.port = xp_server::DEFAULT_PORT;
+        }
+        let old = format!(":{OLD_PORT}");
+        let url = self.server_url.trim().trim_end_matches('/');
+        if let Some(head) = url.strip_suffix(&old) {
+            self.server_url = format!("{head}:{}", xp_server::DEFAULT_PORT);
+        }
+        true
+    }
 }
 
 impl Default for Config {
@@ -68,6 +93,7 @@ impl Default for Config {
             cold_backup_dir: None,
             device_id: String::new(),
             sync_dir: String::new(),
+            port_moved: true,
         }
     }
 }
@@ -269,6 +295,8 @@ async fn save_config(app: AppHandle, s: St<'_>, cfg: Config) -> Result<Value, St
     let st = s.inner().clone();
     blocking(move || {
         let mut cfg = cfg;
+        // 界面不传这个字段；之后改回 8765 也是用户自己选的，不再挪
+        cfg.port_moved = true;
         if cfg.device_id.is_empty() {
             cfg.device_id = st.cfg().device_id;
         }
@@ -764,10 +792,15 @@ pub fn run() {
                 });
             }
             migrate_old_config(&cfg_dir);
-            let cfg: Config = fs::read_to_string(&cfg_path)
+            let mut cfg: Config = fs::read_to_string(&cfg_path)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
                 .unwrap_or_default();
+            if cfg_path.exists() && cfg.move_old_port() {
+                if let Ok(body) = serde_json::to_string_pretty(&cfg) {
+                    let _ = fs::write(&cfg_path, body);
+                }
+            }
             let st = Arc::new(AppState {
                 cfg: Mutex::new(cfg),
                 cfg_path,
@@ -843,7 +876,8 @@ mod tests {
         let c: Config =
             serde_json::from_value(json!({"mode":"host","dataDir":"D:\\xpanel"})).unwrap();
         assert!(c.cold_backup_dir.is_none());
-        assert_eq!(c.port, 8765);
+        assert_eq!(c.port, xp_server::DEFAULT_PORT);
+        assert!(!c.port_moved);
         let base = std::env::temp_dir().join(format!("xp-app-cfg-{}", std::process::id()));
         let _ = fs::remove_dir_all(&base);
         let old = base.join(OLD_IDENTIFIER);
@@ -859,6 +893,30 @@ mod tests {
         migrate_old_config(&new);
         assert!(new.join("config.json").exists() && new.join("pending.json").exists());
         let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn old_default_port_moves_once() {
+        let mut c: Config = serde_json::from_value(
+            json!({"mode":"client","port":8765,"serverUrl":"http://pc:8765/"}),
+        )
+        .unwrap();
+        assert!(c.move_old_port());
+        assert_eq!(c.port, 28765);
+        assert_eq!(c.server_url, "http://pc:28765");
+        assert!(!c.move_old_port());
+        // 自己选的别的端口不动
+        let mut c: Config =
+            serde_json::from_value(json!({"port":9000,"serverUrl":"http://pc:9000"})).unwrap();
+        c.move_old_port();
+        assert_eq!((c.port, c.server_url.as_str()), (9000, "http://pc:9000"));
+        // 新装的不用挪；挪过以后再改回 8765 也不动
+        let mut c = Config {
+            port: 8765,
+            ..Default::default()
+        };
+        assert!(!c.move_old_port());
+        assert_eq!(c.port, 8765);
     }
 
     #[test]
