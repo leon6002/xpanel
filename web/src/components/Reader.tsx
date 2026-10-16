@@ -5,13 +5,14 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } 
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
 import { addLink } from "../lib/links";
-import { autoTitle, dueInfo, entryTarget, findTarget, noteTitle, normCat, allCats, allTags, parseDue, setImageWidth, ago, assetMd, fileLabel, isImgFile, clipFiles } from "../lib/logic";
+import { autoTitle, dueInfo, inboxTitle, entryTarget, findTarget, noteTitle, normCat, allCats, allTags, parseDue, setImageWidth, ago, assetMd, fileLabel, isImgFile, clipFiles } from "../lib/logic";
 import { ls, useUi, type View } from "../lib/store";
 import type { Item, ItemType, Priority, State } from "../lib/types";
 import { TYPES, isCheckable, typeName } from "../lib/types";
 import { useMyWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
 import { putAsset } from "../lib/api";
+import { copyItem } from "../lib/image";
 import { openAgent } from "../dialogs/Agent";
 import { BriefPanel } from "./Brief";
 import { ProjectPick } from "./Projects";
@@ -668,8 +669,12 @@ function ItemView({
           <Pin />
         </IconButton>
         <IconButton
-          label={tg ? "复制网址或路径" : "复制 Markdown"}
-          onClick={async () => say((await copyText(tg || `# ${it.title}\n\n${it.body || ""}`)) ? "已复制" : "复制失败")}
+          label={tg ? "复制网址或路径" : it.type === "inbox" ? "复制（只有图片时复制图片）" : "复制 Markdown"}
+          onClick={async () =>
+            it.type === "inbox" && !tg
+              ? copyItem(inboxTitle(it), it.body).then(say, (e) => say("复制失败：" + errText(e)))
+              : say((await copyText(tg || `# ${it.title}\n\n${it.body || ""}`)) ? "已复制" : "复制失败")
+          }
         >
           <Copy />
         </IconButton>

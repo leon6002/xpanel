@@ -1,12 +1,14 @@
 /* 右键菜单：在任何一条上点右键（首页、各个列表、收件箱的消息），直接做常用的操作——归到项目、完成、置顶、优先级、截止、转成别的类型、交给 AI、删除。
    条目的那一行带 data-item-id 就行，这里在整个页面上统一接右键。
+   在图片上（正文、消息、看大图里的附件图片）点右键，先给「复制图片」「存到下载」，在条目里的话下面接着是这一条的操作。
    桌面版里别处的右键不再弹出浏览器那个菜单（输入框里、选中了文字时照旧，方便复制粘贴）。 */
 import * as DM from "@radix-ui/react-dropdown-menu";
-import { Box, CalendarDays, Check, ChevronRight, Copy, FileDown, Flag, Folder, PanelRightOpen, Pin, Plus, Repeat2, Sparkles, SquareCheck, Trash2 } from "lucide-react";
+import { Box, CalendarDays, Check, ChevronRight, Copy, Download, FileDown, Image as ImageIcon, Flag, Folder, PanelRightOpen, Pin, Plus, Repeat2, Sparkles, SquareCheck, Trash2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { copyText, isApp } from "../lib/api";
+import { errText, isApp } from "../lib/api";
+import { copiedMsg, copyImage, copyItem, saveImage } from "../lib/image";
 import { patchItem, qc, removeItem, restoreItem, useAppState } from "../lib/data";
-import { addDays, allCats, noteTitle } from "../lib/logic";
+import { addDays, allCats, inboxTitle, noteTitle } from "../lib/logic";
 import { NO_PROJECT, projectOf, projectPinned } from "../lib/projects";
 import { useUi } from "../lib/store";
 import type { Item, ItemType, State } from "../lib/types";
@@ -47,7 +49,7 @@ function Opt({ on, onSelect, children, tone }: { on?: boolean; onSelect: () => v
 }
 
 export function ItemMenu() {
-  const [at, setAt] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [at, setAt] = useState<{ x: number; y: number; id?: string; img?: { src: string; name: string } } | null>(null);
   const items = useAppState().data?.items ?? [];
   const projects = useProjects();
 
@@ -57,9 +59,13 @@ export function ItemMenu() {
       const el = t?.closest?.("[data-item-id]") as HTMLElement | null;
       const typing = !!t?.closest?.("input, textarea, [contenteditable=true], [contenteditable='']");
       const selecting = !!window.getSelection()?.toString();
-      if (el && !typing && !selecting) {
+      // 附件图片（桌面版是 data: 网址，浏览器是 /api/asset/…）
+      const im = t?.closest?.("img") as HTMLImageElement | null;
+      const src = im?.getAttribute("src") || "";
+      const img = im && /^data:image\/|\/api\/asset\//.test(src) ? { src, name: im.dataset.name || im.alt || "" } : undefined;
+      if ((el || img) && !typing && !selecting) {
         e.preventDefault();
-        setAt({ x: e.clientX, y: e.clientY, id: el.dataset.itemId! });
+        setAt({ x: e.clientX, y: e.clientY, id: el?.dataset.itemId, img });
         return;
       }
       // 桌面版：别处不弹浏览器的菜单（刷新、另存为这些在这里没用）；要复制粘贴的地方留着
@@ -69,9 +75,35 @@ export function ItemMenu() {
     return () => document.removeEventListener("contextmenu", on);
   }, []);
 
-  const it = at ? items.find((x) => x.id === at.id) : undefined;
-  if (!at || !it) return null;
+  const it = at?.id ? items.find((x) => x.id === at.id) : undefined;
+  if (!at || (!it && !at.img)) return null;
   const close = () => setAt(null);
+  const img = at.img;
+  const imgItems = img && (
+    <>
+      <DM.Item className={row} onSelect={() => copyImage(img.src).then((r) => say(copiedMsg(r)), (e) => say("复制图片失败：" + errText(e)))}>
+        <ImageIcon />
+        复制图片
+      </DM.Item>
+      <DM.Item className={row} onSelect={() => saveImage(img.src, img.name).then((p) => say(p ? "已存到：" + p : "已下载"), (e) => say("保存失败：" + errText(e)))}>
+        <Download />
+        {isApp ? "存到下载文件夹" : "下载图片"}
+      </DM.Item>
+    </>
+  );
+  if (!it)
+    return (
+      <DM.Root open onOpenChange={(o) => !o && close()} modal={false}>
+        <DM.Trigger asChild>
+          <span aria-hidden className="pointer-events-none fixed size-0" style={{ left: at.x, top: at.y }} />
+        </DM.Trigger>
+        <DM.Portal>
+          <DM.Content align="start" side="bottom" sideOffset={2} className={cx(panel, "w-48")} onCloseAutoFocus={(e) => e.preventDefault()} aria-label="图片">
+            {imgItems}
+          </DM.Content>
+        </DM.Portal>
+      </DM.Root>
+    );
   const cur = () => qc.getQueryData<State>(["state"])?.items.find((x) => x.id === it.id) ?? it;
   const set = (ch: Partial<Item>, done?: string) => patchItem(cur(), ch).then(() => done && say(done));
   const title = noteTitle(it) || it.title || "这一条";
@@ -94,6 +126,12 @@ export function ItemMenu() {
       </DM.Trigger>
       <DM.Portal>
         <DM.Content align="start" side="bottom" sideOffset={2} className={cx(panel, "w-56")} onCloseAutoFocus={(e) => e.preventDefault()} aria-label={"对「" + title + "」的操作"}>
+          {imgItems && (
+            <>
+              {imgItems}
+              <DM.Separator className="my-1 h-px bg-surface-2" />
+            </>
+          )}
           <div className="truncate px-2.5 pt-1.5 pb-1 text-xs text-faint">
             {typeName(it.type)} · {title}
           </div>
@@ -187,7 +225,7 @@ export function ItemMenu() {
                 <FileDown />
                 导出上下文
               </DM.Item>
-              <DM.Item className={row} onSelect={async () => say((await copyText([it.title, it.body].filter(Boolean).join("\n\n"))) ? "已复制标题和正文" : "复制失败")}>
+              <DM.Item className={row} onSelect={() => copyItem(it.type === "inbox" ? inboxTitle(it) : it.title, it.body).then(say, (e) => say("复制失败：" + errText(e)))}>
                 <Copy />
                 复制内容
               </DM.Item>

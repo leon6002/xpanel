@@ -1,5 +1,5 @@
 /* Markdown 阅读：附件图片、图片大小（|480）、看大图、问答原文高亮 */
-import { Copy } from "lucide-react";
+import { Copy, Download, X } from "lucide-react";
 import { createContext, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
@@ -12,6 +12,7 @@ import { isTarget, noteTitle } from "../lib/logic";
 import { rehypeImgIndex, rehypePaths, rehypeQaMarks } from "../lib/qa";
 import type { Qa } from "../lib/types";
 import { cx } from "../lib/cx";
+import { copiedMsg, copyImage, saveImage } from "../lib/image";
 
 /** 有这个就能在图片上改大小（传入的是：第几张图，新宽度；0 = 默认） */
 const ImgEdit = createContext<((idx: number, w: number) => void) | null>(null);
@@ -31,15 +32,31 @@ export function useAssetUrl(name: string | null) {
   return url;
 }
 
-export function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
+export function Lightbox({ src, onClose, name }: { src: string; onClose: () => void; name?: string }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && (e.stopPropagation(), onClose());
     window.addEventListener("keydown", k, true);
     return () => window.removeEventListener("keydown", k, true);
   }, [onClose]);
+  const say = useUi.getState().say;
+  const btn = "flex h-9 items-center gap-1.5 rounded-lg bg-white/12 px-3 text-[13px] text-white hover:bg-white/22 [&_svg]:size-4";
   return createPortal(
     <div className="fixed inset-0 z-50 grid cursor-zoom-out place-items-center bg-black/80 p-6" onClick={onClose}>
-      <img src={src} alt="" className="max-h-[92vh] max-w-[94vw] rounded-lg shadow-3" />
+      {/* 右上角：复制图片本身（不是那段 Markdown）、存到电脑上 */}
+      <div className="absolute top-4 right-4 flex cursor-default gap-2" onClick={(e) => e.stopPropagation()}>
+        <button className={btn} onClick={() => copyImage(src).then((r) => say(copiedMsg(r)), (e) => say("复制图片失败：" + errText(e)))}>
+          <Copy />
+          复制图片
+        </button>
+        <button className={btn} onClick={() => saveImage(src, name).then((p) => say(p ? "已存到：" + p : "已下载"), (e) => say("保存失败：" + errText(e)))}>
+          <Download />
+          {isApp ? "存到下载" : "下载"}
+        </button>
+        <button className={btn} aria-label="关闭（Esc）" onClick={onClose}>
+          <X />
+        </button>
+      </div>
+      <img src={src} alt={name || ""} className="max-h-[92vh] max-w-[94vw] cursor-default rounded-lg shadow-3" onClick={(e) => e.stopPropagation()} />
     </div>,
     document.body,
   );
@@ -161,9 +178,9 @@ function AssetImg(props: { src?: string; alt?: string; "data-idx"?: number | str
       {edit && idx >= 0 ? (
         <ResizableImage url={url} alt={label} width={width} onWidth={(w) => edit(idx, w)} onOpen={() => setBig(true)} />
       ) : (
-        <img src={url} alt={label} style={width ? { width, maxHeight: "none" } : undefined} className={cx(!width && "max-h-[min(480px,60vh)] w-auto")} onClick={() => setBig(true)} />
+        <img src={url} alt={label} data-name={label} style={width ? { width, maxHeight: "none" } : undefined} className={cx(!width && "max-h-[min(480px,60vh)] w-auto")} onClick={() => setBig(true)} />
       )}
-      {big && <Lightbox src={url} onClose={() => setBig(false)} />}
+      {big && <Lightbox src={url} name={label} onClose={() => setBig(false)} />}
     </>
   );
 }

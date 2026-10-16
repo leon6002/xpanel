@@ -76,6 +76,7 @@
   - 全局搜索：`components/Palette.tsx`（Ctrl+K / 左上的放大镜 / 首页顶上的搜索框）。条目和密码库在本机搜、共用 `lib/search.ts` 的打分（容错、多个词、按栏加权），
     聊天记录走主机的 `/inbox/messages?q=`。加了新的内容类型要接进来。
   - 正文里的网址和本地路径（`components/Markdown.tsx` 的 `Go`）：点了打开（一律走 `openTarget`，桌面版用系统的浏览器 / 资源管理器），鼠标移上去旁边有复制；行内代码和代码块里整段是网址 / 路径的同样能打开，命令之类的还是点了复制。
+  - 图片复制和保存：`lib/image.ts`（`copyImage` 把图片本身放进剪贴板，非 PNG 先转；`copyItem` 只有图片的消息复制图片；`saveImage`）；入口在大图 `Lightbox` 的右上角和右键菜单（`ItemMenu` 认 `<img>` 的附件地址）
   - `src/lib/qa.ts`：评论定位（rehype 插件给原文加 `<mark>`）；`lib/ws.ts`：项目目录同步；`lib/drafts.ts`：输入框草稿和待发送附件
   - `src/lib/api.ts` 是唯一的传输层：桌面版走 Tauri 命令（读写条目仍用 `get_state`/`apply_op`，保留连接模式的离线队列），浏览器走 HTTP。
   - `src/lib/data.ts`：TanStack Query 缓存全部条目，写入先改本地再提交；`src/lib/store.ts`：zustand 界面状态。

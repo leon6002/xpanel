@@ -7,7 +7,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { copyText, errText, scrubItem, v1, v1Text } from "../lib/api";
 import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useChats, useDevices, useMe } from "../lib/data";
 import { useDrafts } from "../lib/drafts";
-import { INBOX_AUTO, assetMd, inboxTitle, dateStr, dayLabel, dueInfo, findTarget, hm, nowLabel, parseCapture, shortTime } from "../lib/logic";
+import { copyItem } from "../lib/image";
+import { INBOX_AUTO, assetMd, imageRefs, inboxTitle, dateStr, dayLabel, dueInfo, findTarget, hm, nowLabel, parseCapture, shortTime } from "../lib/logic";
 import { useUi } from "../lib/store";
 import type { Chat, Item, ItemType, Msg, State } from "../lib/types";
 import { dropSecret, useVaultUi } from "../lib/vault";
@@ -141,6 +142,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
   const ui = useUi();
   const d = new Date(it.createdAt || 0);
   const title = inboxTitle(it);
+  const onlyImages = !title && imageRefs(it.body).length > 0 && !String(it.body || "").replace(/!\[[^\]]*\]\(asset:[^)]*\)/g, "").trim();
   const di = dueInfo(it);
   const tool = "inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5";
   async function triage(type: ItemType) {
@@ -185,7 +187,7 @@ function MeMsg({ it, sel, selecting, toggle }: { it: Item; sel: boolean; selecti
         <button className={tool} title="在右侧打开" aria-label="在右侧打开" onClick={() => ui.openPeek(it.id)}>
           <PanelRight />
         </button>
-        <button className={tool} title="复制文字" aria-label="复制文字" onClick={async () => say((await copyText([title, it.body].filter(Boolean).join("\n"))) ? "已复制" : "复制失败")}>
+        <button className={tool} title={onlyImages ? "复制图片" : "复制文字"} aria-label={onlyImages ? "复制图片" : "复制文字"} onClick={() => copyItem(title, it.body).then(say, (e) => say("复制失败：" + errText(e)))}>
           <Copy />
         </button>
         <button
@@ -244,7 +246,7 @@ function WxImg({ asset, name }: { asset: string; name: string }) {
   return (
     <>
       <img src={url} alt={name} className="my-1 max-h-[260px] max-w-full cursor-zoom-in rounded-lg" onClick={(e) => (e.stopPropagation(), setBig(true))} />
-      {big && <Lightbox src={url} onClose={() => setBig(false)} />}
+      {big && <Lightbox src={url} name={name} onClose={() => setBig(false)} />}
     </>
   );
 }
