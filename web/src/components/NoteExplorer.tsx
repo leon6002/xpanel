@@ -302,6 +302,7 @@ export function NoteExplorer({
   sel: string | null;
 }) {
   const sort = useSort((s) => s.sort);
+  const box = useRef<HTMLDivElement>(null);
   const cmp = useMemo(() => cmpBy(sort), [sort]);
   const tree = useMemo(() => buildTree(all), [all]);
   const roots = useMemo(() => buildCats(all.filter((x) => tree.isRoot(x))), [all, tree]);
@@ -323,12 +324,19 @@ export function NoteExplorer({
     if (!it.category && closed[""]) useClosedCats.getState().toggle("", false);
   }, [sel, tree]);
 
+  // 从全局搜索、首页或别的页面跳过来：树展开后把这一条滚到看得见的地方
+  useEffect(() => {
+    if (!sel) return;
+    const id = requestAnimationFrame(() => box.current?.querySelector(`[data-item-id="${CSS.escape(sel)}"]`)?.scrollIntoView({ block: "nearest" }));
+    return () => cancelAnimationFrame(id);
+  }, [sel, filtering]);
+
   if (filtering) {
     if (!matched.length) return <div className="px-1 py-6 text-center text-[13px] text-faint">没有匹配的内容</div>;
     // 搜索结果平铺，标题下面写着它在哪个分类、哪篇下面
     const rows = matched.slice().sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (b.updatedAt || 0) - (a.updatedAt || 0));
     return (
-      <div className="flex flex-col">
+      <div ref={box} className="flex flex-col">
         {rows.map((it) => {
           const parts = [...(it.category ? it.category.split("/") : []), ...tree.ancestors(it).map(noteTitle)];
           return <NoteRow key={it.id} it={it} depth={0} sel={sel} tree={tree} cmp={cmp} crumb={parts.join(" / ") || undefined} filtering />;
@@ -343,7 +351,7 @@ export function NoteExplorer({
   const hasCats = roots.length > 0;
   const none: CatNode = { path: "", name: "未分类", depth: 0, kids: [], notes: uncategorized };
   return (
-    <div className="flex flex-col">
+    <div ref={box} className="flex flex-col">
       {hasCats ? (
         <>
           {roots.map((n) => (
