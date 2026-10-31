@@ -1,11 +1,11 @@
 /* 子笔记：阅读区顶上的路径、正文下面的子笔记列表、「移动到…」对话框、列表里的层级和拖动 */
 import { ChevronRight, FileText, Plus } from "lucide-react";
 import { useMemo, useState, type DragEvent } from "react";
-import { qc, useAppState } from "../lib/data";
+import { patchItem, qc, useAppState } from "../lib/data";
 import { Dialog, openDialog } from "../lib/dialog";
 import { ago, noteTitle, plain } from "../lib/logic";
 import { useUi } from "../lib/store";
-import { addChild, buildTree, moveUnder, useOpenNodes } from "../lib/tree";
+import { addChild, buildTree, moveUnder, useClosedCats } from "../lib/tree";
 import type { Item, State } from "../lib/types";
 import { cx } from "../lib/cx";
 import { Button, inputCls } from "./ui";
@@ -201,7 +201,7 @@ export function rootDropProps() {
       if (!id) return;
       e.preventDefault();
       dragging = null;
-      const src = (allItems()).find((x) => x.id === id);
+      const src = allItems().find((x) => x.id === id);
       if (!src?.parentId) return;
       await moveUnder(src, null).catch(() => {});
       say("已移到顶层");
@@ -209,57 +209,37 @@ export function rootDropProps() {
   };
 }
 
-/* ---------------------------------------------------------------- 列表：子笔记行 */
-
-export function SubRows({ parent, depth, sel, seen }: { parent: string; depth: number; sel?: string | null; seen: Set<string> }) {
-  const tree = useTree();
-  return (
-    <>
-      {tree.children(parent).map((k) => (seen.has(k.id) ? null : <SubRow key={k.id} it={k} depth={depth} sel={sel} seen={new Set([...seen, k.id])} />))}
-    </>
-  );
-}
-
-function SubRow({ it, depth, sel, seen }: { it: Item; depth: number; sel?: string | null; seen: Set<string> }) {
-  const tree = useTree();
-  const select = useUi((s) => s.select);
-  const open = useOpenNodes((s) => !!s.open[it.id]);
-  const toggle = useOpenNodes((s) => s.toggle);
-  const n = tree.children(it.id).length;
-  const dnd = useNoteDnd(it);
-  const on = sel === it.id;
-  return (
-    <>
-      <div
-        {...dnd.props}
-        data-item-id={it.id}
-        onClick={() => select(it.id)}
-        aria-current={on || undefined}
-        className={cx(
-          "group/row flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 text-[13px]",
-          on ? "bg-surface-3 font-medium text-fg" : "text-fg-2 hover:bg-surface-3/70",
-          dnd.over && "bg-accent-soft",
-        )}
-        style={{ paddingLeft: 6 + depth * 16 }}
-      >
-        {n > 0 ? (
-          <button
-            aria-label={open ? "收起" : "展开"}
-            onClick={(e) => {
-              e.stopPropagation();
-              toggle(it.id);
-            }}
-            className="grid size-5 shrink-0 place-items-center rounded text-faint hover:bg-surface-3 hover:text-fg"
-          >
-            <ChevronRight className={cx("size-3.5 transition-transform", open && "rotate-90")} />
-          </button>
-        ) : (
-          <FileText className="mx-[3px] size-3.5 shrink-0 text-faint" />
-        )}
-        <span className="min-w-0 grow truncate">{noteTitle(it)}</span>
-        {n > 0 && !open && <span className="text-[11px] text-faint">{n}</span>}
-      </div>
-      {open && n > 0 && <SubRows parent={it.id} depth={depth + 1} sel={sel} seen={seen} />}
-    </>
-  );
+/** 把笔记拖到分类文件夹上：归到那个分类，并从当前的父笔记里挪出来（放到文件夹的顶层）。
+    path 为 null 是「未分类」。 */
+export function useCatDnd(path: string | null) {
+  const [over, setOver] = useState(false);
+  return {
+    over,
+    props: {
+      onDragOver: (e: DragEvent) => {
+        if (!e.dataTransfer.types.includes(DND)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        setOver(true);
+      },
+      onDragLeave: (e: DragEvent) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(false);
+      },
+      onDrop: async (e: DragEvent) => {
+        const id = e.dataTransfer.getData(DND);
+        setOver(false);
+        if (!id) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragging = null;
+        const src = allItems().find((x) => x.id === id);
+        if (!src) return;
+        if ((src.category || null) === path && !src.parentId) return;
+        await patchItem(src, { category: path || undefined, parentId: undefined }).catch(() => {});
+        useClosedCats.getState().toggle(path ?? "", false);
+        say(path ? `已移到「${path.replace(/\//g, " / ")}」` : "已移到未分类");
+      },
+    },
+  };
 }

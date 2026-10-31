@@ -1,7 +1,7 @@
 /* 阅读 / 编辑一条：主界面右边的阅读区，和任何页面都能打开的右侧浮出面板（Peek）共用 */
 import { CalendarDays, Copy, Link2, ExternalLink, FilePlus2, FoldHorizontal, UnfoldHorizontal, Flag, Folder, FolderInput, Hash, Monitor, Maximize2, Minimize2, PanelRightOpen, Pin, Sparkles, Trash2, X, FileText } from "lucide-react";
 import { create } from "zustand";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { copyText, errText, isApp, openTarget } from "../lib/api";
 import { addItem, patchItem, qc, removeItem, restoreItem, useAppState, useDevices } from "../lib/data";
 import { addLink } from "../lib/links";
@@ -19,6 +19,7 @@ import { LinkForm } from "./LinkForm";
 import { Md } from "./Markdown";
 import { CommentsSection, flash } from "./Comments";
 import { Breadcrumb, ChildNotes, openMove, type OpenFn } from "./Tree";
+import { OutlineButton } from "./Outline";
 import { RelatedSection, openLinkPicker } from "./Related";
 import { addChild, canNest } from "../lib/tree";
 import { Button, Chip, IconButton, Segmented } from "./ui";
@@ -179,7 +180,7 @@ const noLost = new Set<string>();
 const BlockEditor = lazy(() => import("./BlockEditor").then((m) => ({ default: m.BlockEditor })));
 
 /** rich：所见即所得的块编辑器；否则是 Markdown 源码 */
-function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focusTitle?: boolean; open: OpenFn }) {
+function Editor({ it, rich, focusTitle, open, scrollRef }: { it: Item; rich: boolean; focusTitle?: boolean; open: OpenFn; scrollRef?: RefObject<HTMLDivElement | null> }) {
   const richApi = useRef<((peek?: boolean) => string | null) | null>(null);
   const { data } = useAppState();
   /* 多台电脑同时开着同一篇：base 是这边最后一次和主机一致的内容。
@@ -190,6 +191,7 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
   const conflictRef = useRef<Item | null>(null);
   conflictRef.current = conflict;
   const alive = useRef(true);
+  const didFocus = useRef(false);
   const [rev, setRev] = useState(0);
   const devices = useDevices();
   const [title, setTitle] = useState(it.title);
@@ -201,6 +203,13 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
   const ta = useRef<HTMLTextAreaElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const edRoot = useRef<HTMLDivElement>(null);
+  const attachScroll = useCallback(
+    (el: HTMLDivElement | null) => {
+      edRoot.current = el;
+      if (scrollRef) scrollRef.current = el;
+    },
+    [scrollRef],
+  );
 
   /** 这边现在的内容（peek：不打断编辑器里还没交出来的改动） */
   const mine = (peek?: boolean) => {
@@ -298,9 +307,18 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
     setBodyRaw(n);
     schedule();
   };
+  // 新建 / 还没标题的条目：进来先把光标放到标题；Markdown 源码模式放到正文
   useEffect(() => {
-    if (focusTitle) titleRef.current?.focus();
-    else if (!rich) ta.current?.focus();
+    if (didFocus.current) return;
+    if (focusTitle && titleRef.current) {
+      titleRef.current.focus();
+      didFocus.current = true;
+    } else if (!rich && ta.current) {
+      ta.current.focus();
+      didFocus.current = true;
+    }
+  }, [focusTitle, rich]);
+  useEffect(() => {
     const save = () => timer.current !== undefined && flush();
     window.addEventListener("beforeunload", save);
     return () => {
@@ -455,7 +473,7 @@ function Editor({ it, rich, focusTitle, open }: { it: Item; rich: boolean; focus
         </div>
       )}
       {rich ? (
-        <div ref={edRoot} className="-ml-12 mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto scroll-quiet">
+        <div ref={attachScroll} className="-ml-12 mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto scroll-quiet">
           <Suspense fallback={<div className="flex-[1_0_auto] pl-12 text-sm text-faint">正在打开编辑器…</div>}>
             <BlockEditor key={rev} value={body} itemId={it.id} api={richApi} onChange={(md) => setBody(() => md)} />
           </Suspense>
@@ -579,6 +597,8 @@ function ItemView({
   const ui = useUi();
   const full = useFullWidth((s) => s.on);
   const [armed, setArmed] = useState(false);
+  const readRef = useRef<HTMLDivElement>(null);
+  const editRef = useRef<HTMLDivElement>(null);
   const tg = it.type === "link" ? entryTarget(it) : null;
   const ws = useMyWorkspace(it);
   useEffect(() => {
@@ -606,6 +626,7 @@ function ItemView({
                 ]
           }
         />}
+        {it.type !== "link" && mode !== "split" && <OutlineButton body={it.body || ""} mode={mode} readRef={readRef} editRef={editRef} />}
         <span className="grow" />
         {wide && (
           <IconButton label={full ? "适中宽度（正文居中）" : "全宽显示"} onClick={() => useFullWidth.getState().toggle()}>
@@ -701,7 +722,7 @@ function ItemView({
         {bar}
       </div>
       {mode === "read" || it.type === "link" ? (
-        <div className="scroll-quiet min-h-0 flex-1 overflow-y-auto px-14 pt-6 pb-40 @container">
+        <div ref={readRef} className="scroll-quiet min-h-0 flex-1 overflow-y-auto px-14 pt-6 pb-40 @container">
           <div className={cx("mx-auto w-full", !full && "max-w-[880px]")}>
             <Breadcrumb it={it} open={open} />
             <MetaChips it={it} />
@@ -712,7 +733,7 @@ function ItemView({
       ) : (
         <div className="flex min-h-0 flex-1 gap-8 px-14 pt-6">
           <div className={cx("mx-auto flex min-h-0 w-full flex-1 flex-col", !full && "max-w-[880px]")}>
-            <Editor key={it.id + mode} it={it} rich={mode === "edit"} focusTitle={focusTitle} open={open} />
+            <Editor key={it.id + mode} it={it} rich={mode === "edit"} focusTitle={focusTitle} open={open} scrollRef={editRef} />
           </div>
 
         </div>
@@ -729,8 +750,8 @@ export function Reader() {
   const it = id ? data?.items.find((x) => x.id === id) : undefined;
   const [focusTitle, setFocusTitle] = useState(false);
   useEffect(() => {
-    // 新建的条目（标题空）直接写标题
-    setFocusTitle(!!it && !it.title && it.type !== "note");
+    // 新建的条目（标题空）直接写标题；笔记已经有正文时就不抢光标了
+    setFocusTitle(!!it && !it.title && (it.type !== "note" || !(it.body || "").trim()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 

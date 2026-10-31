@@ -99,6 +99,8 @@ export const useUi = create<Ui>((set, get) => ({
     // 快速记录默认记成当前页的类型
     set((s) => ({
       view,
+      // 页面上的搜索框只管这一页：换页面就清空，免得别的页面也悄悄只剩几条
+      q: "",
       capType: ({ notes: "note", links: "link", rules: "rule" } as Record<string, ItemType>)[view] ?? (["todo", "issue", "idea"].includes(s.capType) ? s.capType : "todo"),
     }));
   },
