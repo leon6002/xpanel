@@ -1,38 +1,18 @@
-/* 中间的列表：事项（焦点 + 三栏）、笔记、入口（按所在机器分组）、规范 */
-import { Check, ChevronRight, Copy, Link2, Folder, Pin, Plus, Star } from "lucide-react";
-import { useEffect, useMemo } from "react";
-import { copyText } from "../lib/api";
-
-/** 列表里悬停出现的「复制」：复制标题和正文（Markdown） */
-function CopyBtn({ text, className }: { text: string; className?: string }) {
-  return (
-    <button
-      aria-label="复制"
-      title="复制标题和正文"
-      onClick={async (e) => {
-        e.stopPropagation();
-        useUi.getState().say((await copyText(text)) ? "已复制" : "复制失败");
-      }}
-      className={cx("grid size-7 shrink-0 place-items-center rounded-md text-faint opacity-0 group-hover:opacity-100 hover:bg-surface-3 hover:text-fg [&_svg]:size-3.5", className)}
-    >
-      <Copy />
-    </button>
-  );
-}
-const fullText = (it: Item) => [it.title, it.body].filter(Boolean).join("\n\n");
+/* 中间的列表：事项（焦点 + 三栏）、笔记 / 规范（分类文件夹 + 笔记树）、入口（按所在机器分组） */
+import { Check, Link2, Folder, Pin, Plus, Star } from "lucide-react";
+import { useMemo } from "react";
 import { addItem, patchItem, useAppState, useDevices } from "../lib/data";
-import { ago, byPriority, byRecent, dueInfo, imageRefs, inCat, noteTitle, plain, viewOf, VIEW_NAME } from "../lib/logic";
+import { ago, byPriority, dueInfo, inCat, plain, viewOf, VIEW_NAME } from "../lib/logic";
 import { useUi, type View } from "../lib/store";
 import type { Item } from "../lib/types";
 import { TYPES } from "../lib/types";
 import { useMyWorkspace } from "../lib/ws";
 import { cx } from "../lib/cx";
-import { Thumb } from "./Markdown";
-import { rootDropProps, SubRows, useNoteDnd } from "./Tree";
-import { buildTree, useOpenNodes } from "../lib/tree";
 import { linksOf } from "../lib/links";
 import { NO_PROJECT, projectOf } from "../lib/projects";
 import { Filters } from "./Filters";
+import { NoteExplorer, NoteToolbar } from "./NoteExplorer";
+import { rootDropProps } from "./Tree";
 import { useProjects } from "./Projects";
 import { Button, Chip, Pri } from "./ui";
 
@@ -118,46 +98,6 @@ function ItemMeta({ it }: { it: Item }) {
   );
 }
 
-function NoteCard({ it, on, kids = 0, crumb, sel }: { it: Item; on: boolean; kids?: number; crumb?: string; sel?: string | null }) {
-  const select = useUi((s) => s.select);
-  const open = useOpenNodes((s) => !!s.open[it.id]);
-  const toggle = useOpenNodes((s) => s.toggle);
-  const dnd = useNoteDnd(it);
-  const imgs = imageRefs(it.body);
-  const snippet = plain((it.body || "").replace(/!\[[^\]]*\]\([^)]*\)/g, "")).slice(0, 90);
-  return (
-    <div {...dnd.props} data-item-id={it.id} className={cx("group relative rounded-xl transition-colors", dnd.over ? "bg-accent-soft" : on ? "bg-surface-3" : "hover:bg-surface-2")}>
-      <CopyBtn text={fullText(it)} className="absolute top-2.5 right-2.5 z-10" />
-      <button onClick={() => select(it.id)} aria-current={on || undefined} className="flex w-full flex-col gap-1.5 rounded-xl px-3.5 py-3 text-left">
-        {crumb && <span className="-mb-1 truncate text-[11.5px] text-faint">{crumb} /</span>}
-        <span className="line-clamp-2 text-[15px] font-semibold text-fg">
-          {it.pinned && <Pin className="mr-1 inline size-3.5 text-accent" />}
-          {noteTitle(it)}
-        </span>
-        {snippet && snippet !== noteTitle(it) && !snippet.startsWith(noteTitle(it) + " ") && <span className="line-clamp-2 text-[13px] leading-relaxed text-muted">{snippet}</span>}
-        {imgs.length > 0 && (
-          <span className="flex gap-1.5">
-            {imgs.slice(0, 4).map((n) => (
-              <Thumb key={n} name={n} className="h-11 w-16 rounded-md object-cover" />
-            ))}
-            {imgs.length > 4 && <span className="self-center text-xs text-muted">+{imgs.length - 4}</span>}
-          </span>
-        )}
-        <ItemMeta it={it} />
-      </button>
-      {kids > 0 && (
-        <div className="-mt-1.5 px-1.5 pb-2">
-          <button onClick={() => toggle(it.id)} className="flex h-7 items-center gap-1 rounded-lg px-2 text-xs text-muted hover:bg-surface-3 hover:text-fg">
-            <ChevronRight className={cx("size-3.5 transition-transform", open && "rotate-90")} />
-            {kids} 篇子笔记
-          </button>
-          {open && <SubRows parent={it.id} depth={0} sel={sel} seen={new Set([it.id])} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function TaskRow({ it, on }: { it: Item; on: boolean }) {
   const select = useUi((s) => s.select);
   const check = TYPES.find((t) => t.k === it.type)?.check;
@@ -216,42 +156,19 @@ export function ListPane() {
   const match = useFilter();
   const sel = ui.selected[ui.view];
   const filtering = !!(ui.q || ui.tag || ui.dev || ui.cat || ui.proj);
-
-  // 选中的是子笔记（比如从阅读区的路径点过来）：把上面几层展开
-  useEffect(() => {
-    if (!sel || (ui.view !== "notes" && ui.view !== "rules")) return;
-    const t = buildTree(items);
-    const it = t.byId.get(sel);
-    if (it) t.ancestors(it).forEach((a) => !useOpenNodes.getState().open[a.id] && useOpenNodes.getState().toggle(a.id, true));
+  const notesView = ui.view === "notes" || ui.view === "rules";
+  const kind = ui.view === "notes" ? "note" : "rule";
+  const allNotes = useMemo(() => items.filter((i) => i.type === kind), [items, kind]);
+  const matchedNotes = useMemo(
+    () => allNotes.filter(match),
+    // match 是按当前的分类 / 标签 / 搜索算的，这些变了就重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, ui.view]);
+    [allNotes, items, ui.cat, ui.tag, ui.q, ui.dev, ui.proj],
+  );
 
   const title = ui.view === "rules" ? "规范与工作流" : VIEW_NAME[ui.view];
 
   const body = useMemo(() => {
-    const empty = (text: string) => <div className="px-1 py-6 text-center text-[13px] text-faint">{filtering ? "没有匹配的内容" : text}</div>;
-    if (ui.view === "notes" || ui.view === "rules") {
-      const type = ui.view === "notes" ? "note" : "rule";
-      const list = items.filter((i) => i.type === type && match(i)).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || byRecent(a, b));
-      const tree = buildTree(items.filter((i) => i.type === type));
-      // 筛选时平铺（标题上面写着在哪篇下面）；不筛选时只列顶层，子笔记收在卡片里
-      const shown = filtering ? list : list.filter((x) => tree.isRoot(x));
-      return {
-        count: list.length,
-        node: shown.length
-          ? shown.map((it) => (
-              <NoteCard
-                key={it.id}
-                it={it}
-                on={sel === it.id}
-                sel={sel}
-                kids={filtering ? 0 : tree.children(it.id).length}
-                crumb={filtering ? tree.ancestors(it).map(noteTitle).join(" / ") : undefined}
-              />
-            ))
-          : empty(type === "note" ? "还没有笔记" : "写下固定的做法和约定"),
-      };
-    }
     // 事项
     const lanes = TYPES.filter((t) => t.lane);
     const all = items.filter((i) => lanes.some((l) => l.k === i.type) && match(i));
@@ -330,7 +247,7 @@ export function ListPane() {
       <div className="flex items-center gap-2 px-1">
         <h1 className="truncate text-[19px] font-bold">{title}</h1>
         <span className="text-[13px] whitespace-nowrap text-muted">
-          {body.count} {ui.view === "notes" || ui.view === "rules" ? "篇" : "条"}
+          {notesView ? matchedNotes.length : body.count} {notesView ? "篇" : "条"}
         </span>
         <span className="grow" />
         <Button tone="primary" onClick={create} title={ui.view === "notes" ? "新建笔记" : "在快速记录里写"}>
@@ -338,10 +255,11 @@ export function ListPane() {
           新建
         </Button>
       </div>
+      {notesView && <NoteToolbar kind={kind} />}
       <Filters />
-      <div className="scroll-quiet -mx-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-6" {...(ui.view === "notes" || ui.view === "rules" ? rootDropProps() : {})}>
+      <div className="scroll-quiet -mx-2 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pb-6" {...(notesView ? rootDropProps() : {})}>
         <Elsewhere />
-        {body.node}
+        {notesView ? <NoteExplorer kind={kind} all={allNotes} matched={matchedNotes} filtering={filtering} sel={sel ?? null} /> : body.node}
       </div>
     </section>
   );

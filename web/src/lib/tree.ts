@@ -79,6 +79,27 @@ export const useOpenNodes = create<{ open: Record<string, boolean>; toggle: (id:
     }),
 }));
 
+/** 笔记浏览器里收起的分类文件夹（记在本机）。分类默认展开，只记收起的那些，
+    这样新加的分类一出来就能看见，不用一个个点开。 */
+export const useClosedCats = create<{ closed: Record<string, boolean>; toggle: (path: string, v?: boolean) => void }>((set) => ({
+  closed: (() => {
+    try {
+      return JSON.parse(ls.get("wb-note-cats-closed") || "{}");
+    } catch {
+      return {};
+    }
+  })(),
+  toggle: (path, v) =>
+    set((s) => {
+      const closed = { ...s.closed };
+      const shut = v ?? !closed[path];
+      if (shut) closed[path] = true;
+      else delete closed[path];
+      ls.set("wb-note-cats-closed", JSON.stringify(closed));
+      return { closed };
+    }),
+}));
+
 /** 新建子笔记：跟父笔记同类型、同分类 */
 export async function addChild(parent: Item) {
   const n = await addItem({ type: parent.type, title: "", body: "", parentId: parent.id, category: parent.category || undefined, tags: [] });
